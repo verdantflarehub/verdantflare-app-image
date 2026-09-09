@@ -1175,12 +1175,6 @@
       startPollingLoop();
     });
 
-    function loadSampleTasks() {
-      currentTasks = JSON.parse(JSON.stringify(SAMPLE_TASKS));
-      updateMetrics();
-      renderTasks();
-    }
-
     function togglePolling() {
       isPolling = !isPolling;
       const dot = document.getElementById('pollDot');
@@ -1695,9 +1689,11 @@
       localStorage.removeItem('image_mcp_token');
       document.getElementById('inputToken').value = '';
       updateTokenUI(false);
-      showTokenNotice(true, '凭据已清除。当前展示离线演示数据。');
+      showTokenNotice(true, '凭据已清除，请配置 Token 以获取实时任务数据。');
       closeTokenModal();
-      loadSampleTasks();
+      currentTasks = [];
+      updateMetrics();
+      renderTasks();
     }
 
     function saveToken() {
