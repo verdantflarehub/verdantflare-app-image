@@ -1,0 +1,60 @@
+name: Image MCP Server
+
+on:
+  push:
+    branches: [release]
+    paths:
+      - services/image-mcp-server/**
+      - .github/workflows/image-mcp-server.yml
+permissions:
+  contents: read
+concurrency:
+  group: image-mcp-server-release
+  cancel-in-progress: false
+env:
+  SERVICE: image-mcp-server
+  VERSION: 0.1.0
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: services/image-mcp-server
+        run: |
+          python3 -m pip install -r services/${SERVICE}/requirements.txt
+          python3 -m unittest discover -s services/${SERVICE}/tests -v
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - id: image
+        env:
+          REGISTRY_ENDPOINT: ${{ secrets.REGISTRY_ENDPOINT_ALIYUN }}
+        run: |
+          set -euo pipefail
+          registry_endpoint="${REGISTRY_ENDPOINT%/}"
+          test -n "${registry_endpoint}"
+          echo "registry_endpoint=${registry_endpoint}" >> "$GITHUB_OUTPUT"
+          echo "name=${registry_endpoint}/wod/verdantflare-app" >> "$GITHUB_OUTPUT"
+          echo "version=${SERVICE}-v${VERSION}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.image.outputs.registry_endpoint }}
+          username: ${{ secrets.REGISTRY_USER_ALIYUN }}
+          password: ${{ secrets.REGISTRY_PASSWORD_ALIYUN }}
+      - run: '! docker buildx imagetools inspect "${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}" >/dev/null 2>&1'
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/${{ env.SERVICE }}
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
+

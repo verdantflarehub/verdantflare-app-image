@@ -1,0 +1,1695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VerdantFlare Image Station - 青焰生图任务与资产工作台</title>
+  <style>
+    :root {
+      --ink: #0b0f0c;
+      --ink-2: #121812;
+      --paper: #f4f1e8;
+      --paper-2: #e7e1d2;
+      --muted: #9aa69b;
+      --muted-2: #686f66;
+      --green: #4ce39a;
+      --moss: #6f8f72;
+      --amber: #d89a45;
+      --rose: #ff6570;
+      --line: rgba(244, 241, 232, 0.14);
+      --line-strong: rgba(244, 241, 232, 0.28);
+      --line-dark: rgba(11, 15, 12, 0.14);
+      --max: 1360px;
+      --radius-pill: 999px;
+      --radius-card: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--ink);
+      color: var(--paper);
+    }
+
+    body {
+      font-family: Inter, "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      background:
+        radial-gradient(circle at 86% 9%, rgba(76, 227, 154, 0.14), transparent 28rem),
+        radial-gradient(circle at 16% 28%, rgba(216, 154, 69, 0.08), transparent 22rem),
+        linear-gradient(180deg, #0b0f0c 0%, #101610 52%, #0b0f0c 100%);
+      color: var(--paper);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-track { background: var(--ink); }
+    ::-webkit-scrollbar-thumb { background: rgba(244, 241, 232, 0.18); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(76, 227, 154, 0.4); }
+
+    /* Site Header (Aligned with verdantflare-www) */
+    .site-header {
+      position: fixed;
+      z-index: 30;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 72px;
+      border-bottom: 1px solid rgba(244, 241, 232, 0.12);
+      background: rgba(7, 10, 8, 0.82);
+      backdrop-filter: blur(20px);
+    }
+
+    .nav {
+      width: min(var(--max), calc(100% - 40px));
+      height: 100%;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 650;
+      color: var(--paper);
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      border: 1px solid rgba(76, 227, 154, 0.44);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 54% 22%, #f4f1e8 0 4px, transparent 5px),
+        radial-gradient(circle at 50% 72%, rgba(76, 227, 154, 0.9), transparent 12px),
+        linear-gradient(135deg, rgba(76, 227, 154, 0.18), rgba(216, 154, 69, 0.1));
+      box-shadow: 0 0 34px rgba(76, 227, 154, 0.22);
+      flex-shrink: 0;
+    }
+
+    .brand span {
+      font-size: 16px;
+      letter-spacing: 0.02em;
+    }
+
+    .brand-tag {
+      font-size: 11px;
+      padding: 3px 9px;
+      border-radius: var(--radius-pill);
+      background: rgba(76, 227, 154, 0.12);
+      border: 1px solid rgba(76, 227, 154, 0.32);
+      color: var(--green);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .nav-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Buttons (Aligned with verdantflare-www) */
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 0 18px;
+      border: 1px solid rgba(244, 241, 232, 0.24);
+      border-radius: var(--radius-pill);
+      background: rgba(244, 241, 232, 0.08);
+      color: var(--paper);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-1px);
+      border-color: rgba(76, 227, 154, 0.62);
+      background: rgba(76, 227, 154, 0.12);
+    }
+
+    .button.primary {
+      border-color: rgba(76, 227, 154, 0.72);
+      background: var(--paper);
+      color: var(--ink-2);
+      font-weight: 650;
+    }
+
+    .button.primary:hover {
+      background: #ffffff;
+      box-shadow: 0 4px 20px rgba(76, 227, 154, 0.3);
+    }
+
+    .pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 16px;
+      border: 1px solid rgba(244, 241, 232, 0.14);
+      border-radius: var(--radius-pill);
+      background: rgba(244, 241, 232, 0.06);
+      color: rgba(244, 241, 232, 0.85);
+      font-size: 12px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .dot-live {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 10px var(--green);
+      animation: pulse-dot 2.5s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    /* Main Container */
+    .market-page {
+      min-height: 100vh;
+      padding-top: 72px;
+      flex: 1;
+    }
+
+    .market-wrap {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    /* Hero Section */
+    .market-hero {
+      padding: 56px 0 42px;
+      border-bottom: 1px solid rgba(244, 241, 232, 0.12);
+    }
+
+    .market-hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+      gap: 40px;
+      align-items: end;
+    }
+
+    .market-kicker {
+      margin: 0 0 14px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 760;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .market-hero h1 {
+      margin: 0;
+      font-size: clamp(36px, 4.4vw, 64px);
+      line-height: 1.05;
+      font-weight: 620;
+      color: var(--paper);
+      letter-spacing: -0.01em;
+    }
+
+    .market-hero p {
+      max-width: 680px;
+      margin: 18px 0 0;
+      color: rgba(244, 241, 232, 0.74);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    /* Orbit Metric Dashboard */
+    .market-orbit {
+      min-height: 220px;
+      display: grid;
+      align-content: center;
+      padding: 26px 28px;
+      border: 1px solid rgba(244, 241, 232, 0.16);
+      border-radius: var(--radius-card);
+      background:
+        linear-gradient(145deg, rgba(244, 241, 232, 0.08), rgba(244, 241, 232, 0.03)),
+        radial-gradient(circle at 75% 20%, rgba(76, 227, 154, 0.18), transparent 56%);
+      box-shadow: inset 0 1px 0 rgba(244, 241, 232, 0.08);
+    }
+
+    .market-orbit span {
+      color: rgba(244, 241, 232, 0.58);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+
+    .market-orbit strong {
+      margin-top: 8px;
+      color: var(--paper);
+      font-size: 64px;
+      line-height: 1;
+      font-weight: 580;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .market-orbit small {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    /* Orbit Mini Cards Row */
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 14px;
+      margin: 28px 0 0;
+    }
+
+    .metric-card {
+      padding: 18px 20px;
+      border: 1px solid rgba(244, 241, 232, 0.14);
+      border-radius: var(--radius-card);
+      background:
+        linear-gradient(145deg, rgba(244, 241, 232, 0.06), rgba(244, 241, 232, 0.02)),
+        rgba(9, 13, 10, 0.72);
+      transition: border-color 160ms ease, transform 160ms ease;
+    }
+
+    .metric-card:hover {
+      border-color: rgba(76, 227, 154, 0.44);
+      transform: translateY(-2px);
+    }
+
+    .metric-card-label {
+      color: rgba(244, 241, 232, 0.58);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .metric-card-val {
+      margin-top: 10px;
+      font-size: 32px;
+      font-weight: 620;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .metric-card-foot {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    /* Sticky Market Toolbar */
+    .market-toolbar {
+      position: sticky;
+      z-index: 12;
+      top: 72px;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto auto;
+      gap: 16px;
+      align-items: end;
+      padding: 18px 0;
+      background: rgba(11, 15, 12, 0.9);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(244, 241, 232, 0.08);
+    }
+
+    .market-search {
+      display: grid;
+      gap: 6px;
+      color: rgba(244, 241, 232, 0.58);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .market-search input {
+      height: 44px;
+      width: 100%;
+      border: 1px solid rgba(244, 241, 232, 0.15);
+      border-radius: var(--radius-pill);
+      background: rgba(244, 241, 232, 0.08);
+      color: var(--paper);
+      padding: 0 20px;
+      outline: 0;
+      font-size: 13px;
+      transition: border-color 160ms ease;
+    }
+
+    .market-search input:focus {
+      border-color: rgba(76, 227, 154, 0.6);
+    }
+
+    .market-search input::placeholder {
+      color: rgba(244, 241, 232, 0.44);
+    }
+
+    .market-selects {
+      display: flex;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .market-selects label {
+      display: grid;
+      gap: 6px;
+      color: rgba(244, 241, 232, 0.58);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .market-toolbar select {
+      height: 44px;
+      min-width: 140px;
+      padding: 0 42px 0 18px;
+      border: 1px solid rgba(244, 241, 232, 0.15);
+      border-radius: var(--radius-pill);
+      background-color: rgba(244, 241, 232, 0.08);
+      background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 14 14' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3.5 5.25L7 8.75L10.5 5.25' stroke='%23f4f1e8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      background-size: 14px 14px;
+      appearance: none;
+      color: var(--paper);
+      outline: 0;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .market-toolbar select option {
+      background: var(--ink);
+      color: var(--paper);
+    }
+
+    /* Filter Row Pills (Aligned with verdantflare-www) */
+    .market-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin: 20px 0 26px;
+    }
+
+    .market-filter-row button {
+      min-height: 38px;
+      padding: 0 18px;
+      border: 1px solid rgba(244, 241, 232, 0.14);
+      border-radius: var(--radius-pill);
+      background: rgba(244, 241, 232, 0.06);
+      color: rgba(244, 241, 232, 0.72);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 160ms ease, background 160ms ease, border-color 160ms ease, transform 160ms ease;
+    }
+
+    .market-filter-row button:hover {
+      border-color: rgba(76, 227, 154, 0.44);
+      color: var(--paper);
+    }
+
+    .market-filter-row button.active {
+      border-color: rgba(76, 227, 154, 0.62);
+      background: rgba(76, 227, 154, 0.14);
+      color: var(--paper);
+    }
+
+    .view-switcher {
+      margin-left: auto;
+      display: flex;
+      border: 1px solid rgba(244, 241, 232, 0.14);
+      border-radius: var(--radius-pill);
+      padding: 3px;
+      background: rgba(244, 241, 232, 0.04);
+    }
+
+    .view-switcher button {
+      border: none;
+      background: transparent;
+      padding: 6px 14px;
+      border-radius: var(--radius-pill);
+      color: rgba(244, 241, 232, 0.6);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 160ms ease;
+    }
+
+    .view-switcher button.active {
+      background: rgba(76, 227, 154, 0.16);
+      color: var(--paper);
+      border: 1px solid rgba(76, 227, 154, 0.36);
+    }
+
+    /* Model Cards Grid (Aligned with verdantflare-www) */
+    .model-results.grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr));
+      gap: 18px;
+    }
+
+    .model-card {
+      display: flex;
+      flex-direction: column;
+      border: 1px solid rgba(244, 241, 232, 0.14);
+      border-radius: var(--radius-card);
+      background:
+        linear-gradient(145deg, rgba(244, 241, 232, 0.075), rgba(244, 241, 232, 0.035)),
+        rgba(9, 13, 10, 0.78);
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+    }
+
+    .model-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(76, 227, 154, 0.46);
+      background:
+        linear-gradient(145deg, rgba(76, 227, 154, 0.11), rgba(244, 241, 232, 0.045)),
+        rgba(9, 13, 10, 0.86);
+    }
+
+    .card-thumb-wrap {
+      width: 100%;
+      height: 220px;
+      background: #060907;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .card-thumb-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 300ms ease;
+    }
+
+    .model-card:hover .card-thumb-wrap img {
+      transform: scale(1.04);
+    }
+
+    .card-badges {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+    }
+
+    .badge-tag {
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(244, 241, 232, 0.16);
+      background: rgba(7, 10, 8, 0.72);
+      color: var(--paper);
+    }
+
+    .badge-tag.engine-gemini {
+      border-color: rgba(76, 227, 154, 0.3);
+      color: var(--green);
+    }
+
+    .badge-tag.engine-codex {
+      border-color: rgba(216, 154, 69, 0.35);
+      color: var(--amber);
+    }
+
+    .badge-status {
+      padding: 3px 9px;
+      border-radius: var(--radius-pill);
+      font-size: 11px;
+      font-weight: 650;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      backdrop-filter: blur(10px);
+    }
+
+    .badge-status.completed {
+      background: rgba(76, 227, 154, 0.16);
+      border: 1px solid rgba(76, 227, 154, 0.44);
+      color: var(--green);
+    }
+
+    .badge-status.running {
+      background: rgba(76, 227, 154, 0.12);
+      border: 1px solid rgba(76, 227, 154, 0.3);
+      color: var(--paper);
+    }
+
+    .badge-status.queued {
+      background: rgba(216, 154, 69, 0.15);
+      border: 1px solid rgba(216, 154, 69, 0.4);
+      color: var(--amber);
+    }
+
+    .badge-status.failed {
+      background: rgba(255, 101, 112, 0.15);
+      border: 1px solid rgba(255, 101, 112, 0.4);
+      color: var(--rose);
+    }
+
+    .card-body {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .card-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .card-prompt {
+      color: rgba(244, 241, 232, 0.88);
+      font-size: 13px;
+      line-height: 1.6;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .model-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .model-tags span {
+      padding: 3px 8px;
+      border: 1px solid rgba(244, 241, 232, 0.12);
+      border-radius: 5px;
+      background: rgba(244, 241, 232, 0.06);
+      color: rgba(244, 241, 232, 0.68);
+      font-size: 11px;
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .card-footer {
+      padding-top: 14px;
+      border-top: 1px solid rgba(244, 241, 232, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+    }
+
+    .card-footer-action {
+      color: var(--green);
+      font-weight: 600;
+    }
+
+    /* Table View */
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid rgba(244, 241, 232, 0.14);
+      border-radius: var(--radius-card);
+      background: rgba(9, 13, 10, 0.84);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    th {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(244, 241, 232, 0.14);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: rgba(244, 241, 232, 0.03);
+    }
+
+    td {
+      padding: 14px 20px;
+      border-bottom: 1px solid rgba(244, 241, 232, 0.08);
+      color: rgba(244, 241, 232, 0.86);
+      vertical-align: middle;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+    }
+
+    tr:hover td {
+      background: rgba(76, 227, 154, 0.06);
+    }
+
+    /* Modals & Drawers */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(5, 8, 6, 0.88);
+      backdrop-filter: blur(14px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .modal-window {
+      width: 100%;
+      max-width: 860px;
+      max-height: 90vh;
+      border: 1px solid rgba(244, 241, 232, 0.2);
+      border-radius: 12px;
+      background:
+        linear-gradient(145deg, rgba(244, 241, 232, 0.07), rgba(244, 241, 232, 0.02)),
+        #0b0f0c;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .modal-head {
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(244, 241, 232, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 24px;
+    }
+
+    .drawer-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(520px, 100vw);
+      background: #0b0f0c;
+      border-left: 1px solid rgba(244, 241, 232, 0.2);
+      box-shadow: -10px 0 40px rgba(0, 0, 0, 0.7);
+      z-index: 55;
+      display: flex;
+      flex-direction: column;
+      padding: 30px;
+      overflow-y: auto;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 1. Header (verdantflare-www Style) -->
+  <header class="site-header">
+    <div class="nav">
+      <div class="brand" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
+        <div class="brand-mark"></div>
+        <span>VerdantFlare</span>
+        <span class="brand-tag">IMAGE STATION</span>
+      </div>
+
+      <div class="nav-actions">
+        <!-- Live Gauges -->
+        <div class="pill-badge">
+          <span style="color: var(--muted)">GEMINI</span>
+          <strong id="gaugeGemini" style="color: var(--green)">5/5</strong>
+          <span style="color: rgba(244,241,232,0.2)">|</span>
+          <span style="color: var(--muted)">CODEX</span>
+          <strong id="gaugeCodex" style="color: var(--amber)">2/2</strong>
+        </div>
+
+        <!-- Poller Badge -->
+        <div class="pill-badge" style="cursor: pointer;" onclick="togglePolling()">
+          <span class="dot-live" id="pollDot"></span>
+          <span id="pollText">3s 轮询中</span>
+        </div>
+
+        <!-- New Task Button -->
+        <button class="button primary" onclick="openDispatchDrawer()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <span>新建生图任务</span>
+        </button>
+
+        <!-- Token Settings -->
+        <button class="button" onclick="openTokenModal()" title="设置安全 Token">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 2. Main Page -->
+  <main class="market-page">
+    <!-- Hero Section -->
+    <section class="market-hero">
+      <div class="market-wrap market-hero-grid">
+        <div>
+          <p class="market-kicker">VERDANTFLARE IMAGE STATION · FLEET OBSERVABILITY</p>
+          <h1>双核生图任务与资产工作台</h1>
+          <p>
+            整合 OpenAI <code>gpt-image-2</code> 与 Gemini <code>gemini-3.1-flash-image</code> 双生图引擎。
+            基于 SQLite WAL 任务持久化与信号量隔离机制，实现高并发排队与生成资产追踪。
+          </p>
+          <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
+            <button class="button primary" onclick="openDispatchDrawer()">立即体验生图</button>
+            <button class="button" onclick="loadSampleTasks()">重置 Mock 演示样本</button>
+          </div>
+        </div>
+
+        <!-- Orbit Showcase Card -->
+        <div class="market-orbit">
+          <span>RUNNING WORKLOAD</span>
+          <strong id="orbitRunning">2</strong>
+          <small>当前正在由物理通道执行推理任务，双核并发吞吐已全面受控。</small>
+        </div>
+      </div>
+
+      <!-- Secondary Metric Cards Row -->
+      <div class="market-wrap">
+        <div class="metrics-row">
+          <div class="metric-card">
+            <div class="metric-card-label">
+              <span>排队等待池</span>
+              <span style="color: var(--amber);">QUEUED</span>
+            </div>
+            <div class="metric-card-val" id="statQueued" style="color: var(--amber);">1</div>
+            <div class="metric-card-foot">FIFO 异步信号量限流</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-card-label">
+              <span>正在生成中</span>
+              <span style="color: var(--green);">RUNNING</span>
+            </div>
+            <div class="metric-card-val" id="statRunning" style="color: var(--green);">2</div>
+            <div class="metric-card-foot">双通道并发中</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-card-label">
+              <span>今日完成归档</span>
+              <span style="color: var(--paper);">COMPLETED</span>
+            </div>
+            <div class="metric-card-val" id="statCompleted">18</div>
+            <div class="metric-card-foot" style="color: var(--green);">94.7% 成功率</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-card-label">
+              <span>异常与失败</span>
+              <span style="color: var(--rose);">FAILED</span>
+            </div>
+            <div class="metric-card-val" id="statFailed" style="color: var(--rose);">1</div>
+            <div class="metric-card-foot">记录完整调用栈</div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-card-label">
+              <span>平均推理耗时</span>
+              <span style="color: var(--muted);">AVG LATENCY</span>
+            </div>
+            <div class="metric-card-val" id="statAvgDuration">14.2s</div>
+            <div class="metric-card-foot">Gemini ~12s / Codex ~28s</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Toolbar Section -->
+    <section class="market-wrap">
+      <div class="market-toolbar">
+        <label class="market-search">
+          <span>PROMPT / TASK ID 快速查找</span>
+          <input type="search" id="searchInput" oninput="applyFilters()" placeholder="搜索提示词、任务编号或工程标识..." />
+        </label>
+
+        <div class="market-selects">
+          <label>
+            <span>生图引擎</span>
+            <select id="filterEngine" onchange="applyFilters()">
+              <option value="all">全部引擎</option>
+              <option value="gemini">Gemini 3.1 Flash</option>
+              <option value="codex">Codex (gpt-image-2)</option>
+            </select>
+          </label>
+
+          <label>
+            <span>任务类型</span>
+            <select id="filterType" onchange="applyFilters()">
+              <option value="all">全部类型</option>
+              <option value="text2img">文生图 (T2I)</option>
+              <option value="img2img">以图生图 (I2I)</option>
+              <option value="inpaint">局部重绘 (Inpaint)</option>
+              <option value="4k">4K超高清 (UHD)</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="view-switcher">
+          <button id="btnViewGallery" class="active" onclick="switchView('gallery')">画廊模式</button>
+          <button id="btnViewTable" onclick="switchView('table')">工程表格</button>
+        </div>
+      </div>
+
+      <!-- Quick Filter Pills -->
+      <div class="market-filter-row">
+        <button class="active" id="pillStatusAll" onclick="setStatusFilter('all')">全部状态</button>
+        <button id="pillStatusQueued" onclick="setStatusFilter('queued')">⏳ 排队中</button>
+        <button id="pillStatusRunning" onclick="setStatusFilter('running')">⚡ 推理中</button>
+        <button id="pillStatusCompleted" onclick="setStatusFilter('completed')">✅ 已完成</button>
+        <button id="pillStatusFailed" onclick="setStatusFilter('failed')">❌ 失败</button>
+      </div>
+
+      <!-- Results Grid / Table -->
+      <div id="galleryContainer" class="model-results grid" style="padding-bottom: 80px;">
+        <!-- Injected via JavaScript -->
+      </div>
+
+      <div id="tableContainer" class="table-container hidden" style="margin-bottom: 80px;">
+        <table>
+          <thead>
+            <tr>
+              <th>产物</th>
+              <th>任务 ID</th>
+              <th>引擎 / 模型</th>
+              <th>类型 / 尺寸</th>
+              <th>提示词 (Prompt) 摘要</th>
+              <th>状态</th>
+              <th>耗时</th>
+              <th>创建时间</th>
+              <th style="text-align: right;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- Injected via JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== MODALS & DRAWERS ==================== -->
+
+  <!-- 1. Task Inspector Modal -->
+  <div id="inspectorModal" class="modal-backdrop hidden" onclick="if(event.target===this) closeInspector()">
+    <div class="modal-window">
+      <div class="modal-head">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="modalStatusBadge" class="badge-status completed">已完成</span>
+          <strong id="modalTaskId" style="font-family: 'SFMono-Regular', Consolas, monospace; font-size: 14px;">task_xxx</strong>
+        </div>
+        <button class="button" style="min-height: 32px; padding: 0 12px;" onclick="closeInspector()">关闭</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Left: Image Box -->
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div style="width: 100%; height: 320px; border-radius: var(--radius-card); border: 1px solid rgba(244,241,232,0.14); background: #060907; overflow: hidden; display: flex; align-items: center; justify-content: center; position: relative;">
+            <img id="modalImg" src="" style="width: 100%; height: 100%; object-fit: contain; cursor: zoom-in;" onclick="openLightbox(this.src)" />
+            <div id="modalImgEmpty" class="hidden" style="color: var(--muted); font-size: 13px;">暂无可用图片产物</div>
+          </div>
+
+          <div id="modalRefBox" class="hidden" style="padding: 12px; border-radius: var(--radius-card); border: 1px solid rgba(244,241,232,0.12); background: rgba(244,241,232,0.03);">
+            <span style="font-size: 11px; color: var(--muted); display: block; margin-bottom: 8px;">输入底图与重绘遮罩:</span>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" id="modalRefThumbs"></div>
+          </div>
+
+          <div style="display: flex; gap: 10px;">
+            <a id="modalDownloadBtn" href="#" target="_blank" download class="button primary" style="flex: 1; text-align: center;">下载原画</a>
+            <button class="button" onclick="copyCurrentPrompt()">复制 Prompt</button>
+          </div>
+        </div>
+
+        <!-- Right: Parameters -->
+        <div style="display: flex; flex-direction: column; gap: 16px; font-size: 12px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px; border-radius: var(--radius-card); border: 1px solid rgba(244,241,232,0.12); background: rgba(244,241,232,0.03); font-family: 'SFMono-Regular', Consolas, monospace;">
+            <div>
+              <span style="color: var(--muted); font-size: 10px; display: block;">ENGINE</span>
+              <strong id="modalEngine" style="color: var(--paper);">--</strong>
+            </div>
+            <div>
+              <span style="color: var(--muted); font-size: 10px; display: block;">MODEL</span>
+              <strong id="modalModel" style="color: var(--green);">--</strong>
+            </div>
+            <div>
+              <span style="color: var(--muted); font-size: 10px; display: block;">DURATION</span>
+              <strong id="modalDuration" style="color: var(--paper);">--</strong>
+            </div>
+            <div>
+              <span style="color: var(--muted); font-size: 10px; display: block;">SIZE</span>
+              <strong id="modalSize" style="color: var(--amber);">--</strong>
+            </div>
+            <div style="grid-column: span 2; border-top: 1px solid rgba(244,241,232,0.08); padding-top: 8px;">
+              <span style="color: var(--muted); font-size: 10px; display: block;">ARTIFACT HANDLE</span>
+              <span id="modalArtifactId" style="color: var(--green);">--</span>
+            </div>
+          </div>
+
+          <div>
+            <span style="color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; display: block; margin-bottom: 6px;">PROMPT 提示词</span>
+            <div id="modalPrompt" style="padding: 12px 14px; border-radius: var(--radius-card); border: 1px solid rgba(244,241,232,0.12); background: #060907; line-height: 1.6; color: var(--paper); max-height: 120px; overflow-y: auto;"></div>
+          </div>
+
+          <div id="modalErrorBox" class="hidden" style="padding: 12px; border-radius: var(--radius-card); border: 1px solid rgba(255,101,112,0.4); background: rgba(255,101,112,0.08); color: var(--rose);">
+            <strong style="display: block; margin-bottom: 4px; font-size: 11px;">执行异常堆栈:</strong>
+            <span id="modalError" style="font-family: 'SFMono-Regular', Consolas, monospace; font-size: 11px;"></span>
+          </div>
+
+          <div>
+            <span style="color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; display: block; margin-bottom: 6px;">RAW METADATA (JSON)</span>
+            <pre id="modalJson" style="padding: 10px; border-radius: var(--radius-card); border: 1px solid rgba(244,241,232,0.1); background: #060907; color: var(--green); font-size: 10px; font-family: 'SFMono-Regular', Consolas, monospace; max-height: 100px; overflow: auto;"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Lightbox Modal -->
+  <div id="lightboxModal" class="modal-backdrop hidden" style="background: rgba(0,0,0,0.96);" onclick="closeLightbox()">
+    <img id="lightboxImg" src="" style="max-width: 95vw; max-height: 92vh; object-fit: contain; border-radius: var(--radius-card); box-shadow: 0 0 50px rgba(0,0,0,0.8);" />
+  </div>
+
+  <!-- 3. Quick Dispatch Drawer -->
+  <div id="dispatchDrawer" class="modal-backdrop hidden" onclick="if(event.target===this) closeDispatchDrawer()">
+    <div class="drawer-panel">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px;">
+        <h3 style="font-size: 20px; font-weight: 600; color: var(--paper);">新建生图任务</h3>
+        <button class="button" style="min-height: 32px; padding: 0 12px;" onclick="closeDispatchDrawer()">关闭</button>
+      </div>
+
+      <form onsubmit="submitTask(event)" style="display: flex; flex-direction: column; gap: 18px; font-size: 13px;">
+        <div>
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">任务模式</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+            <button type="button" id="btnModeT2I" class="button primary" style="min-height: 36px; padding: 0;" onclick="setDispatchMode('text2img')">文生图</button>
+            <button type="button" id="btnModeI2I" class="button" style="min-height: 36px; padding: 0;" onclick="setDispatchMode('img2img')">图生图</button>
+            <button type="button" id="btnModeInpaint" class="button" style="min-height: 36px; padding: 0;" onclick="setDispatchMode('inpaint')">局部重绘</button>
+          </div>
+        </div>
+
+        <div>
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">执行引擎</label>
+          <select id="dispatchEngine" class="market-toolbar" style="position: static; width: 100%; background-color: rgba(244,241,232,0.08); padding-top:0; padding-bottom:0;">
+            <option value="gemini">Gemini 3.1 Flash (高性价比极速 ~12s)</option>
+            <option value="codex">Codex (gpt-image-2 电影级渲染 ~28s)</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">分辨率规格</label>
+          <select id="dispatchSize" class="market-toolbar" style="position: static; width: 100%; background-color: rgba(244,241,232,0.08); padding-top:0; padding-bottom:0;">
+            <option value="1024x1024">标准方形 1024x1024 (1:1)</option>
+            <option value="1792x1024">宽幅横屏 1792x1024 (16:9)</option>
+            <option value="1024x1792">纵向海报 1024x1792 (9:16)</option>
+            <option value="3840x2160">超高清 4K 3840x2160</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">提示词 (Prompt) *</label>
+          <textarea id="dispatchPrompt" required rows="4" style="width: 100%; border: 1px solid rgba(244,241,232,0.18); border-radius: var(--radius-card); background: #060907; color: var(--paper); padding: 12px; outline: 0; line-height: 1.6; font-size: 13px;" placeholder="描绘你的创意灵感..."></textarea>
+        </div>
+
+        <div id="fieldImageInput" class="hidden">
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">底图文件路径 / URL</label>
+          <input type="text" id="dispatchImageUrl" class="market-search" style="width: 100%; height: 40px; border-radius: 6px; border: 1px solid rgba(244,241,232,0.18); background: #060907; padding: 0 12px; color: var(--paper);" placeholder=".tmp/verdantflare-app-image/inputs/base_character.png">
+        </div>
+
+        <div id="fieldMaskInput" class="hidden">
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">遮罩图文件路径 / URL</label>
+          <input type="text" id="dispatchMaskUrl" class="market-search" style="width: 100%; height: 40px; border-radius: 6px; border: 1px solid rgba(244,241,232,0.18); background: #060907; padding: 0 12px; color: var(--paper);" placeholder=".tmp/verdantflare-app-image/inputs/mask_character.png">
+        </div>
+
+        <div>
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">项目标识 (Project ID)</label>
+          <input type="text" id="dispatchProjectId" value="verdantflare-design-demo" style="width: 100%; height: 40px; border-radius: 6px; border: 1px solid rgba(244,241,232,0.18); background: #060907; padding: 0 12px; color: var(--paper); font-family: 'SFMono-Regular', Consolas, monospace;">
+        </div>
+
+        <div style="margin-top: 14px;">
+          <button type="submit" class="button primary" style="width: 100%; height: 46px; font-size: 14px;">加入排队池并执行</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 4. Token Configuration Modal -->
+  <div id="tokenModal" class="modal-backdrop hidden" onclick="if(event.target===this) closeTokenModal()">
+    <div class="modal-window" style="max-width: 480px;">
+      <div class="modal-head">
+        <strong style="font-size: 16px;">安全认证配置</strong>
+        <button class="button" style="min-height: 28px; padding: 0 10px;" onclick="closeTokenModal()">关闭</button>
+      </div>
+      <div style="padding: 24px;">
+        <p style="color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 16px;">
+          配置 MCP Server 鉴权 Token (<code>IMAGE_MCP_BEARER_TOKEN</code>)。凭据仅在浏览器本地保留。
+        </p>
+        <input type="password" id="inputToken" placeholder="输入 Bearer Token..." style="width: 100%; height: 44px; border-radius: var(--radius-pill); border: 1px solid rgba(244,241,232,0.2); background: #060907; padding: 0 18px; color: var(--paper); outline: 0; margin-bottom: 20px; font-family: 'SFMono-Regular', Consolas, monospace;">
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="button" onclick="closeTokenModal()">取消</button>
+          <button class="button primary" onclick="saveToken()">保存凭据</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== SCRIPT LOGIC ==================== -->
+  <script>
+    let currentView = 'gallery';
+    let currentStatusFilter = 'all';
+    let isPolling = true;
+    let pollCountdown = 3;
+    let currentTasks = [];
+    let activeTask = null;
+    let currentDispatchMode = 'text2img';
+
+    const SAMPLE_TASKS = [
+      {
+        id: "task_img_codex_4k_090901",
+        engine: "codex",
+        model: "gpt-image-2",
+        type: "4k",
+        prompt: "A photorealistic 4K cinematic scene of an emerald sci-fi research dome surrounded by lush bioluminescent flora, ultra high dynamic range, intricate textures, volumetric god rays.",
+        status: "completed",
+        duration: 28.45,
+        created_at: "2026-09-09T10:48:12+08:00",
+        size: "3840x2160",
+        output_image: "../outputs/codex_04_4k.png",
+        artifact_id: "art_3840x2160_codex_dome_0909",
+        project_id: "verdantflare-design-demo"
+      },
+      {
+        id: "task_img_gemini_t2i_090902",
+        engine: "gemini",
+        model: "gemini-3.1-flash-image",
+        type: "text2img",
+        prompt: "Close-up portrait of a cyberpunk android woman with emerald cybernetic implants and luminescent cyan tattoos, moody futuristic neon lighting, studio photography, 8k resolution.",
+        status: "completed",
+        duration: 11.88,
+        created_at: "2026-09-09T10:50:03+08:00",
+        size: "1024x1024",
+        output_image: "../outputs/gemini_01_text2img.png",
+        artifact_id: "art_1024x1024_gemini_portrait_0909",
+        project_id: "verdantflare-design-demo"
+      },
+      {
+        id: "task_img_gemini_inpaint_090903",
+        engine: "gemini",
+        model: "gemini-3.1-flash-image",
+        type: "inpaint",
+        prompt: "Replace the character hair with holographic glowing cyan twin braids, perfectly blended with cyberpunk lighting and neon highlights.",
+        status: "completed",
+        duration: 15.61,
+        created_at: "2026-09-09T10:52:30+08:00",
+        size: "1024x1024",
+        output_image: "../outputs/gemini_03_inpaint.png",
+        ref_image: "../inputs/base_character.png",
+        mask_image: "../inputs/mask_character.png",
+        artifact_id: "art_inpaint_gemini_braids_0909",
+        project_id: "verdantflare-design-demo"
+      },
+      {
+        id: "task_img_codex_i2i_090904",
+        engine: "codex",
+        model: "gpt-image-2",
+        type: "img2img",
+        prompt: "Transform the character into a crystalline diamond armor battle commander standing on an obsidian alien citadel, high fantasy cyberpunk blend.",
+        status: "completed",
+        duration: 27.91,
+        created_at: "2026-09-09T10:54:10+08:00",
+        size: "1024x1024",
+        output_image: "../outputs/codex_02_img2img.png",
+        ref_image: "../inputs/base_character.png",
+        artifact_id: "art_i2i_codex_diamond_0909",
+        project_id: "verdantflare-design-demo"
+      },
+      {
+        id: "task_img_gemini_run_090905",
+        engine: "gemini",
+        model: "gemini-3.1-flash-image",
+        type: "text2img",
+        prompt: "Epic isometric architectural blueprint of an underwater floating quantum data station, emerald wireframes with deep sapphire water caustics.",
+        status: "running",
+        duration: 8.2,
+        created_at: "2026-09-09T11:02:18+08:00",
+        size: "1024x1024",
+        output_image: null,
+        artifact_id: null,
+        project_id: "verdantflare-design-demo"
+      },
+      {
+        id: "task_img_codex_queue_090906",
+        engine: "codex",
+        model: "gpt-image-2",
+        type: "4k",
+        prompt: "Wide panoramic vista of the VerdantFlare flagship interstellar spacecraft landing on an emerald moss planet at twilight, hyperrealistic.",
+        status: "queued",
+        duration: 0.0,
+        created_at: "2026-09-09T11:03:02+08:00",
+        size: "3840x2160",
+        output_image: null,
+        artifact_id: null,
+        project_id: "verdantflare-design-demo"
+      },
+      {
+        id: "task_img_codex_err_090907",
+        engine: "codex",
+        model: "gpt-image-2",
+        type: "text2img",
+        prompt: "Invalid prompt demonstration causing timeout or upstream safety policy violation test.",
+        status: "failed",
+        duration: 3.12,
+        created_at: "2026-09-09T10:45:00+08:00",
+        size: "1024x1024",
+        error: "Upstream API Error (400): Prompt violates internal safety policy content filters (CWE-filtered).",
+        output_image: null,
+        artifact_id: null,
+        project_id: "verdantflare-design-demo"
+      }
+    ];
+
+    window.addEventListener('DOMContentLoaded', () => {
+      loadSampleTasks();
+      startPollingLoop();
+    });
+
+    function loadSampleTasks() {
+      currentTasks = JSON.parse(JSON.stringify(SAMPLE_TASKS));
+      updateMetrics();
+      renderTasks();
+    }
+
+    function togglePolling() {
+      isPolling = !isPolling;
+      const dot = document.getElementById('pollDot');
+      const text = document.getElementById('pollText');
+      if (isPolling) {
+        dot.style.display = 'inline-block';
+        text.innerText = '3s 轮询中';
+      } else {
+        dot.style.display = 'none';
+        text.innerText = '轮询已暂停';
+      }
+    }
+
+    function startPollingLoop() {
+      setInterval(() => {
+        if (!isPolling) return;
+        pollCountdown--;
+        if (pollCountdown <= 0) {
+          pollCountdown = 3;
+          triggerRefresh();
+        }
+        document.getElementById('pollText').innerText = `${pollCountdown}s 轮询中`;
+      }, 1000);
+    }
+
+    async function triggerRefresh() {
+      const token = localStorage.getItem('image_mcp_token') || '';
+      const headers = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['X-MCP-Token'] = token;
+      }
+      try {
+        const res = await fetch('/api/tasks?limit=50', { headers });
+        if (res.ok) {
+          const data = await res.json();
+          const taskList = Array.isArray(data) ? data : (data.tasks || []);
+          if (taskList.length > 0) {
+            currentTasks = taskList.map(normalizeLiveTask);
+            updateMetrics();
+            renderTasks();
+          }
+        }
+      } catch (e) {
+        // Fallback to local sample
+      }
+    }
+
+    function normalizeLiveTask(t) {
+      const params = t.parameters || {};
+      return {
+        id: t.id || t.task_id,
+        engine: t.engine || 'unknown',
+        model: t.model || '',
+        type: params.mask_image ? 'inpaint' : (params.image ? 'img2img' : (params.size === '3840x2160' ? '4k' : 'text2img')),
+        prompt: t.prompt || '',
+        status: t.status || 'queued',
+        duration: t.duration_seconds || 0,
+        created_at: t.created_at || new Date().toISOString(),
+        size: params.size || '1024x1024',
+        output_image: t.artifact_id ? `/artifacts/${t.artifact_id}/content` : null,
+        artifact_id: t.artifact_id || null,
+        error: t.error || null,
+        project_id: t.project_id || 'default',
+        parameters: params
+      };
+    }
+
+    function switchView(view) {
+      currentView = view;
+      const bGal = document.getElementById('btnViewGallery');
+      const bTab = document.getElementById('btnViewTable');
+      const cGal = document.getElementById('galleryContainer');
+      const cTab = document.getElementById('tableContainer');
+
+      if (view === 'gallery') {
+        bGal.className = 'active';
+        bTab.className = '';
+        cGal.classList.remove('hidden');
+        cTab.classList.add('hidden');
+      } else {
+        bTab.className = 'active';
+        bGal.className = '';
+        cTab.classList.remove('hidden');
+        cGal.classList.add('hidden');
+      }
+      renderTasks();
+    }
+
+    function setStatusFilter(status) {
+      currentStatusFilter = status;
+      const pills = {
+        all: document.getElementById('pillStatusAll'),
+        queued: document.getElementById('pillStatusQueued'),
+        running: document.getElementById('pillStatusRunning'),
+        completed: document.getElementById('pillStatusCompleted'),
+        failed: document.getElementById('pillStatusFailed')
+      };
+      Object.keys(pills).forEach(k => {
+        if (pills[k]) pills[k].className = (k === status ? 'active' : '');
+      });
+      applyFilters();
+    }
+
+    function applyFilters() {
+      renderTasks();
+    }
+
+    function getFilteredTasks() {
+      const engine = document.getElementById('filterEngine').value;
+      const type = document.getElementById('filterType').value;
+      const search = document.getElementById('searchInput').value.toLowerCase().trim();
+
+      return currentTasks.filter(t => {
+        if (currentStatusFilter !== 'all' && t.status !== currentStatusFilter) return false;
+        if (engine !== 'all' && t.engine !== engine) return false;
+        if (type !== 'all' && t.type !== type) return false;
+        if (search) {
+          const matchId = t.id.toLowerCase().includes(search);
+          const matchPrompt = (t.prompt || '').toLowerCase().includes(search);
+          if (!matchId && !matchPrompt) return false;
+        }
+        return true;
+      });
+    }
+
+    function updateMetrics() {
+      const queued = currentTasks.filter(t => t.status === 'queued').length;
+      const running = currentTasks.filter(t => t.status === 'running').length;
+      const completed = currentTasks.filter(t => t.status === 'completed').length;
+      const failed = currentTasks.filter(t => t.status === 'failed').length;
+
+      document.getElementById('statQueued').innerText = queued;
+      document.getElementById('statRunning').innerText = running;
+      document.getElementById('orbitRunning').innerText = running;
+      document.getElementById('statCompleted').innerText = completed;
+      document.getElementById('statFailed').innerText = failed;
+
+      const geminiRunning = currentTasks.filter(t => t.engine === 'gemini' && t.status === 'running').length;
+      const codexRunning = currentTasks.filter(t => t.engine === 'codex' && t.status === 'running').length;
+      document.getElementById('gaugeGemini').innerText = `${Math.max(0, 5 - geminiRunning)}/5`;
+      document.getElementById('gaugeCodex').innerText = `${Math.max(0, 2 - codexRunning)}/2`;
+
+      const completedWithDuration = currentTasks.filter(t => t.status === 'completed' && t.duration > 0);
+      if (completedWithDuration.length > 0) {
+        const avg = completedWithDuration.reduce((acc, t) => acc + t.duration, 0) / completedWithDuration.length;
+        document.getElementById('statAvgDuration').innerText = `${avg.toFixed(1)}s`;
+      }
+    }
+
+    function renderTasks() {
+      const filtered = getFilteredTasks();
+      if (currentView === 'gallery') {
+        renderGallery(filtered);
+      } else {
+        renderTable(filtered);
+      }
+    }
+
+    function renderGallery(tasks) {
+      const container = document.getElementById('galleryContainer');
+      if (!tasks.length) {
+        container.innerHTML = `
+          <div style="grid-column: 1/-1; padding: 60px 0; text-align: center; color: var(--muted); border: 1px solid var(--line); border-radius: var(--radius-card); background: rgba(9,13,10,0.5);">
+            <p>暂无匹配的生图任务</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = tasks.map(t => {
+        const isCompleted = t.status === 'completed';
+        const isRunning = t.status === 'running';
+        const isQueued = t.status === 'queued';
+        const isFailed = t.status === 'failed';
+
+        let mediaHtml = '';
+        if (isCompleted && t.output_image) {
+          mediaHtml = `<img src="${t.output_image}" alt="Output" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'400\\' height=\\'300\\'><rect fill=\\'%23101610\\' width=\\'100%\\' height=\\'100%\\'/><text fill=\\'%23686f66\\' x=\\'50%\\' y=\\'50%\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\'>预览归档</text></svg>';" />`;
+        } else if (isRunning) {
+          mediaHtml = `<div style="display:flex; flex-direction:column; align-items:center; gap:8px;"><div class="dot-live" style="width:14px; height:14px;"></div><span style="font-size:12px; color:var(--green); font-family: monospace;">推理并发中 (${t.duration || 0}s)</span></div>`;
+        } else if (isQueued) {
+          mediaHtml = `<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:24px; color:var(--amber);">⏳</span><span style="font-size:12px; color:var(--amber); font-family: monospace;">排队调度中</span></div>`;
+        } else {
+          mediaHtml = `<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:24px; color:var(--rose);">❌</span><span style="font-size:12px; color:var(--rose); font-family: monospace;">任务失败</span></div>`;
+        }
+
+        const engineBadge = t.engine === 'codex'
+          ? `<span class="badge-tag engine-codex">CODEX</span>`
+          : `<span class="badge-tag engine-gemini">GEMINI</span>`;
+
+        let statusBadge = '';
+        if (isCompleted) statusBadge = `<span class="badge-status completed">● 完成</span>`;
+        else if (isRunning) statusBadge = `<span class="badge-status running">● 运行中</span>`;
+        else if (isQueued) statusBadge = `<span class="badge-status queued">● 排队</span>`;
+        else statusBadge = `<span class="badge-status failed">● 失败</span>`;
+
+        return `
+          <div class="model-card" onclick="openInspector('${t.id}')">
+            <div class="card-thumb-wrap">
+              ${mediaHtml}
+              <div class="card-badges">
+                ${engineBadge}
+                ${statusBadge}
+              </div>
+            </div>
+            <div class="card-body">
+              <div>
+                <div class="card-title-row">
+                  <span>${t.id.slice(-14)}</span>
+                  <span>${t.duration ? t.duration + 's' : '--'}</span>
+                </div>
+                <p class="card-prompt" style="margin-top: 6px;">${t.prompt || '无提示词'}</p>
+              </div>
+              <div class="model-tags">
+                <span>${t.type.toUpperCase()}</span>
+                <span>${t.size}</span>
+                <span>${t.model.replace('-image', '')}</span>
+              </div>
+              <div class="card-footer">
+                <span>${(t.created_at || '').split('T')[1]?.split('+')[0] || ''}</span>
+                <span class="card-footer-action">检视详情 →</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTable(tasks) {
+      const tbody = document.getElementById('tableBody');
+      if (!tasks.length) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--muted);">暂无匹配记录</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = tasks.map(t => {
+        let statusBadge = '';
+        if (t.status === 'completed') statusBadge = `<span style="color: var(--green);">已完成</span>`;
+        else if (t.status === 'running') statusBadge = `<span style="color: var(--paper);">推理中</span>`;
+        else if (t.status === 'queued') statusBadge = `<span style="color: var(--amber);">排队中</span>`;
+        else statusBadge = `<span style="color: var(--rose);">失败</span>`;
+
+        const thumb = t.output_image
+          ? `<img src="${t.output_image}" style="width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: pointer;" onclick="openLightbox('${t.output_image}'); event.stopPropagation();" />`
+          : `<div style="width: 44px; height: 44px; border-radius: 6px; background: #060907; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); font-size: 10px;">--</div>`;
+
+        return `
+          <tr style="cursor: pointer;" onclick="openInspector('${t.id}')">
+            <td>${thumb}</td>
+            <td><strong>${t.id}</strong></td>
+            <td><div style="color: var(--paper);">${t.engine.toUpperCase()}</div><div style="color: var(--muted); font-size: 11px;">${t.model}</div></td>
+            <td><div>${t.type.toUpperCase()}</div><div style="color: var(--muted); font-size: 11px;">${t.size}</div></td>
+            <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: sans-serif; color: rgba(244,241,232,0.8);">${t.prompt}</td>
+            <td>${statusBadge}</td>
+            <td style="color: var(--paper); font-weight: 600;">${t.duration ? t.duration + 's' : '--'}</td>
+            <td style="color: var(--muted);">${t.created_at?.replace('T', ' ').split('+')[0] || ''}</td>
+            <td style="text-align: right;">
+              <button class="button" style="min-height: 28px; padding: 0 10px; font-size: 11px;" onclick="openInspector('${t.id}'); event.stopPropagation();">详情</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openInspector(taskId) {
+      const task = currentTasks.find(t => t.id === taskId);
+      if (!task) return;
+      activeTask = task;
+
+      document.getElementById('modalTaskId').innerText = task.id;
+      document.getElementById('modalEngine').innerText = task.engine.toUpperCase();
+      document.getElementById('modalModel').innerText = task.model || '--';
+      document.getElementById('modalDuration').innerText = task.duration ? `${task.duration}s` : '排队中';
+      document.getElementById('modalSize').innerText = task.size || '1024x1024';
+      document.getElementById('modalArtifactId').innerText = task.artifact_id || '未生成句柄';
+      document.getElementById('modalPrompt').innerText = task.prompt || '--';
+
+      const pill = document.getElementById('modalStatusBadge');
+      if (task.status === 'completed') {
+        pill.className = "badge-status completed";
+        pill.innerText = "已完成 (Completed)";
+      } else if (task.status === 'running') {
+        pill.className = "badge-status running";
+        pill.innerText = "正在推理 (Running)";
+      } else if (task.status === 'queued') {
+        pill.className = "badge-status queued";
+        pill.innerText = "排队中 (Queued)";
+      } else {
+        pill.className = "badge-status failed";
+        pill.innerText = "执行失败 (Failed)";
+      }
+
+      const img = document.getElementById('modalImg');
+      const empty = document.getElementById('modalImgEmpty');
+      const downloadBtn = document.getElementById('modalDownloadBtn');
+      if (task.output_image) {
+        img.src = task.output_image;
+        img.classList.remove('hidden');
+        empty.classList.add('hidden');
+        downloadBtn.href = task.output_image;
+        downloadBtn.classList.remove('hidden');
+      } else {
+        img.classList.add('hidden');
+        empty.classList.remove('hidden');
+        downloadBtn.classList.add('hidden');
+      }
+
+      const refBox = document.getElementById('modalRefBox');
+      const refThumbs = document.getElementById('modalRefThumbs');
+      if (task.ref_image || task.mask_image) {
+        refBox.classList.remove('hidden');
+        refThumbs.innerHTML = `
+          ${task.ref_image ? `<div><span style="font-size:10px; color:var(--muted); display:block; margin-bottom:4px;">参考底图</span><img src="${task.ref_image}" style="height:70px; width:100%; object-fit:cover; border-radius:4px; border:1px solid var(--line); cursor:pointer;" onclick="openLightbox('${task.ref_image}')"/></div>` : ''}
+          ${task.mask_image ? `<div><span style="font-size:10px; color:var(--muted); display:block; margin-bottom:4px;">重绘遮罩</span><img src="${task.mask_image}" style="height:70px; width:100%; object-fit:cover; border-radius:4px; border:1px solid var(--line); cursor:pointer;" onclick="openLightbox('${task.mask_image}')"/></div>` : ''}
+        `;
+      } else {
+        refBox.classList.add('hidden');
+      }
+
+      const errBox = document.getElementById('modalErrorBox');
+      if (task.error) {
+        errBox.classList.remove('hidden');
+        document.getElementById('modalError').innerText = task.error;
+      } else {
+        errBox.classList.add('hidden');
+      }
+
+      document.getElementById('modalJson').innerText = JSON.stringify(task, null, 2);
+      document.getElementById('inspectorModal').classList.remove('hidden');
+    }
+
+    function closeInspector() {
+      document.getElementById('inspectorModal').classList.add('hidden');
+      activeTask = null;
+    }
+
+    function openLightbox(src) {
+      if (!src) return;
+      document.getElementById('lightboxImg').src = src;
+      document.getElementById('lightboxModal').classList.remove('hidden');
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightboxModal').classList.add('hidden');
+    }
+
+    function copyCurrentPrompt() {
+      if (!activeTask || !activeTask.prompt) return;
+      navigator.clipboard.writeText(activeTask.prompt).then(() => {
+        alert('Prompt 已复制到剪贴板！');
+      });
+    }
+
+    function openDispatchDrawer() {
+      document.getElementById('dispatchDrawer').classList.remove('hidden');
+    }
+
+    function closeDispatchDrawer() {
+      document.getElementById('dispatchDrawer').classList.add('hidden');
+    }
+
+    function setDispatchMode(mode) {
+      currentDispatchMode = mode;
+      const bT2I = document.getElementById('btnModeT2I');
+      const bI2I = document.getElementById('btnModeI2I');
+      const bInpaint = document.getElementById('btnModeInpaint');
+      const fImg = document.getElementById('fieldImageInput');
+      const fMask = document.getElementById('fieldMaskInput');
+
+      [bT2I, bI2I, bInpaint].forEach(b => b.className = "button");
+
+      if (mode === 'text2img') {
+        bT2I.className = "button primary";
+        fImg.classList.add('hidden');
+        fMask.classList.add('hidden');
+      } else if (mode === 'img2img') {
+        bI2I.className = "button primary";
+        fImg.classList.remove('hidden');
+        fMask.classList.add('hidden');
+      } else if (mode === 'inpaint') {
+        bInpaint.className = "button primary";
+        fImg.classList.remove('hidden');
+        fMask.classList.remove('hidden');
+      }
+    }
+
+    async function submitTask(e) {
+      e.preventDefault();
+      const engine = document.getElementById('dispatchEngine').value;
+      const size = document.getElementById('dispatchSize').value;
+      const prompt = document.getElementById('dispatchPrompt').value.trim();
+      const projectId = document.getElementById('dispatchProjectId').value.trim();
+
+      const newTask = {
+        id: `task_img_${engine}_${Date.now().toString().slice(-6)}`,
+        engine: engine,
+        model: engine === 'codex' ? 'gpt-image-2' : 'gemini-3.1-flash-image',
+        type: size === '3840x2160' ? '4k' : currentDispatchMode,
+        prompt: prompt,
+        status: "queued",
+        duration: 0.0,
+        created_at: new Date().toISOString(),
+        size: size,
+        output_image: null,
+        artifact_id: null,
+        project_id: projectId
+      };
+
+      currentTasks.unshift(newTask);
+      updateMetrics();
+      renderTasks();
+      closeDispatchDrawer();
+
+      setTimeout(() => {
+        newTask.status = "running";
+        newTask.duration = 4.0;
+        updateMetrics();
+        renderTasks();
+      }, 1500);
+
+      setTimeout(() => {
+        newTask.status = "completed";
+        newTask.duration = engine === 'codex' ? 26.8 : 11.9;
+        newTask.output_image = engine === 'codex' ? "../outputs/codex_01_text2img.png" : "../outputs/gemini_01_text2img.png";
+        newTask.artifact_id = `art_${Date.now()}`;
+        updateMetrics();
+        renderTasks();
+      }, 4500);
+    }
+
+    function openTokenModal() {
+      document.getElementById('inputToken').value = localStorage.getItem('image_mcp_token') || '';
+      document.getElementById('tokenModal').classList.remove('hidden');
+    }
+
+    function closeTokenModal() {
+      document.getElementById('tokenModal').classList.add('hidden');
+    }
+
+    function saveToken() {
+      const val = document.getElementById('inputToken').value.trim();
+      localStorage.setItem('image_mcp_token', val);
+      closeTokenModal();
+      alert('凭据已安全保存在本地浏览器！');
+      triggerRefresh();
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeInspector();
+        closeLightbox();
+        closeDispatchDrawer();
+        closeTokenModal();
+      }
+    });
+  </script>
+</body>
+</html>
