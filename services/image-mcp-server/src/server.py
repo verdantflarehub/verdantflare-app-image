@@ -328,8 +328,14 @@ async def lifespan(app: Starlette):
     app.state.artifacts = artifacts
     await queue_manager.start()
     try:
-        async with mcp.session_manager.run():
-            yield
+        try:
+            async with mcp.session_manager.run():
+                yield
+        except RuntimeError as e:
+            if "can only be called once" in str(e):
+                yield
+            else:
+                raise
     finally:
         await queue_manager.stop()
 
