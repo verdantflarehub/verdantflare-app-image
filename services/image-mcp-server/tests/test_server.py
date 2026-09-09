@@ -1,4 +1,8 @@
 import os
+
+os.environ.setdefault("IMAGE_ARTIFACT_ROOT", "/tmp/image-test-artifacts")
+os.environ.setdefault("IMAGE_MCP_BEARER_TOKEN", "test-secret-token")
+
 import unittest
 
 try:

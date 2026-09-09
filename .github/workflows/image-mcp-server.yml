@@ -24,6 +24,8 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: services/image-mcp-server
+          IMAGE_ARTIFACT_ROOT: /tmp/image-test-artifacts
+          IMAGE_MCP_BEARER_TOKEN: test-secret-token
         run: |
           python3 -m pip install -r services/${SERVICE}/requirements.txt
           python3 -m unittest discover -s services/${SERVICE}/tests -v

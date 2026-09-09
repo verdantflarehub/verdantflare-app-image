@@ -1,4 +1,8 @@
 import os
+
+os.environ.setdefault("IMAGE_ARTIFACT_ROOT", "/tmp/image-dashboard-test")
+os.environ.setdefault("IMAGE_MCP_BEARER_TOKEN", "dash-secret-token")
+
 import unittest
 
 try:
