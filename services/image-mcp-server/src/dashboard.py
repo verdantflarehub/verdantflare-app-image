@@ -449,3 +449,66 @@ async def api_task_stats(request: Request) -> Response:
     stats = tasks_store.get_stats()
     return JSONResponse(stats)
 
+
+async def api_create_task(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    project_id = str(body.get("project_id", "default")).strip() or "default"
+    prompt = str(body.get("prompt", "")).strip()
+    if not prompt:
+        return JSONResponse({"error": "prompt_is_required"}, status_code=400)
+
+    engine = str(body.get("engine", "gemini")).strip().lower()
+    if engine not in ("codex", "gemini"):
+        engine = "gemini"
+
+    aspect_ratio = str(body.get("aspect_ratio", "16:9")).strip()
+    resolution = str(body.get("resolution", "2k")).strip()
+    quality = str(body.get("quality", "auto")).strip()
+
+    model = str(body.get("model", "")).strip()
+    resolved_model = model or (
+        "gpt-image-2" if engine == "codex" else "gemini-3.1-flash-image"
+    )
+
+    params = {
+        "action": "generate",
+        "prompt": prompt,
+        "model": resolved_model,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "quality": quality,
+    }
+
+    import uuid
+    idempotency_key = str(body.get("idempotency_key", "")).strip() or f"ui-{uuid.uuid4().hex[:12]}"
+
+    tasks_store = request.app.state.tasks
+    queue_mgr = getattr(request.app.state, "queue_manager", None)
+
+    task = tasks_store.create(
+        project_id=project_id,
+        idempotency_key=idempotency_key,
+        engine=engine,
+        model=resolved_model,
+        request_params=params,
+    )
+
+    if task.status == "queued" and queue_mgr:
+        await queue_mgr.enqueue(
+            task_id=task.task_id,
+            project_id=project_id,
+            engine=engine,
+            action="generate",
+            params=params,
+        )
+
+    return JSONResponse(task.to_dict(), status_code=201)
+
+

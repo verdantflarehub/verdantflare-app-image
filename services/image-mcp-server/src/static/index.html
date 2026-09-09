@@ -830,7 +830,7 @@
           </p>
           <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
             <button class="button primary" onclick="openDispatchDrawer()">立即体验生图</button>
-            <button class="button" onclick="loadSampleTasks()">重置 Mock 演示样本</button>
+            <button class="button" onclick="triggerRefresh()">刷新实时队列</button>
           </div>
         </div>
 
@@ -1147,111 +1147,6 @@
     let activeTask = null;
     let currentDispatchMode = 'text2img';
 
-    const SAMPLE_TASKS = [
-      {
-        id: "task_img_codex_4k_090901",
-        engine: "codex",
-        model: "gpt-image-2",
-        type: "4k",
-        prompt: "A photorealistic 4K cinematic scene of an emerald sci-fi research dome surrounded by lush bioluminescent flora, ultra high dynamic range, intricate textures, volumetric god rays.",
-        status: "completed",
-        duration: 28.45,
-        created_at: "2026-09-09T10:48:12+08:00",
-        size: "3840x2160",
-        output_image: "../outputs/codex_04_4k.png",
-        artifact_id: "art_3840x2160_codex_dome_0909",
-        project_id: "verdantflare-design-demo"
-      },
-      {
-        id: "task_img_gemini_t2i_090902",
-        engine: "gemini",
-        model: "gemini-3.1-flash-image",
-        type: "text2img",
-        prompt: "Close-up portrait of a cyberpunk android woman with emerald cybernetic implants and luminescent cyan tattoos, moody futuristic neon lighting, studio photography, 8k resolution.",
-        status: "completed",
-        duration: 11.88,
-        created_at: "2026-09-09T10:50:03+08:00",
-        size: "1024x1024",
-        output_image: "../outputs/gemini_01_text2img.png",
-        artifact_id: "art_1024x1024_gemini_portrait_0909",
-        project_id: "verdantflare-design-demo"
-      },
-      {
-        id: "task_img_gemini_inpaint_090903",
-        engine: "gemini",
-        model: "gemini-3.1-flash-image",
-        type: "inpaint",
-        prompt: "Replace the character hair with holographic glowing cyan twin braids, perfectly blended with cyberpunk lighting and neon highlights.",
-        status: "completed",
-        duration: 15.61,
-        created_at: "2026-09-09T10:52:30+08:00",
-        size: "1024x1024",
-        output_image: "../outputs/gemini_03_inpaint.png",
-        ref_image: "../inputs/base_character.png",
-        mask_image: "../inputs/mask_character.png",
-        artifact_id: "art_inpaint_gemini_braids_0909",
-        project_id: "verdantflare-design-demo"
-      },
-      {
-        id: "task_img_codex_i2i_090904",
-        engine: "codex",
-        model: "gpt-image-2",
-        type: "img2img",
-        prompt: "Transform the character into a crystalline diamond armor battle commander standing on an obsidian alien citadel, high fantasy cyberpunk blend.",
-        status: "completed",
-        duration: 27.91,
-        created_at: "2026-09-09T10:54:10+08:00",
-        size: "1024x1024",
-        output_image: "../outputs/codex_02_img2img.png",
-        ref_image: "../inputs/base_character.png",
-        artifact_id: "art_i2i_codex_diamond_0909",
-        project_id: "verdantflare-design-demo"
-      },
-      {
-        id: "task_img_gemini_run_090905",
-        engine: "gemini",
-        model: "gemini-3.1-flash-image",
-        type: "text2img",
-        prompt: "Epic isometric architectural blueprint of an underwater floating quantum data station, emerald wireframes with deep sapphire water caustics.",
-        status: "running",
-        duration: 8.2,
-        created_at: "2026-09-09T11:02:18+08:00",
-        size: "1024x1024",
-        output_image: null,
-        artifact_id: null,
-        project_id: "verdantflare-design-demo"
-      },
-      {
-        id: "task_img_codex_queue_090906",
-        engine: "codex",
-        model: "gpt-image-2",
-        type: "4k",
-        prompt: "Wide panoramic vista of the VerdantFlare flagship interstellar spacecraft landing on an emerald moss planet at twilight, hyperrealistic.",
-        status: "queued",
-        duration: 0.0,
-        created_at: "2026-09-09T11:03:02+08:00",
-        size: "3840x2160",
-        output_image: null,
-        artifact_id: null,
-        project_id: "verdantflare-design-demo"
-      },
-      {
-        id: "task_img_codex_err_090907",
-        engine: "codex",
-        model: "gpt-image-2",
-        type: "text2img",
-        prompt: "Invalid prompt demonstration causing timeout or upstream safety policy violation test.",
-        status: "failed",
-        duration: 3.12,
-        created_at: "2026-09-09T10:45:00+08:00",
-        size: "1024x1024",
-        error: "Upstream API Error (400): Prompt violates internal safety policy content filters (CWE-filtered).",
-        output_image: null,
-        artifact_id: null,
-        project_id: "verdantflare-design-demo"
-      }
-    ];
-
     const BASE_PATH = window.location.pathname.startsWith('/image') ? '/image' : '';
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -1268,8 +1163,7 @@
       const token = localStorage.getItem('image_mcp_token') || '';
       if (!token) {
         updateTokenUI(false);
-        showTokenNotice(true, '尚未配置访问 Token，当前展示离线演示数据。请点击右侧按钮输入 <code>IMAGE_MCP_BEARER_TOKEN</code> 接入实时队列。');
-        loadSampleTasks();
+        showTokenNotice(true, '尚未配置访问 Token。请点击右侧按钮输入 <code>IMAGE_MCP_BEARER_TOKEN</code> 接入实时队列。');
         openTokenModal();
       } else {
         updateTokenUI(true);
@@ -1277,6 +1171,7 @@
         triggerRefresh();
       }
 
+      renderTasks();
       startPollingLoop();
     });
 
@@ -1337,9 +1232,7 @@
         if (tasksRes.ok) {
           const data = await tasksRes.json();
           const taskList = Array.isArray(data) ? data : (data.tasks || []);
-          if (taskList.length > 0) {
-            currentTasks = taskList.map(normalizeLiveTask);
-          }
+          currentTasks = taskList.map(normalizeLiveTask);
         }
 
         if (statsRes.ok) {
@@ -1470,8 +1363,13 @@
       const container = document.getElementById('galleryContainer');
       if (!tasks.length) {
         container.innerHTML = `
-          <div style="grid-column: 1/-1; padding: 60px 0; text-align: center; color: var(--muted); border: 1px solid var(--line); border-radius: var(--radius-card); background: rgba(9,13,10,0.5);">
-            <p>暂无匹配的生图任务</p>
+          <div style="grid-column: 1/-1; padding: 70px 20px; text-align: center; color: var(--muted); border: 1px solid var(--line); border-radius: var(--radius-card); background: rgba(9,13,10,0.5);">
+            <div style="font-size: 32px; margin-bottom: 12px; opacity: 0.8;">🎨</div>
+            <h3 style="color: var(--paper); font-size: 16px; font-weight: 600; margin-bottom: 6px;">当前暂无生图任务</h3>
+            <p style="font-size: 13px; max-width: 460px; margin: 0 auto 16px; line-height: 1.6;">
+              集群队列就绪待命中，尚未产生任务记录。点击下方按钮即可提交任务进行双核生图。
+            </p>
+            <button class="button primary" onclick="openDispatchDrawer()">立即提交生图任务</button>
           </div>
         `;
         return;
@@ -1539,7 +1437,15 @@
     function renderTable(tasks) {
       const tbody = document.getElementById('tableBody');
       if (!tasks.length) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--muted);">暂无匹配记录</td></tr>`;
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="9" style="text-align: center; padding: 60px 20px; color: var(--muted);">
+              <div style="font-size: 15px; color: var(--paper); margin-bottom: 6px;">当前暂无生图任务记录</div>
+              <div style="font-size: 12px; margin-bottom: 14px;">后端任务数据库为空。可点击右上角「新建生图任务」提交真实任务，或由 Agent 通过 MCP 工具发起。</div>
+              <button class="button primary" onclick="openDispatchDrawer()" style="min-height: 30px; font-size: 12px;">新建生图任务</button>
+            </td>
+          </tr>
+        `;
         return;
       }
 
@@ -1696,46 +1602,72 @@
 
     async function submitTask(e) {
       e.preventDefault();
+      const token = localStorage.getItem('image_mcp_token') || '';
+      if (!token) {
+        openTokenModal('提交生图任务需要先配置 Token');
+        return;
+      }
+
       const engine = document.getElementById('dispatchEngine').value;
       const size = document.getElementById('dispatchSize').value;
       const prompt = document.getElementById('dispatchPrompt').value.trim();
-      const projectId = document.getElementById('dispatchProjectId').value.trim();
+      const projectId = document.getElementById('dispatchProjectId').value.trim() || 'default';
 
-      const newTask = {
-        id: `task_img_${engine}_${Date.now().toString().slice(-6)}`,
-        engine: engine,
-        model: engine === 'codex' ? 'gpt-image-2' : 'gemini-3.1-flash-image',
-        type: size === '3840x2160' ? '4k' : currentDispatchMode,
-        prompt: prompt,
-        status: "queued",
-        duration: 0.0,
-        created_at: new Date().toISOString(),
-        size: size,
-        output_image: null,
-        artifact_id: null,
-        project_id: projectId
-      };
+      if (!prompt) {
+        alert('请输入生图提示词 (Prompt)');
+        return;
+      }
 
-      currentTasks.unshift(newTask);
-      updateMetrics();
-      renderTasks();
-      closeDispatchDrawer();
+      const resolution = size === '3840x2160' ? '4k' : '2k';
+      const aspectRatio = size === '3840x2160' ? '16:9' : (size === '1024x1024' ? '1:1' : '16:9');
 
-      setTimeout(() => {
-        newTask.status = "running";
-        newTask.duration = 4.0;
-        updateMetrics();
-        renderTasks();
-      }, 1500);
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerText = '正在向集群提交任务...';
+      }
 
-      setTimeout(() => {
-        newTask.status = "completed";
-        newTask.duration = engine === 'codex' ? 26.8 : 11.9;
-        newTask.output_image = engine === 'codex' ? "../outputs/codex_01_text2img.png" : "../outputs/gemini_01_text2img.png";
-        newTask.artifact_id = `art_${Date.now()}`;
-        updateMetrics();
-        renderTasks();
-      }, 4500);
+      try {
+        const res = await fetch(`${BASE_PATH}/api/tasks`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-MCP-Token': token
+          },
+          body: JSON.stringify({
+            project_id: projectId,
+            engine: engine,
+            prompt: prompt,
+            aspect_ratio: aspectRatio,
+            resolution: resolution,
+            quality: 'auto'
+          })
+        });
+
+        if (res.status === 401) {
+          openTokenModal('Token 鉴权失败，请检查输入的 Bearer Token');
+          return;
+        }
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          alert(`提交失败: ${errData.error || res.statusText}`);
+          return;
+        }
+
+        const task = await res.json();
+        closeDispatchDrawer();
+        document.getElementById('dispatchPrompt').value = '';
+        triggerRefresh();
+      } catch (err) {
+        alert(`网络异常: ${err.message}`);
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerText = '加入排队池并执行';
+        }
+      }
     }
 
     function openTokenModal(errorMsg = '') {

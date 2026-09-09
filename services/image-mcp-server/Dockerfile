@@ -3,7 +3,7 @@ FROM docker.io/library/python:3.11.10-slim
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 LABEL org.opencontainers.image.source="https://github.com/verdantflarehub/verdantflare-app-image"
 LABEL org.opencontainers.image.title="VerdantFlare Image MCP Server"
-LABEL org.opencontainers.image.version="0.1.1"
+LABEL org.opencontainers.image.version="0.1.2"
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 && rm -rf /var/lib/apt/lists/*

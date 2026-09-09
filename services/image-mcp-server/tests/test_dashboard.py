@@ -79,6 +79,36 @@ class TestDashboard(unittest.TestCase):
             stats_image = resp_image.json()
             self.assertEqual(stats_image["queued"], stats["queued"])
 
+    def test_api_create_task(self):
+        with TestClient(app) as client:
+            # 未提供 token -> 401
+            resp = client.post("/image/api/tasks", json={"prompt": "test prompt"})
+            self.assertEqual(resp.status_code, 401)
+
+            # 缺少 prompt -> 400
+            resp_no_prompt = client.post(
+                "/image/api/tasks",
+                json={"prompt": ""},
+                headers={"Authorization": "Bearer dash-secret-token"},
+            )
+            self.assertEqual(resp_no_prompt.status_code, 400)
+
+            # 正常创建 -> 201
+            resp_ok = client.post(
+                "/image/api/tasks",
+                json={
+                    "project_id": "test-proj",
+                    "prompt": "a test prompt",
+                    "engine": "gemini",
+                },
+                headers={"Authorization": "Bearer dash-secret-token"},
+            )
+            self.assertEqual(resp_ok.status_code, 201)
+            created = resp_ok.json()
+            self.assertIn("task_id", created)
+            self.assertEqual(created["project_id"], "test-proj")
+            self.assertEqual(created["status"], "queued")
+
 
 if __name__ == "__main__":
     unittest.main()

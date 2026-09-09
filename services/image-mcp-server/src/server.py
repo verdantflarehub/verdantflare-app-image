@@ -18,7 +18,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore
-from .dashboard import api_list_tasks, api_task_stats, dashboard_page
+from .dashboard import api_create_task, api_list_tasks, api_task_stats, dashboard_page
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
 from .queue import TaskQueueManager
@@ -327,6 +327,7 @@ async def lifespan(app: Starlette):
     tasks.ensure_ready()
     app.state.tasks = tasks
     app.state.artifacts = artifacts
+    app.state.queue_manager = queue_manager
     await queue_manager.start()
     try:
         try:
@@ -352,6 +353,8 @@ app = Starlette(
         Route("/image/dashboard/", dashboard_page, methods=["GET"]),
         Route("/api/tasks", api_list_tasks, methods=["GET"]),
         Route("/image/api/tasks", api_list_tasks, methods=["GET"]),
+        Route("/api/tasks", api_create_task, methods=["POST"]),
+        Route("/image/api/tasks", api_create_task, methods=["POST"]),
         Route("/api/tasks/stats", api_task_stats, methods=["GET"]),
         Route("/image/api/tasks/stats", api_task_stats, methods=["GET"]),
         Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
