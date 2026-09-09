@@ -787,8 +787,13 @@
         </button>
 
         <!-- Token Settings -->
-        <button class="button" onclick="openTokenModal()" title="设置安全 Token">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <button id="btnTokenSetting" class="button" onclick="openTokenModal()" style="display: inline-flex; align-items: center; gap: 8px;" title="设置安全 Token">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span id="tokenBadgeDot" style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; display: inline-block;"></span>
+          <span id="tokenStatusText" style="font-size: 13px; font-weight: 500;">输入 Token</span>
         </button>
       </div>
     </div>
@@ -796,6 +801,23 @@
 
   <!-- 2. Main Page -->
   <main class="market-page">
+    <!-- Token Notification Banner -->
+    <div id="tokenNoticeBanner" class="market-wrap" style="display: none; padding-top: 16px;">
+      <div style="padding: 14px 20px; border-radius: var(--radius-card); border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.1); display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px; color: #fbbf24; font-size: 13px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <span id="tokenNoticeText">尚未配置访问 Token，当前展示离线演示数据。请点击右侧按钮输入 <code>IMAGE_MCP_BEARER_TOKEN</code> 接入实时队列。</span>
+        </div>
+        <button class="button primary" onclick="openTokenModal()" style="min-height: 32px; padding: 0 14px; font-size: 12px; white-space: nowrap;">
+          输入 Token 凭据
+        </button>
+      </div>
+    </div>
+
     <!-- Hero Section -->
     <section class="market-hero">
       <div class="market-wrap market-hero-grid">
@@ -1090,19 +1112,26 @@
 
   <!-- 4. Token Configuration Modal -->
   <div id="tokenModal" class="modal-backdrop hidden" onclick="if(event.target===this) closeTokenModal()">
-    <div class="modal-window" style="max-width: 480px;">
+    <div class="modal-window" style="max-width: 500px;">
       <div class="modal-head">
-        <strong style="font-size: 16px;">安全认证配置</strong>
+        <strong style="font-size: 16px;">配置安全 Token (Bearer Token)</strong>
         <button class="button" style="min-height: 28px; padding: 0 10px;" onclick="closeTokenModal()">关闭</button>
       </div>
       <div style="padding: 24px;">
         <p style="color: var(--muted); font-size: 13px; line-height: 1.6; margin-bottom: 16px;">
-          配置 MCP Server 鉴权 Token (<code>IMAGE_MCP_BEARER_TOKEN</code>)。凭据仅在浏览器本地保留。
+          看板需要使用与 MCP Server 匹配的 <code>IMAGE_MCP_BEARER_TOKEN</code> 进行数据查询与任务管理。凭据仅保存在当前浏览器的本地存储（<code>localStorage</code>）中，不会上传泄露。
         </p>
-        <input type="password" id="inputToken" placeholder="输入 Bearer Token..." style="width: 100%; height: 44px; border-radius: var(--radius-pill); border: 1px solid rgba(244,241,232,0.2); background: #060907; padding: 0 18px; color: var(--paper); outline: 0; margin-bottom: 20px; font-family: 'SFMono-Regular', Consolas, monospace;">
-        <div style="display: flex; justify-content: flex-end; gap: 10px;">
-          <button class="button" onclick="closeTokenModal()">取消</button>
-          <button class="button primary" onclick="saveToken()">保存凭据</button>
+        <div id="tokenModalAlert" style="display: none; padding: 10px 14px; margin-bottom: 14px; border-radius: 6px; font-size: 12px; line-height: 1.5;"></div>
+        <div style="margin-bottom: 20px;">
+          <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">BEARER TOKEN</label>
+          <input type="password" id="inputToken" placeholder="粘贴输入 IMAGE_MCP_BEARER_TOKEN..." style="width: 100%; height: 44px; border-radius: var(--radius-pill); border: 1px solid rgba(244,241,232,0.2); background: #060907; padding: 0 18px; color: var(--paper); outline: 0; font-family: 'SFMono-Regular', Consolas, monospace; font-size: 13px;" onkeydown="if(event.key==='Enter') saveToken()">
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <button class="button" type="button" onclick="clearToken()" style="color: #f87171; border-color: rgba(239, 68, 68, 0.3);">清除凭据</button>
+          <div style="display: flex; gap: 10px;">
+            <button class="button" onclick="closeTokenModal()">取消</button>
+            <button class="button primary" onclick="saveToken()">保存并连接</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1223,8 +1252,31 @@
       }
     ];
 
+    const BASE_PATH = window.location.pathname.startsWith('/image') ? '/image' : '';
+
     window.addEventListener('DOMContentLoaded', () => {
-      loadSampleTasks();
+      // 1. Check URL query param ?token=...
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryToken = urlParams.get('token');
+      if (queryToken) {
+        localStorage.setItem('image_mcp_token', queryToken);
+        // Clean query parameter from URL without reloading
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      // 2. Check current token state
+      const token = localStorage.getItem('image_mcp_token') || '';
+      if (!token) {
+        updateTokenUI(false);
+        showTokenNotice(true, '尚未配置访问 Token，当前展示离线演示数据。请点击右侧按钮输入 <code>IMAGE_MCP_BEARER_TOKEN</code> 接入实时队列。');
+        loadSampleTasks();
+        openTokenModal();
+      } else {
+        updateTokenUI(true);
+        showTokenNotice(false);
+        triggerRefresh();
+      }
+
       startPollingLoop();
     });
 
@@ -1239,11 +1291,11 @@
       const dot = document.getElementById('pollDot');
       const text = document.getElementById('pollText');
       if (isPolling) {
-        dot.style.display = 'inline-block';
-        text.innerText = '3s 轮询中';
+        if (dot) dot.style.display = 'inline-block';
+        if (text) text.innerText = '3s 轮询中';
       } else {
-        dot.style.display = 'none';
-        text.innerText = '轮询已暂停';
+        if (dot) dot.style.display = 'none';
+        if (text) text.innerText = '轮询已暂停';
       }
     }
 
@@ -1255,7 +1307,8 @@
           pollCountdown = 3;
           triggerRefresh();
         }
-        document.getElementById('pollText').innerText = `${pollCountdown}s 轮询中`;
+        const text = document.getElementById('pollText');
+        if (text) text.innerText = `${pollCountdown}s 轮询中`;
       }, 1000);
     }
 
@@ -1265,36 +1318,56 @@
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
         headers['X-MCP-Token'] = token;
+      } else {
+        return;
       }
       try {
-        const res = await fetch('/api/tasks?limit=50', { headers });
-        if (res.ok) {
-          const data = await res.json();
+        const [tasksRes, statsRes] = await Promise.all([
+          fetch(`${BASE_PATH}/api/tasks?limit=50`, { headers }),
+          fetch(`${BASE_PATH}/api/tasks/stats`, { headers })
+        ]);
+
+        if (tasksRes.status === 401 || statsRes.status === 401) {
+          updateTokenUI(false);
+          showTokenNotice(true, 'Token 鉴权失败 (401 Unauthorized)，请检查输入的 Bearer Token 是否正确。');
+          openTokenModal('Token 鉴权失败 (401 Unauthorized)，请检查输入的 Bearer Token 是否正确');
+          return;
+        }
+
+        if (tasksRes.ok) {
+          const data = await tasksRes.json();
           const taskList = Array.isArray(data) ? data : (data.tasks || []);
           if (taskList.length > 0) {
             currentTasks = taskList.map(normalizeLiveTask);
-            updateMetrics();
-            renderTasks();
           }
         }
+
+        if (statsRes.ok) {
+          const stats = await statsRes.json();
+          applyServerStats(stats);
+        } else {
+          updateMetrics();
+        }
+
+        renderTasks();
       } catch (e) {
-        // Fallback to local sample
+        console.warn('triggerRefresh error:', e);
       }
     }
 
     function normalizeLiveTask(t) {
-      const params = t.parameters || {};
+      const params = t.request_params || t.parameters || {};
       return {
         id: t.id || t.task_id,
         engine: t.engine || 'unknown',
         model: t.model || '',
-        type: params.mask_image ? 'inpaint' : (params.image ? 'img2img' : (params.size === '3840x2160' ? '4k' : 'text2img')),
-        prompt: t.prompt || '',
+        type: params.action === 'inpaint' ? 'inpaint' : (params.action === 'edit' ? 'img2img' : (params.resolution === '4k' ? '4k' : 'text2img')),
+        prompt: (params.prompt || t.prompt_preview || t.prompt || ''),
         status: t.status || 'queued',
         duration: t.duration_seconds || 0,
         created_at: t.created_at || new Date().toISOString(),
-        size: params.size || '1024x1024',
-        output_image: t.artifact_id ? `/artifacts/${t.artifact_id}/content` : null,
+        size: params.resolution === '4k' ? '3840x2160' : (params.aspect_ratio || '16:9'),
+        output_image: t.artifact_id ? `${BASE_PATH}/artifacts/${t.artifact_id}/content` : null,
         artifact_id: t.artifact_id || null,
         error: t.error || null,
         project_id: t.project_id || 'default',
@@ -1665,21 +1738,95 @@
       }, 4500);
     }
 
-    function openTokenModal() {
-      document.getElementById('inputToken').value = localStorage.getItem('image_mcp_token') || '';
+    function openTokenModal(errorMsg = '') {
+      const input = document.getElementById('inputToken');
+      const alertBox = document.getElementById('tokenModalAlert');
+      input.value = localStorage.getItem('image_mcp_token') || '';
+      if (errorMsg) {
+        alertBox.style.display = 'block';
+        alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        alertBox.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        alertBox.style.color = '#fca5a5';
+        alertBox.innerText = errorMsg;
+      } else {
+        alertBox.style.display = 'none';
+      }
       document.getElementById('tokenModal').classList.remove('hidden');
+      setTimeout(() => input.focus(), 50);
     }
 
     function closeTokenModal() {
       document.getElementById('tokenModal').classList.add('hidden');
     }
 
+    function clearToken() {
+      localStorage.removeItem('image_mcp_token');
+      document.getElementById('inputToken').value = '';
+      updateTokenUI(false);
+      showTokenNotice(true, '凭据已清除。当前展示离线演示数据。');
+      closeTokenModal();
+      loadSampleTasks();
+    }
+
     function saveToken() {
       const val = document.getElementById('inputToken').value.trim();
+      if (!val) {
+        openTokenModal('Token 不能为空，请输入有效的 Bearer Token');
+        return;
+      }
       localStorage.setItem('image_mcp_token', val);
+      updateTokenUI(true);
+      showTokenNotice(false);
       closeTokenModal();
-      alert('凭据已安全保存在本地浏览器！');
       triggerRefresh();
+    }
+
+    function updateTokenUI(hasToken) {
+      const btn = document.getElementById('btnTokenSetting');
+      const dot = document.getElementById('tokenBadgeDot');
+      const text = document.getElementById('tokenStatusText');
+      if (!btn || !dot || !text) return;
+
+      if (hasToken) {
+        dot.style.background = '#4ce39a';
+        dot.style.boxShadow = '0 0 8px #4ce39a';
+        text.innerText = 'Token: 已配置';
+        btn.style.borderColor = 'rgba(76, 227, 154, 0.4)';
+      } else {
+        dot.style.background = '#f59e0b';
+        dot.style.boxShadow = 'none';
+        text.innerText = '输入 Token';
+        btn.style.borderColor = 'rgba(245, 158, 11, 0.5)';
+      }
+    }
+
+    function showTokenNotice(show, msg = '') {
+      const banner = document.getElementById('tokenNoticeBanner');
+      const text = document.getElementById('tokenNoticeText');
+      if (!banner) return;
+      if (show) {
+        if (text && msg) text.innerHTML = msg;
+        banner.style.display = 'block';
+      } else {
+        banner.style.display = 'none';
+      }
+    }
+
+    function applyServerStats(stats) {
+      document.getElementById('statQueued').innerText = stats.queued ?? 0;
+      document.getElementById('statRunning').innerText = stats.running ?? 0;
+      document.getElementById('orbitRunning').innerText = stats.running ?? 0;
+      document.getElementById('statCompleted').innerText = stats.completed ?? 0;
+      document.getElementById('statFailed').innerText = stats.failed ?? 0;
+
+      const geminiRunning = currentTasks.filter(t => t.engine === 'gemini' && t.status === 'running').length;
+      const codexRunning = currentTasks.filter(t => t.engine === 'codex' && t.status === 'running').length;
+      document.getElementById('gaugeGemini').innerText = `${Math.max(0, 5 - geminiRunning)}/5`;
+      document.getElementById('gaugeCodex').innerText = `${Math.max(0, 2 - codexRunning)}/2`;
+
+      if (stats.avg_duration !== undefined && stats.avg_duration !== null) {
+        document.getElementById('statAvgDuration').innerText = `${Number(stats.avg_duration).toFixed(1)}s`;
+      }
     }
 
     window.addEventListener('keydown', (e) => {

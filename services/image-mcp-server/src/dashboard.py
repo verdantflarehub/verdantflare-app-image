@@ -400,6 +400,11 @@ def check_auth(request: Request) -> bool:
     if query_token and hmac.compare_digest(query_token, token):
         return True
 
+    # 3. Check X-MCP-Token Header
+    x_token = request.headers.get("x-mcp-token", "")
+    if x_token and hmac.compare_digest(x_token, token):
+        return True
+
     return False
 
 

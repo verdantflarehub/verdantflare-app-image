@@ -26,11 +26,20 @@ class TestDashboard(unittest.TestCase):
             self.assertIn("VerdantFlare", resp.text)
             self.assertIn("IMAGE STATION", resp.text.upper())
 
+            # 测试网关前缀 /image/dashboard 也正常返回 HTML，无需鉴权拦截
+            resp_image = client.get("/image/dashboard")
+            self.assertEqual(resp_image.status_code, 200)
+            self.assertIn("VerdantFlare", resp_image.text)
+            self.assertIn("tokenModal", resp_image.text)
+
     def test_api_tasks_auth(self):
         with TestClient(app) as client:
             # 未提供 token -> 401
             resp = client.get("/api/tasks")
             self.assertEqual(resp.status_code, 401)
+
+            resp_image_unauth = client.get("/image/api/tasks")
+            self.assertEqual(resp_image_unauth.status_code, 401)
 
             # Query param 提供 token -> 200
             resp_query = client.get("/api/tasks?token=dash-secret-token")
@@ -41,10 +50,17 @@ class TestDashboard(unittest.TestCase):
 
             # Header 提供 token -> 200
             resp_header = client.get(
-                "/api/tasks",
+                "/image/api/tasks",
                 headers={"Authorization": "Bearer dash-secret-token"},
             )
             self.assertEqual(resp_header.status_code, 200)
+
+            # X-MCP-Token Header 提供 token -> 200
+            resp_x_header = client.get(
+                "/image/api/tasks",
+                headers={"X-MCP-Token": "dash-secret-token"},
+            )
+            self.assertEqual(resp_x_header.status_code, 200)
 
     def test_api_tasks_stats(self):
         with TestClient(app) as client:
@@ -56,6 +72,12 @@ class TestDashboard(unittest.TestCase):
             self.assertIn("completed", stats)
             self.assertIn("failed", stats)
             self.assertIn("avg_duration", stats)
+
+            # 测试 /image/api/tasks/stats
+            resp_image = client.get("/image/api/tasks/stats", headers={"Authorization": "Bearer dash-secret-token"})
+            self.assertEqual(resp_image.status_code, 200)
+            stats_image = resp_image.json()
+            self.assertEqual(stats_image["queued"], stats["queued"])
 
 
 if __name__ == "__main__":

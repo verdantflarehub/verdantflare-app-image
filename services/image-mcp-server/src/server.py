@@ -299,11 +299,12 @@ async def artifact_content(request: Request) -> Response:
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        # 放行健康检查、看板静态页面与 API（API 内部具备鉴权处理）
+        # 放行健康检查、看板页面（前端自适应 Token 输入与存储）、API（内部鉴权）与产物下载
         if (
-            path == "/health"
-            or path == "/dashboard"
+            path in ("/health", "/image/health")
+            or "/dashboard" in path
             or path.startswith("/api/")
+            or path.startswith("/image/api/")
             or "/artifacts/" in path
         ):
             return await call_next(request)
@@ -344,9 +345,15 @@ mcp_app = mcp.streamable_http_app()
 app = Starlette(
     routes=[
         Route("/health", health, methods=["GET"]),
+        Route("/image/health", health, methods=["GET"]),
         Route("/dashboard", dashboard_page, methods=["GET"]),
+        Route("/dashboard/", dashboard_page, methods=["GET"]),
+        Route("/image/dashboard", dashboard_page, methods=["GET"]),
+        Route("/image/dashboard/", dashboard_page, methods=["GET"]),
         Route("/api/tasks", api_list_tasks, methods=["GET"]),
+        Route("/image/api/tasks", api_list_tasks, methods=["GET"]),
         Route("/api/tasks/stats", api_task_stats, methods=["GET"]),
+        Route("/image/api/tasks/stats", api_task_stats, methods=["GET"]),
         Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
         Route("/image/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
         Mount("/image", app=mcp_app),
