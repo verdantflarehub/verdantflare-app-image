@@ -268,4 +268,4 @@ verdantflare-app-image/
 
 上层业务套件（如 `verdantflare-music-mv`）可直接通过 HTTP POST 向 `${IMAGE_MCP_PUBLIC_BASE_URL}` 发送标准 MCP 工具调用（`image.generate`、`image.edit`、`image.inpaint`），并通过返回的 `/artifacts/{artifact_id}/content` 获取已落盘的受控图像资产。
 
-客户端统一配合安装 `verdantflare-skills/skills/verdantflare-image-codex` 即可获得完全受控的原子图像生产能力。
+客户端统一配合安装 `verdantflare-skills/skills/verdantflare-image` 即可获得完全受控的原子图像生产能力。
