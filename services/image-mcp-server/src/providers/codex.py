@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 import urllib.error
 import urllib.request
 import uuid
@@ -24,6 +25,30 @@ DEFAULT_VERBATIM_INSTRUCTIONS = (
     "or add or remove visual details or constraints. Preserve the original language, "
     "wording, capitalization, quotes, and punctuation exactly."
 )
+
+# 针对 OpenAI Responses / GPT Image 模型缺少负面提示词独立通道的防御性过滤器
+# 彻底杜绝提示词末尾携带的"负面提示词/negative prompt"被底层扩散模型误作为正向关键词加权反噬
+NEGATIVE_PROMPT_PATTERN = re.compile(
+    r"(?:^|\r?\n)\s*(?:负面提示词|负向提示词|反向提示词|negative\s*prompts?)[\s:：].*?(?=(?:\r?\n\s*\r?\n)|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def sanitize_prompt(prompt: str) -> str:
+    """过滤提示词中由于历史习惯引入的负面提示词/反向词区块。
+
+    说明：
+    GPT Image (DALL-E / Responses API) 等官方模型不存在独立负面词通道。
+    在方案 A 逐字透传指令生效后，若将负向词（如'塑料皮肤，过度磨皮，动漫脸'）直接送入底层模型，
+    会被扩散注意力机制误解为目标特征正面加权，造成严重的画质涂抹与塑料感反噬。
+    故此处对负向词进行自动化防御性剥离。
+    """
+    if not prompt:
+        return ""
+    cleaned = NEGATIVE_PROMPT_PATTERN.sub("\n", prompt)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
 
 # 官方支持质量档位：auto, low, medium, high, xhigh, max
 VALID_QUALITIES = {"auto", "low", "medium", "high", "xhigh", "max"}
@@ -75,6 +100,10 @@ class CodexProvider:
             or os.environ.get("OPENAI_API_KEY")
             or os.environ.get("CODEX_RELAY_API_KEY")
             or ""
+        )
+        self.auto_sanitize_negative_prompts = (
+            os.environ.get("CODEX_AUTO_SANITIZE_NEGATIVE_PROMPTS", "true").lower()
+            in {"true", "1", "yes"}
         )
 
     def _resolve_target_size(self, size: str, prefer_4k: bool) -> str:
@@ -185,6 +214,9 @@ class CodexProvider:
             or os.environ.get("CODEX_VERBATIM_INSTRUCTIONS")
             or DEFAULT_VERBATIM_INSTRUCTIONS
         )
+        sanitized_prompt = (
+            sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
+        )
 
         tool: dict[str, Any] = {
             "type": "image_generation",
@@ -200,7 +232,7 @@ class CodexProvider:
         payload = {
             "model": DEFAULT_SESSION_MODEL,
             "instructions": target_instructions,
-            "input": prompt,
+            "input": sanitized_prompt,
             "tools": [tool],
             "tool_choice": {"type": "image_generation"},
             "stream": True,
@@ -256,10 +288,13 @@ class CodexProvider:
 
         target_quality = normalize_quality(quality)
         target_bg = normalize_background(background)
+        sanitized_prompt = (
+            sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
+        )
 
         fields: dict[str, Any] = {
             "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
-            "prompt": prompt,
+            "prompt": sanitized_prompt,
             "size": size,
             "output_format": "png",
             "n": 1,

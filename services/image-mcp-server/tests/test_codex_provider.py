@@ -7,6 +7,7 @@ from src.providers.codex import (
     DEFAULT_VERBATIM_INSTRUCTIONS,
     DEFAULT_SESSION_MODEL,
     DEFAULT_IMAGE_MODEL,
+    sanitize_prompt,
 )
 
 
@@ -91,6 +92,37 @@ class TestCodexProvider(unittest.TestCase):
             instructions=custom_instructions,
         )
         self.assertEqual(captured_payload.get("instructions"), custom_instructions)
+
+    def test_sanitize_prompt_removes_chinese_negative_block(self):
+        raw = "9:16 真实写真，舞蹈室自拍。\n\n负面提示词： 未成年外观，儿童化面容，塑料皮肤，过度磨皮，动漫脸，CG脸。"
+        cleaned = sanitize_prompt(raw)
+        self.assertEqual(cleaned, "9:16 真实写真，舞蹈室自拍。")
+
+    def test_sanitize_prompt_removes_english_negative_block(self):
+        raw = "A realistic studio portrait.\n\nNegative prompt: blurry, bad anatomy, cartoon, watermark"
+        cleaned = sanitize_prompt(raw)
+        self.assertEqual(cleaned, "A realistic studio portrait.")
+
+    @patch("urllib.request.urlopen")
+    def test_generate_auto_sanitizes_negative_prompt_token_pollution(self, mock_urlopen):
+        captured_payload = {}
+
+        def fake_urlopen(req, timeout=300):
+            nonlocal captured_payload
+            captured_payload = json.loads(req.data.decode("utf-8"))
+            mock_resp = MagicMock()
+            import base64
+            fake_b64 = base64.b64encode(b"fake-sanitized-image").decode("utf-8")
+            data_json = json.dumps({"type": "response.completed", "result": fake_b64})
+            mock_resp.__enter__.return_value = [f"data: {data_json}\r\n".encode("utf-8"), b"\r\n", b"data: [DONE]\r\n"]
+            return mock_resp
+
+        mock_urlopen.side_effect = fake_urlopen
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        dirty_prompt = "真实写真，高清摄影。\n\n负面提示词： 塑料皮肤，过度磨皮，动漫脸，CG脸。"
+        provider.generate(prompt=dirty_prompt)
+
+        self.assertEqual(captured_payload.get("input"), "真实写真，高清摄影。")
 
 
 if __name__ == "__main__":
