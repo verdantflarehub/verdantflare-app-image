@@ -8,7 +8,7 @@ VerdantFlare App Image 是部署在 VerdantFlare Station 上的 AI 图像资产�
 
 系统**不依赖任何本地 CLI（不通过 Codex CLI 或 Gemini CLI）**，底层全面采用标准 HTTP API 中继，内置**双核 API 驱动**：
 
-1. **Codex 图像引擎**：基于 `OPENAI_BASE_URL` + `OPENAI_API_KEY`，调用 OpenAI Responses API / Images Edits API，权威出图模型指定为 **`gpt-image-2`**；
+1. **Codex 图像引擎**：基于 `OPENAI_BASE_URL` + `OPENAI_API_KEY`，调用 OpenAI Responses API / Images Edits API，权威出图模型指定为 **`gpt-image-2.5-sunburst`**（亦支持 `gpt-image-2.5-flare`）；
 2. **Gemini 图像引擎**：基于 `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`，调用 Anthropic Messages 协议中继接口（`/v1/messages`），权威出图模型指定为 **`gemini-3.1-flash-image`**，内建纯净图与多模态指令编辑支持。
 
 ---
@@ -31,7 +31,7 @@ flowchart TD
         Artifacts[ArtifactStore 产物管理与哈希校验]
 
         subgraph Providers[内置双核 API 驱动模块]
-            CodexP[providers/codex.py<br/>OpenAI Responses / gpt-image-2]
+            CodexP[providers/codex.py<br/>OpenAI Responses / gpt-image-2.5-sunburst]
             GeminiP[providers/gemini.py<br/>Anthropic Messages / gemini-3.1-flash-image]
         end
 
@@ -133,12 +133,12 @@ verdantflare-app-image/
 - **入参**：
   - `project_id` (string): 项目标识。
   - `idempotency_key` (string): 幂等唯一键（建议 `<unit_id>/<attempt_id>`）。
-  - `engine` (string): 指定底层引擎（`"codex"` 或 `"gemini"`，默认 `"gemini"`）。
-  - `model` (string, 可选): 指定具体模型（Codex 默认 `gpt-image-2`，Gemini 默认 `gemini-3.1-flash-image`）。
+  - `engine` (string): 指定底层引擎（`"codex"` 或 `"gemini"`，默认 `"codex"`）。
+  - `model` (string, 可选): 指定具体模型（Codex 默认 `gpt-image-2.5-sunburst`，Gemini 默认 `gemini-3.1-flash-image`）。
   - `prompt` (string): 提示词。
   - `aspect_ratio` (string): 画幅比例（`"16:9"`, `"9:16"`, `"1:1"`, `"4:3"`, `"3:4"`，默认 `"16:9"`）。
   - `resolution` (string): 分辨率（`"2k"` 或 `"4k"`，默认 `"2k"`）。
-  - `quality` (string): 质量偏好（`"auto"`, `"standard"`, `"hd"`）。
+  - `quality` (string): 质量偏好（默认 `"hd"`，防止微观细节丢失与塑料涂抹感；亦支持 `"standard"`、`"auto"`）。
 - **输出**：`task_id`、初始状态与时间戳。
 
 ### 3.3 `image.edit`

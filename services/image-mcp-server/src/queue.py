@@ -120,14 +120,14 @@ class TaskQueueManager:
                     else:
                         raise ValueError(f"未知的任务动作: {job.action}")
 
-                    duration = time.time() - start_time
+                    duration = round(time.time() - start_time, 2)
                     self.tasks.update_status(
                         job.task_id,
                         status="completed",
                         duration_seconds=duration,
                     )
                 except Exception as exc:
-                    duration = time.time() - start_time
+                    duration = round(time.time() - start_time, 2)
                     self.tasks.update_status(
                         job.task_id,
                         status="failed",
@@ -144,14 +144,16 @@ class TaskQueueManager:
         model = p.get("model", "")
         aspect_ratio = p.get("aspect_ratio", "16:9")
         resolution = p.get("resolution", "2k")
+        quality = p.get("quality", "high")
+        background = p.get("background", "auto")
 
         prefer_4k = resolution.lower() == "4k"
         size_map = {
             "16:9": "2048x1152",
             "9:16": "1152x2048",
             "1:1": "1024x1024",
-            "4:3": "1600x1200",
-            "3:4": "1200x1600",
+            "4:3": "1792x1344",
+            "3:4": "1344x1792",
         }
         size = size_map.get(aspect_ratio, "2048x1152")
 
@@ -165,6 +167,8 @@ class TaskQueueManager:
                 prompt=prompt,
                 size=size,
                 prefer_4k=prefer_4k,
+                quality=quality,
+                background=background,
                 model=model or DEFAULT_IMAGE_MODEL,
             )
 
@@ -176,10 +180,12 @@ class TaskQueueManager:
             media_type="image/png",
             metadata={
                 "engine": engine,
-                "model": model,
+                "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
                 "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
                 "resolution": resolution,
+                "quality": quality,
+                "background": background,
             },
         )
         self.tasks.update_status(job.task_id, "running", artifact_id=record.artifact_id)
@@ -189,10 +195,22 @@ class TaskQueueManager:
         prompt = p.get("prompt", "")
         engine = job.engine.lower()
         source_id = p.get("source_artifact_id", "")
+        ref_ids = p.get("reference_artifact_ids", [])
         mask_id = p.get("mask_artifact_id")
+        model = p.get("model", "")
+        size = p.get("size", "2048x1152")
+        quality = p.get("quality", "auto")
+        background = p.get("background", "auto")
 
         source_rec = self.artifacts.get(source_id, job.project_id)
         source_bytes = self.artifacts.content_path(source_rec).read_bytes()
+
+        source_bytes_list: list[bytes] = [source_bytes]
+        if ref_ids and isinstance(ref_ids, list):
+            for rid in ref_ids:
+                if rid and rid != source_id:
+                    rec = self.artifacts.get(rid, job.project_id)
+                    source_bytes_list.append(self.artifacts.content_path(rec).read_bytes())
 
         mask_bytes = None
         if mask_id:
@@ -202,15 +220,18 @@ class TaskQueueManager:
         if engine == "gemini":
             img_bytes = self.gemini_provider.generate(
                 prompt=prompt,
-                model=DEFAULT_GEMINI_MODEL,
+                model=model or DEFAULT_GEMINI_MODEL,
                 source_image_bytes=source_bytes,
             )
         else:
             img_bytes = self.codex_provider.edit(
                 prompt=prompt,
-                source_bytes=source_bytes,
+                source_bytes=source_bytes_list if len(source_bytes_list) > 1 else source_bytes,
                 mask_bytes=mask_bytes,
-                model=DEFAULT_IMAGE_MODEL,
+                size=size or "2048x1152",
+                quality=quality,
+                background=background,
+                model=model or DEFAULT_IMAGE_MODEL,
             )
 
         filename = f"edit-{job.task_id}.png"
@@ -221,9 +242,14 @@ class TaskQueueManager:
             media_type="image/png",
             metadata={
                 "engine": engine,
+                "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
                 "source_artifact_id": source_id,
+                "reference_artifact_ids": ref_ids,
                 "mask_artifact_id": mask_id,
                 "prompt": prompt,
+                "size": size,
+                "quality": quality,
+                "background": background,
             },
         )
         self.tasks.update_status(job.task_id, "running", artifact_id=record.artifact_id)

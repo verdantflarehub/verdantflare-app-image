@@ -39,6 +39,32 @@ class TestServer(unittest.TestCase):
             resp_health = client.get("/health")
             self.assertEqual(resp_health.status_code, 200)
 
+            # 测试携带正确 Bearer Token 的 MCP 初始化握手
+            init_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-agent", "version": "1.0"},
+                },
+            }
+            resp_mcp = client.post(
+                "/image",
+                json=init_payload,
+                headers={
+                    "Authorization": "Bearer test-secret-token",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, text/event-stream",
+                },
+            )
+            self.assertEqual(resp_mcp.status_code, 200)
+            mcp_data = resp_mcp.json()
+            self.assertEqual(mcp_data["jsonrpc"], "2.0")
+            self.assertEqual(mcp_data["id"], 1)
+            self.assertIn("capabilities", mcp_data["result"])
+
 
 if __name__ == "__main__":
     unittest.main()

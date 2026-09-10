@@ -276,10 +276,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           'canceled': '⏹️ 已取消'
         }[t.status] || t.status;
 
-        const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : '--';
+        const dur = t.duration_seconds > 0 ? `${Math.round(t.duration_seconds)}s` : '--';
         const dateStr = t.created_at ? new Date(t.created_at).toLocaleTimeString() : '--';
         const engineLabel = t.engine === 'gemini' ? 'Gemini' : 'Codex';
-        const modelLabel = t.model || (t.engine === 'gemini' ? 'gemini-3.1-f' : 'gpt-image-2');
+        const modelLabel = t.model || (t.engine === 'gemini' ? 'gemini-3.1-f' : 'gpt-image-2.5-sunburst');
 
         return `
           <tr class="hover:bg-slate-800/40 transition">
@@ -313,7 +313,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       document.getElementById('modalTaskIdBadge').innerText = t.task_id;
       document.getElementById('modalEngine').innerText = t.engine;
       document.getElementById('modalModel').innerText = t.model || '--';
-      document.getElementById('modalDuration').innerText = t.duration_seconds ? `${t.duration_seconds.toFixed(2)}s` : '--';
+      document.getElementById('modalDuration').innerText = t.duration_seconds ? `${Math.round(t.duration_seconds)}s` : '--';
       document.getElementById('modalStatus').innerText = t.status;
       document.getElementById('modalArtifactId').innerText = t.artifact_id || '未生成';
       document.getElementById('modalPrompt').innerText = (t.request_params && t.request_params.prompt) || t.prompt_preview || '--';
@@ -464,17 +464,19 @@ async def api_create_task(request: Request) -> Response:
     if not prompt:
         return JSONResponse({"error": "prompt_is_required"}, status_code=400)
 
-    engine = str(body.get("engine", "gemini")).strip().lower()
+    engine = str(body.get("engine", "codex")).strip().lower()
     if engine not in ("codex", "gemini"):
-        engine = "gemini"
+        engine = "codex"
 
     aspect_ratio = str(body.get("aspect_ratio", "16:9")).strip()
     resolution = str(body.get("resolution", "2k")).strip()
-    quality = str(body.get("quality", "auto")).strip()
+    quality = str(body.get("quality", "hd")).strip()
+    if not quality or quality == "auto":
+        quality = "hd"
 
     model = str(body.get("model", "")).strip()
     resolved_model = model or (
-        "gpt-image-2" if engine == "codex" else "gemini-3.1-flash-image"
+        "gpt-image-2.5-sunburst" if engine == "codex" else "gemini-3.1-flash-image"
     )
 
     params = {

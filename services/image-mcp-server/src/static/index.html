@@ -611,6 +611,7 @@
       line-height: 1.6;
       display: -webkit-box;
       -webkit-line-clamp: 2;
+      line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
@@ -825,7 +826,7 @@
           <p class="market-kicker">VERDANTFLARE IMAGE STATION · FLEET OBSERVABILITY</p>
           <h1>双核生图任务与资产工作台</h1>
           <p>
-            整合 OpenAI <code>gpt-image-2</code> 与 Gemini <code>gemini-3.1-flash-image</code> 双生图引擎。
+            整合 OpenAI <code>gpt-image-2.5-sunburst</code> 与 Gemini <code>gemini-3.1-flash-image</code> 双生图引擎。
             基于 SQLite WAL 任务持久化与信号量隔离机制，实现高并发排队与生成资产追踪。
           </p>
           <div style="margin-top: 24px; display: flex; gap: 12px; align-items: center;">
@@ -907,7 +908,7 @@
             <select id="filterEngine" onchange="applyFilters()">
               <option value="all">全部引擎</option>
               <option value="gemini">Gemini 3.1 Flash</option>
-              <option value="codex">Codex (gpt-image-2)</option>
+              <option value="codex">Codex (gpt-image-2.5-sunburst)</option>
             </select>
           </label>
 
@@ -1068,8 +1069,8 @@
         <div>
           <label style="color: var(--muted); font-size: 11px; font-weight: 700; display: block; margin-bottom: 8px;">执行引擎</label>
           <select id="dispatchEngine" class="market-toolbar" style="position: static; width: 100%; background-color: rgba(244,241,232,0.08); padding-top:0; padding-bottom:0;">
+            <option value="codex" selected>Codex (gpt-image-2.5-sunburst 电影级微观细节 HD ~28s)</option>
             <option value="gemini">Gemini 3.1 Flash (高性价比极速 ~12s)</option>
-            <option value="codex">Codex (gpt-image-2 电影级渲染 ~28s)</option>
           </select>
         </div>
 
@@ -1242,6 +1243,14 @@
       }
     }
 
+    function formatDuration(sec) {
+      if (sec === null || sec === undefined || isNaN(sec)) return '--';
+      const n = Number(sec);
+      if (n <= 0) return '--';
+      const rounded = Math.round(n);
+      return `${rounded > 0 ? rounded : (n > 0 ? 1 : 0)}s`;
+    }
+
     function normalizeLiveTask(t) {
       const params = t.request_params || t.parameters || {};
       return {
@@ -1379,7 +1388,7 @@
         if (isCompleted && t.output_image) {
           mediaHtml = `<img src="${t.output_image}" alt="Output" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'400\\' height=\\'300\\'><rect fill=\\'%23101610\\' width=\\'100%\\' height=\\'100%\\'/><text fill=\\'%23686f66\\' x=\\'50%\\' y=\\'50%\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\'>预览归档</text></svg>';" />`;
         } else if (isRunning) {
-          mediaHtml = `<div style="display:flex; flex-direction:column; align-items:center; gap:8px;"><div class="dot-live" style="width:14px; height:14px;"></div><span style="font-size:12px; color:var(--green); font-family: monospace;">推理并发中 (${t.duration || 0}s)</span></div>`;
+          mediaHtml = `<div style="display:flex; flex-direction:column; align-items:center; gap:8px;"><div class="dot-live" style="width:14px; height:14px;"></div><span style="font-size:12px; color:var(--green); font-family: monospace;">推理并发中 (${Math.round(t.duration || 0)}s)</span></div>`;
         } else if (isQueued) {
           mediaHtml = `<div style="display:flex; flex-direction:column; align-items:center; gap:6px;"><span style="font-size:24px; color:var(--amber);">⏳</span><span style="font-size:12px; color:var(--amber); font-family: monospace;">排队调度中</span></div>`;
         } else {
@@ -1409,7 +1418,7 @@
               <div>
                 <div class="card-title-row">
                   <span>${t.id.slice(-14)}</span>
-                  <span>${t.duration ? t.duration + 's' : '--'}</span>
+                  <span>${formatDuration(t.duration)}</span>
                 </div>
                 <p class="card-prompt" style="margin-top: 6px;">${t.prompt || '无提示词'}</p>
               </div>
@@ -1462,7 +1471,7 @@
             <td><div>${t.type.toUpperCase()}</div><div style="color: var(--muted); font-size: 11px;">${t.size}</div></td>
             <td style="max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: sans-serif; color: rgba(244,241,232,0.8);">${t.prompt}</td>
             <td>${statusBadge}</td>
-            <td style="color: var(--paper); font-weight: 600;">${t.duration ? t.duration + 's' : '--'}</td>
+            <td style="color: var(--paper); font-weight: 600;">${formatDuration(t.duration)}</td>
             <td style="color: var(--muted);">${t.created_at?.replace('T', ' ').split('+')[0] || ''}</td>
             <td style="text-align: right;">
               <button class="button" style="min-height: 28px; padding: 0 10px; font-size: 11px;" onclick="openInspector('${t.id}'); event.stopPropagation();">详情</button>
@@ -1480,7 +1489,7 @@
       document.getElementById('modalTaskId').innerText = task.id;
       document.getElementById('modalEngine').innerText = task.engine.toUpperCase();
       document.getElementById('modalModel').innerText = task.model || '--';
-      document.getElementById('modalDuration').innerText = task.duration ? `${task.duration}s` : '排队中';
+      document.getElementById('modalDuration').innerText = task.duration > 0 ? formatDuration(task.duration) : (task.status === 'running' ? '推理中' : '排队中');
       document.getElementById('modalSize').innerText = task.size || '1024x1024';
       document.getElementById('modalArtifactId').innerText = task.artifact_id || '未生成句柄';
       document.getElementById('modalPrompt').innerText = task.prompt || '--';

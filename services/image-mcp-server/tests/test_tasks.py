@@ -54,7 +54,7 @@ class TestTasks(unittest.TestCase):
                 idempotency_key="unit-2/attempt-1",
                 engine="codex",
                 request_params={"prompt": "anime character"},
-                model="gpt-image-2",
+                model="gpt-image-2.5-sunburst",
             )
             store.update_status(t3.task_id, "failed", error="upstream timeout", duration_seconds=5.0)
 
@@ -103,5 +103,52 @@ class TestTasks(unittest.TestCase):
             self.assertIn("服务重启", recovered_task.error)
 
 
+class TestCodexProvider(unittest.TestCase):
+    def test_codex_spec_normalization_and_4k_resolution(self):
+        from src.providers.codex import (
+            CodexProvider,
+            normalize_background,
+            normalize_quality,
+        )
+
+        # 1. 质量档位规范化测试
+        self.assertEqual(normalize_quality("auto"), "auto")
+        self.assertEqual(normalize_quality("high"), "high")
+        self.assertEqual(normalize_quality("xhigh"), "xhigh")
+        self.assertEqual(normalize_quality("max"), "max")
+        self.assertEqual(normalize_quality("medium"), "medium")
+        self.assertEqual(normalize_quality("low"), "low")
+        self.assertEqual(normalize_quality("hd"), "high")  # 兼容映射
+        self.assertEqual(normalize_quality("standard"), "medium")  # 兼容映射
+        self.assertEqual(normalize_quality(None), "auto")
+
+        # 2. 背景模式规范化测试
+        self.assertEqual(normalize_background("transparent"), "transparent")
+        self.assertEqual(normalize_background("opaque"), "opaque")
+        self.assertEqual(normalize_background("auto"), "auto")
+        self.assertEqual(normalize_background(None), "auto")
+
+        # 3. 4K 官方规格解析测试（单边必须 <= 3840，必须为 16 的整倍数）
+        provider = CodexProvider(api_key="test-key")
+        test_sizes = [
+            ("2048x1152", "3840x2160"),
+            ("1152x2048", "2160x3840"),
+            ("1024x1024", "2048x2048"),
+            ("1792x1344", "2880x2160"),
+            ("1344x1792", "2160x2880"),
+            ("1536x1024", "3072x2048"),
+            ("1024x1536", "2048x3072"),
+        ]
+        for base, expected in test_sizes:
+            res = provider._resolve_target_size(base, prefer_4k=True)
+            self.assertEqual(res, expected)
+            w, h = map(int, res.split("x"))
+            self.assertLessEqual(w, 3840)
+            self.assertLessEqual(h, 3840)
+            self.assertEqual(w % 16, 0)
+            self.assertEqual(h % 16, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

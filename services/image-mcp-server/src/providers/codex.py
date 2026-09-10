@@ -9,11 +9,41 @@ import urllib.request
 import uuid
 from typing import Any
 
-# 用户明确规范：Codex 生图模型权威指定为 gpt-image-2
-DEFAULT_IMAGE_MODEL = "gpt-image-2"
+# 官方规范：Codex 生图模型主力为 gpt-image-2.5-sunburst (画质基准)，亦支持 gpt-image-2.5-flare (极速响应) 与 gpt-image-2 (向下兼容)
+DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst"
 DEFAULT_SESSION_MODEL = "gpt-6-astra"
 DEFAULT_SIZE = "2048x1152"
-DEFAULT_4K_SIZE = "4096x2304"
+DEFAULT_4K_SIZE = "3840x2160"
+DEFAULT_QUALITY = "high"
+DEFAULT_BACKGROUND = "auto"
+
+# 官方支持质量档位：auto, low, medium, high, xhigh, max
+VALID_QUALITIES = {"auto", "low", "medium", "high", "xhigh", "max"}
+# 官方支持背景模式：auto, opaque, transparent
+VALID_BACKGROUNDS = {"auto", "opaque", "transparent"}
+
+
+def normalize_quality(quality: str | None) -> str:
+    if not quality:
+        return "auto"
+    q = quality.lower().strip()
+    if q in VALID_QUALITIES:
+        return q
+    # 历史兼容映射
+    if q == "hd":
+        return "high"
+    if q == "standard":
+        return "medium"
+    return "auto"
+
+
+def normalize_background(background: str | None) -> str:
+    if not background:
+        return "auto"
+    bg = background.lower().strip()
+    if bg in VALID_BACKGROUNDS:
+        return bg
+    return "auto"
 
 
 class CodexProviderError(Exception):
@@ -38,6 +68,33 @@ class CodexProvider:
             or os.environ.get("CODEX_RELAY_API_KEY")
             or ""
         )
+
+    def _resolve_target_size(self, size: str, prefer_4k: bool) -> str:
+        if not prefer_4k:
+            return size
+        # 4K 分辨率动态映射，严格遵循 GPT Image 2.5 官方单边上限 <= 3840 像素且为 16 的整数倍
+        mapping_4k = {
+            "2048x1152": "3840x2160",  # 16:9 4K (8,294,400 像素，官方允许上限)
+            "1152x2048": "2160x3840",  # 9:16 4K
+            "1024x1024": "2048x2048",  # 1:1 2K 正方形
+            "1792x1344": "2880x2160",  # 4:3 4K
+            "1344x1792": "2160x2880",  # 3:4 4K
+            "1536x1024": "3072x2048",  # 3:2 4K
+            "1024x1536": "2048x3072",  # 2:3 4K
+        }
+        if size in mapping_4k:
+            return mapping_4k[size]
+        if "x" in size:
+            try:
+                w, h = map(int, size.split("x", 1))
+                if w < h:
+                    return "2160x3840"
+                if w == h:
+                    return "2048x2048"
+                return "3840x2160"
+            except ValueError:
+                pass
+        return DEFAULT_4K_SIZE
 
     def _ensure_auth(self) -> None:
         if not self.api_key:
@@ -106,20 +163,26 @@ class CodexProvider:
         prompt: str,
         size: str = DEFAULT_SIZE,
         prefer_4k: bool = False,
-        quality: str = "auto",
+        quality: str = DEFAULT_QUALITY,
+        background: str = DEFAULT_BACKGROUND,
         model: str = DEFAULT_IMAGE_MODEL,
     ) -> bytes:
         self._ensure_auth()
-        target_size = DEFAULT_4K_SIZE if prefer_4k else size
+        target_size = self._resolve_target_size(size, prefer_4k)
+        target_quality = normalize_quality(quality)
+        target_bg = normalize_background(background)
 
-        tool = {
+        tool: dict[str, Any] = {
             "type": "image_generation",
-            "model": model,  # 指定 gpt-image-2
+            "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
             "size": target_size,
-            "quality": quality,
+            "quality": target_quality,
             "output_format": "png",
             "partial_images": 3,
         }
+        if target_bg != "auto":
+            tool["background"] = target_bg
+
         payload = {
             "model": DEFAULT_SESSION_MODEL,
             "input": prompt,
@@ -148,8 +211,15 @@ class CodexProvider:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             # 4K 回退支持
-            if prefer_4k and target_size == DEFAULT_4K_SIZE:
-                return self.generate(prompt, size=size, prefer_4k=False, quality=quality, model=model)
+            if prefer_4k and target_size != size:
+                return self.generate(
+                    prompt,
+                    size=size,
+                    prefer_4k=False,
+                    quality=quality,
+                    background=background,
+                    model=model,
+                )
             raise CodexProviderError(f"Codex 生图请求失败 HTTP {exc.code}: {detail}") from exc
         except Exception as exc:
             raise CodexProviderError(f"Codex 生成执行异常: {exc}") from exc
@@ -157,9 +227,11 @@ class CodexProvider:
     def edit(
         self,
         prompt: str,
-        source_bytes: bytes,
+        source_bytes: bytes | list[bytes],
         mask_bytes: bytes | None = None,
         size: str = DEFAULT_SIZE,
+        quality: str = DEFAULT_QUALITY,
+        background: str = DEFAULT_BACKGROUND,
         model: str = DEFAULT_IMAGE_MODEL,
     ) -> bytes:
         self._ensure_auth()
@@ -167,19 +239,35 @@ class CodexProvider:
         boundary = f"----CodexImageBoundary{uuid.uuid4().hex}"
         body = bytearray()
 
-        fields = {
-            "model": model,  # gpt-image-2
+        target_quality = normalize_quality(quality)
+        target_bg = normalize_background(background)
+
+        fields: dict[str, Any] = {
+            "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
             "prompt": prompt,
             "size": size,
+            "output_format": "png",
             "n": 1,
         }
+        if target_quality != "auto":
+            fields["quality"] = target_quality
+        if target_bg != "auto":
+            fields["background"] = target_bg
+
         for k, v in fields.items():
             body.extend(f"--{boundary}\r\n".encode("utf-8"))
             body.extend(f'Content-Disposition: form-data; name="{k}"\r\n\r\n'.encode("utf-8"))
             body.extend(str(v).encode("utf-8"))
             body.extend(b"\r\n")
 
-        files = [("image", "source.png", source_bytes, "image/png")]
+        # 支持多参考图（单个 bytes 或 list[bytes]）
+        raw_list = source_bytes if isinstance(source_bytes, list) else [source_bytes]
+        files = []
+        for idx, b_data in enumerate(raw_list):
+            field_name = "image" if idx == 0 else f"image_{idx}"
+            filename = f"source_{idx}.png" if idx > 0 else "source.png"
+            files.append((field_name, filename, b_data, "image/png"))
+
         if mask_bytes:
             files.append(("mask", "mask.png", mask_bytes, "image/png"))
 
