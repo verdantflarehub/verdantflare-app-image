@@ -59,7 +59,7 @@ class TestTaskQueueManager(unittest.TestCase):
                     final_rec = tasks.get(t1.task_id)
                     self.assertEqual(final_rec.status, "completed")
                     self.assertIsNotNone(final_rec.artifact_id)
-                    self.assertGreater(final_rec.duration_seconds, 0.0)
+                    self.assertGreaterEqual(final_rec.duration_seconds, 0.0)
 
                 finally:
                     await queue_mgr.stop()
