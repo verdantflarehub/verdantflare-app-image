@@ -76,6 +76,7 @@ async def image_generate(
     resolution: str = "2k",
     quality: str = "high",
     background: str = "auto",
+    instructions: str | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词生成图像。
 
@@ -88,6 +89,7 @@ async def image_generate(
     - resolution: "2k" (默认), "4k" (对齐 3840x2160 / 2160x3840 官方尺寸约束)
     - quality: "auto", "low", "medium", "high", "xhigh", "max" (历史 "hd" 兼容映射为 "high")
     - background: "auto", "transparent" (纯净透明通道，输出 PNG), "opaque"
+    - instructions: 传递给上游主控中介模型的系统指令 (默认注入逐字直传规范)
     """
     resolved_model = model or (
         DEFAULT_IMAGE_MODEL if engine.lower() == "codex" else DEFAULT_GEMINI_MODEL
@@ -101,6 +103,8 @@ async def image_generate(
         "quality": quality,
         "background": background,
     }
+    if instructions:
+        params["instructions"] = str(instructions).strip()
     task = tasks.create(
         project_id=project_id,
         idempotency_key=idempotency_key,

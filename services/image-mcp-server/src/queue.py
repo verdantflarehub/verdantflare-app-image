@@ -146,6 +146,7 @@ class TaskQueueManager:
         resolution = p.get("resolution", "2k")
         quality = p.get("quality", "high")
         background = p.get("background", "auto")
+        instructions = p.get("instructions")
 
         prefer_4k = resolution.lower() == "4k"
         size_map = {
@@ -170,6 +171,7 @@ class TaskQueueManager:
                 quality=quality,
                 background=background,
                 model=model or DEFAULT_IMAGE_MODEL,
+                instructions=instructions,
             )
 
         filename = f"gen-{job.task_id}.png"
@@ -186,6 +188,7 @@ class TaskQueueManager:
                 "resolution": resolution,
                 "quality": quality,
                 "background": background,
+                "instructions": instructions or "verbatim",
             },
         )
         self.tasks.update_status(job.task_id, "running", artifact_id=record.artifact_id)

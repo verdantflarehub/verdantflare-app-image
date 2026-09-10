@@ -487,6 +487,9 @@ async def api_create_task(request: Request) -> Response:
         "resolution": resolution,
         "quality": quality,
     }
+    instructions = body.get("instructions")
+    if instructions:
+        params["instructions"] = str(instructions).strip()
 
     import uuid
     idempotency_key = str(body.get("idempotency_key", "")).strip() or f"ui-{uuid.uuid4().hex[:12]}"

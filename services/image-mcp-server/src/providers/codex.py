@@ -17,6 +17,14 @@ DEFAULT_4K_SIZE = "3840x2160"
 DEFAULT_QUALITY = "high"
 DEFAULT_BACKGROUND = "auto"
 
+# 官方规范方案 A：注入逐字直传系统指令，彻底防止中介模型 (如 gpt-6-astra) 二次改写、概括或稀释专业提示词
+DEFAULT_VERBATIM_INSTRUCTIONS = (
+    "When invoking the image_generation tool, use the user's image prompt verbatim. "
+    "Do not rewrite, expand, summarize, embellish, translate, normalize punctuation, "
+    "or add or remove visual details or constraints. Preserve the original language, "
+    "wording, capitalization, quotes, and punctuation exactly."
+)
+
 # 官方支持质量档位：auto, low, medium, high, xhigh, max
 VALID_QUALITIES = {"auto", "low", "medium", "high", "xhigh", "max"}
 # 官方支持背景模式：auto, opaque, transparent
@@ -166,11 +174,17 @@ class CodexProvider:
         quality: str = DEFAULT_QUALITY,
         background: str = DEFAULT_BACKGROUND,
         model: str = DEFAULT_IMAGE_MODEL,
+        instructions: str | None = None,
     ) -> bytes:
         self._ensure_auth()
         target_size = self._resolve_target_size(size, prefer_4k)
         target_quality = normalize_quality(quality)
         target_bg = normalize_background(background)
+        target_instructions = (
+            instructions
+            or os.environ.get("CODEX_VERBATIM_INSTRUCTIONS")
+            or DEFAULT_VERBATIM_INSTRUCTIONS
+        )
 
         tool: dict[str, Any] = {
             "type": "image_generation",
@@ -185,6 +199,7 @@ class CodexProvider:
 
         payload = {
             "model": DEFAULT_SESSION_MODEL,
+            "instructions": target_instructions,
             "input": prompt,
             "tools": [tool],
             "tool_choice": {"type": "image_generation"},
