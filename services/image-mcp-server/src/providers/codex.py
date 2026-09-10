@@ -137,64 +137,6 @@ class CodexProvider:
         if not self.api_key:
             raise CodexProviderError("缺少 API 凭据，请配置 OPENAI_API_KEY (或 OPENAI_BASE_URL)")
 
-    def _parse_sse(self, response: urllib.response.addinfourl) -> list[str]:
-        data_lines: list[str] = []
-        final_results: list[str] = []
-        partial_results: dict[int, str] = {}
-
-        def flush_item() -> None:
-            nonlocal data_lines
-            if not data_lines:
-                return
-            raw = "\n".join(data_lines).strip()
-            data_lines = []
-            if not raw or raw == "[DONE]":
-                return
-            try:
-                item = json.loads(raw)
-            except json.JSONDecodeError:
-                return
-
-            event_type = item.get("type", "")
-            if event_type == "response.image_generation_call.partial_image":
-                b64 = item.get("partial_image_b64")
-                idx = item.get("partial_image_index", len(partial_results))
-                if isinstance(b64, str) and b64:
-                    try:
-                        partial_results[int(idx)] = b64
-                    except (TypeError, ValueError):
-                        pass
-            elif event_type in {"response.completed", "response.output_item.done", "image_generation_call"}:
-                self._collect_b64(item, final_results)
-
-        for raw_line in response:
-            line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-            if not line:
-                flush_item()
-                continue
-            if line.startswith(":"):
-                continue
-            if line.startswith("data:"):
-                data_lines.append(line[len("data:") :].strip())
-
-        flush_item()
-        if final_results:
-            return final_results
-        if partial_results:
-            return [partial_results[idx] for idx in sorted(partial_results)]
-        raise CodexProviderError("Responses SSE 流中未收到有效图片 Base64 数据")
-
-    def _collect_b64(self, val: Any, res: list[str]) -> None:
-        if isinstance(val, dict):
-            for k, v in val.items():
-                if k in {"result", "b64_json", "partial_image_b64"} and isinstance(v, str) and v:
-                    res.append(v)
-                else:
-                    self._collect_b64(v, res)
-        elif isinstance(val, list):
-            for item in val:
-                self._collect_b64(item, res)
-
     def generate(
         self,
         prompt: str,
@@ -209,36 +151,21 @@ class CodexProvider:
         target_size = self._resolve_target_size(size, prefer_4k)
         target_quality = normalize_quality(quality)
         target_bg = normalize_background(background)
-        target_instructions = (
-            instructions
-            or os.environ.get("CODEX_VERBATIM_INSTRUCTIONS")
-            or DEFAULT_VERBATIM_INSTRUCTIONS
-        )
         sanitized_prompt = (
             sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
         )
 
-        tool: dict[str, Any] = {
-            "type": "image_generation",
+        payload: dict[str, Any] = {
             "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
+            "prompt": sanitized_prompt,
             "size": target_size,
             "quality": target_quality,
-            "output_format": "png",
-            "partial_images": 3,
+            "response_format": "b64_json",
         }
         if target_bg != "auto":
-            tool["background"] = target_bg
+            payload["background"] = target_bg
 
-        payload = {
-            "model": DEFAULT_SESSION_MODEL,
-            "instructions": target_instructions,
-            "input": sanitized_prompt,
-            "tools": [tool],
-            "tool_choice": {"type": "image_generation"},
-            "stream": True,
-        }
-
-        endpoint = f"{self.base_url}/responses"
+        endpoint = f"{self.base_url}/images/generations"
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             endpoint,
@@ -253,8 +180,11 @@ class CodexProvider:
 
         try:
             with urllib.request.urlopen(req, timeout=300) as resp:
-                images = self._parse_sse(resp)
-                return base64.b64decode(images[-1])
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                items = resp_data.get("data", [])
+                if not items or "b64_json" not in items[0]:
+                    raise CodexProviderError("Codex /images/generations 未返回有效图片 Base64 数据")
+                return base64.b64decode(items[0]["b64_json"])
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             # 4K 回退支持
@@ -266,6 +196,7 @@ class CodexProvider:
                     quality=quality,
                     background=background,
                     model=model,
+                    instructions=instructions,
                 )
             raise CodexProviderError(f"Codex 生图请求失败 HTTP {exc.code}: {detail}") from exc
         except Exception as exc:
