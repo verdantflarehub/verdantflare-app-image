@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 from src.providers.codex import (
     CodexProvider,
     CodexProviderError,
+    CodexPolicyRefusalError,
+    format_http_error_detail,
     DEFAULT_VERBATIM_INSTRUCTIONS,
     DEFAULT_SESSION_MODEL,
     DEFAULT_IMAGE_MODEL,
@@ -162,6 +164,85 @@ class TestCodexProvider(unittest.TestCase):
         # 验证 4K 映射生效：9:16 从 1152x2048 映射为 2160x3840
         self.assertIn(b'name="size"\r\n\r\n2160x3840\r\n', captured_data)
         self.assertIn(b'name="model"\r\n\r\ngpt-image-2.5-sunburst\r\n', captured_data)
+
+    @patch("urllib.request.urlopen")
+    def test_generate_via_responses_extracts_chinese_refusal_text(self, mock_urlopen):
+        mock_resp = MagicMock()
+        sse_body = [
+            b"event: response.output_item.done\r\n",
+            b'data: {"type": "output_item.done", "item": {"type": "message", "content": [{"type": "output_text", "text": "\xe6\x8a\xb1\xe6\xad\x89\xef\xbc\x8c\xe8\xbf\x99\xe4\xb8\xaa\xe8\xaf\xb7\xe6\xb1\x82\xe5\x8c\x85\xe5\x90\xab\xe5\xb8\xa6\xe6\x9c\x89\xe6\x80\xa7\xe5\x8c\x96\xe6\x84\x8f\xe5\x91\xb3\xe7\x9a\x84\xe8\xa7\x86\xe8\xa7\x89\xef\xbc\x8c\xe6\x88\x91\xe6\x97\xa0\xe6\xb3\x95\xe7\x94\x9f\xe6\x88\x90\xe3\x80\x82"}]}}\r\n',
+            b"\r\n",
+            b"event: response.completed\r\n",
+            b"data: [DONE]\r\n",
+            b"\r\n",
+        ]
+        mock_resp.__iter__.return_value = iter(sse_body)
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        with self.assertRaises(CodexPolicyRefusalError) as ctx:
+            provider._generate_via_responses(
+                prompt="测试敏感提示词",
+                size="1152x2048",
+                quality="high",
+                background="auto",
+                model="gpt-image-2.5-sunburst",
+            )
+        self.assertIn("上游安全审查拦截拒止", str(ctx.exception))
+        self.assertIn("带有性化意味", str(ctx.exception))
+
+    @patch("urllib.request.urlopen")
+    def test_generate_via_responses_extracts_english_sexualized_refusal(self, mock_urlopen):
+        mock_resp = MagicMock()
+        sse_body = [
+            b"event: response.output_item.done\r\n",
+            b'data: {"type": "output_item.done", "item": {"type": "message", "content": [{"type": "output_text", "text": "I can\xe2\x80\x99t generate that image because the no-pants styling was flagged as sexualized."}]}}\r\n',
+            b"\r\n",
+            b"event: response.completed\r\n",
+            b"data: [DONE]\r\n",
+            b"\r\n",
+        ]
+        mock_resp.__iter__.return_value = iter(sse_body)
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        with self.assertRaises(CodexPolicyRefusalError) as ctx:
+            provider._generate_via_responses(
+                prompt="no-pants styling",
+                size="1152x2048",
+                quality="high",
+                background="auto",
+                model="gpt-image-2.5-sunburst",
+            )
+        self.assertIn("flagged as sexualized", str(ctx.exception))
+
+    @patch("urllib.request.urlopen")
+    def test_generate_re_raises_policy_refusal_without_fallback(self, mock_urlopen):
+        mock_resp = MagicMock()
+        sse_body = [
+            b"event: response.output_item.done\r\n",
+            b'data: {"type": "output_item.done", "item": {"type": "message", "content": [{"type": "output_text", "text": "Flagged as sexualized."}]}}\r\n',
+            b"\r\n",
+            b"event: response.completed\r\n",
+            b"data: [DONE]\r\n",
+            b"\r\n",
+        ]
+        mock_resp.__iter__.return_value = iter(sse_body)
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        provider.prefer_responses = True
+        with self.assertRaises(CodexPolicyRefusalError) as ctx:
+            provider.generate(prompt="test prompt")
+        self.assertIn("Flagged as sexualized", str(ctx.exception))
+
+    def test_format_http_error_detail(self):
+        body = json.dumps({"error": {"message": "Upstream refused", "code": "content_policy_violation"}})
+        formatted = format_http_error_detail(400, body)
+        self.assertEqual(formatted, "HTTP 400 [content_policy_violation]: Upstream refused")
 
 
 if __name__ == "__main__":

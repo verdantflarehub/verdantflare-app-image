@@ -126,12 +126,15 @@ class TaskQueueManager:
                         status="completed",
                         duration_seconds=duration,
                     )
+                    print(f"✅ [TaskQueue] 任务成功: {job.task_id} (action: {job.action}, engine: {job.engine}) 耗时: {duration}s", flush=True)
                 except Exception as exc:
                     duration = round(time.time() - start_time, 2)
+                    err_msg = str(exc)
+                    print(f"❌ [TaskQueue] 任务失败: {job.task_id} (action: {job.action}, engine: {job.engine}, model: {job.params.get('model')}) 耗时: {duration}s, 错误详情: {err_msg}", flush=True)
                     self.tasks.update_status(
                         job.task_id,
                         status="failed",
-                        error=str(exc),
+                        error=err_msg,
                         duration_seconds=duration,
                     )
                 finally:

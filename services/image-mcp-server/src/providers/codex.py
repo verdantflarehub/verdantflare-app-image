@@ -83,6 +83,57 @@ class CodexProviderError(Exception):
     pass
 
 
+class CodexPolicyRefusalError(CodexProviderError):
+    """上游安全审查或内容政策拦截拒止异常，包含模型的原始拒止说明与整改建议。"""
+    pass
+
+
+def extract_sse_model_texts_and_errors(events: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    """从 Responses SSE 事件流中提取中介模型的文本回复（如拒止理由、建议）以及工具执行错误。"""
+    texts: list[str] = []
+    errors: list[str] = []
+    for ev in events:
+        ev_type = str(ev.get("type", ""))
+        if ev_type in ("response.failed", "error"):
+            errors.append(str(ev.get("error") or ev))
+
+        # 兼容包含 item 的各类事件（如 response.output_item.done, output_item.done 等）
+        item = ev.get("item")
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type == "message":
+                for c in item.get("content", []):
+                    if isinstance(c, dict) and c.get("type") == "output_text":
+                        t = c.get("text", "").strip()
+                        if t and t not in texts:
+                            texts.append(t)
+            elif item_type == "image_generation_call":
+                status = item.get("status")
+                if status and status != "completed":
+                    errors.append(f"image_generation_call status={status}")
+    return texts, errors
+
+
+def format_http_error_detail(status_code: int, raw_body: str) -> str:
+    """格式化 HTTP 错误响应体为结构化可读文本，提取上游真实错误信息。"""
+    try:
+        data = json.loads(raw_body)
+        err = data.get("error", {})
+        if isinstance(err, dict):
+            msg = err.get("message") or raw_body
+            code = err.get("code")
+            err_type = err.get("type")
+            prefix = f"HTTP {status_code}"
+            if code:
+                prefix += f" [{code}]"
+            elif err_type:
+                prefix += f" [{err_type}]"
+            return f"{prefix}: {msg}"
+    except Exception:
+        pass
+    return f"HTTP {status_code}: {raw_body}"
+
+
 def parse_sse_events(response) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     event_type = ""
@@ -267,6 +318,12 @@ class CodexProvider:
 
         b64_list = collect_b64(events)
         if not b64_list:
+            model_texts, sse_errors = extract_sse_model_texts_and_errors(events)
+            if model_texts:
+                refusal_msg = " ".join(model_texts)
+                raise CodexPolicyRefusalError(f"上游安全审查拦截拒止: {refusal_msg}")
+            if sse_errors:
+                raise CodexProviderError(f"Responses 工具调用失败: {'; '.join(sse_errors)}")
             for ev in events:
                 if ev.get("type") in ("response.failed", "error"):
                     raise CodexProviderError(f"Responses 失败: {ev}")
@@ -302,6 +359,9 @@ class CodexProvider:
                     model=model,
                     instructions=instructions,
                 )
+            except CodexPolicyRefusalError:
+                # 明确的安全审查拒止，严禁静默吞掉并回退（回退只会撞 502 并掩盖真相）
+                raise
             except Exception:
                 # 端点不可用或 mock 不支持时回退至 /images/generations
                 pass
@@ -339,6 +399,7 @@ class CodexProvider:
                 return base64.b64decode(items[0]["b64_json"])
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            formatted = format_http_error_detail(exc.code, detail)
             # 4K 回退支持
             if prefer_4k and target_size != size:
                 return self.generate(
@@ -350,7 +411,9 @@ class CodexProvider:
                     model=model,
                     instructions=instructions,
                 )
-            raise CodexProviderError(f"Codex 生图请求失败 HTTP {exc.code}: {detail}") from exc
+            raise CodexProviderError(f"Codex 生图请求失败: {formatted}") from exc
+        except CodexProviderError:
+            raise
         except Exception as exc:
             raise CodexProviderError(f"Codex 生成执行异常: {exc}") from exc
 
@@ -387,6 +450,9 @@ class CodexProvider:
                     source_bytes=raw_list,
                     instructions=instructions,
                 )
+            except CodexPolicyRefusalError:
+                # 明确的安全审查拒止，严禁静默吞掉并回退
+                raise
             except Exception:
                 pass
 
@@ -453,6 +519,7 @@ class CodexProvider:
                 return base64.b64decode(items[0]["b64_json"])
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            formatted = format_http_error_detail(exc.code, detail)
             # 4K 回退支持
             if prefer_4k and target_size != size:
                 return self.edit(
@@ -466,6 +533,8 @@ class CodexProvider:
                     model=model,
                     instructions=instructions,
                 )
-            raise CodexProviderError(f"Codex 图片编辑失败 HTTP {exc.code}: {detail}") from exc
+            raise CodexProviderError(f"Codex 图片编辑失败: {formatted}") from exc
+        except CodexProviderError:
+            raise
         except Exception as exc:
             raise CodexProviderError(f"Codex 编辑执行异常: {exc}") from exc
