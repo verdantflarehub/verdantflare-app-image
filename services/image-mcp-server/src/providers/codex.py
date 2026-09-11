@@ -12,13 +12,13 @@ from typing import Any
 
 # 官方规范：Codex 生图模型主力为 gpt-image-2.5-sunburst (画质基准)，亦支持 gpt-image-2.5-flare (极速响应) 与 gpt-image-2 (向下兼容)
 DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst"
-DEFAULT_SESSION_MODEL = "gpt-6-astra"
+DEFAULT_SESSION_MODEL = "gpt-5.6-luna"
 DEFAULT_SIZE = "2048x1152"
 DEFAULT_4K_SIZE = "3840x2160"
 DEFAULT_QUALITY = "high"
 DEFAULT_BACKGROUND = "auto"
 
-# 官方规范方案 A：注入逐字直传系统指令，彻底防止中介模型 (如 gpt-6-astra) 二次改写、概括或稀释专业提示词
+# 官方规范方案 A：注入逐字直传系统指令，彻底防止中介模型二次改写、概括或稀释专业提示词
 DEFAULT_VERBATIM_INSTRUCTIONS = (
     "When invoking the image_generation tool, use the user's image prompt verbatim. "
     "Do not rewrite, expand, summarize, embellish, translate, normalize punctuation, "
@@ -157,12 +157,18 @@ class CodexProvider:
             or os.environ.get("CODEX_RELAY_API_KEY")
             or ""
         )
+        self.session_model = (
+            os.environ.get("CODEX_SESSION_MODEL")
+            or os.environ.get("SUB2API_IMAGES_MAIN_MODEL")
+            or DEFAULT_SESSION_MODEL
+        )
         self.auto_sanitize_negative_prompts = (
             os.environ.get("CODEX_AUTO_SANITIZE_NEGATIVE_PROMPTS", "true").lower()
             in {"true", "1", "yes"}
         )
+        # 默认关闭 prefer_responses，全面落地方案 E：直接请求 sub2api 标准 /images/generations 与 /images/edits
         self.prefer_responses = (
-            os.environ.get("CODEX_PREFER_RESPONSES", "true").lower()
+            os.environ.get("CODEX_PREFER_RESPONSES", "false").lower()
             in {"true", "1", "yes"}
         )
         self.actor_auth = (
@@ -210,10 +216,12 @@ class CodexProvider:
         background: str,
         model: str,
         source_bytes: list[bytes] | None = None,
+        instructions: str | None = None,
     ) -> bytes:
         endpoint = f"{self.base_url}/responses"
         tool: dict[str, Any] = {
             "type": "image_generation",
+            "model": model,
             "size": size,
             "quality": quality if quality != "auto" else "high",
             "background": background,
@@ -230,7 +238,8 @@ class CodexProvider:
         user_content.append({"type": "input_text", "text": prompt})
 
         payload = {
-            "model": model,
+            "model": self.session_model,
+            "instructions": instructions or DEFAULT_VERBATIM_INSTRUCTIONS,
             "input": [{"type": "message", "role": "user", "content": user_content}],
             "tools": [tool],
             "tool_choice": {"type": "image_generation"},
@@ -282,7 +291,7 @@ class CodexProvider:
             sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
         )
 
-        # 1. 优先使用 OpenAI Responses API 流式生成，彻底避免中继网关上的非流式超时
+        # 1. 若显式配置 CODEX_PREFER_RESPONSES=true，优先使用 OpenAI Responses API 流式生成
         if self.prefer_responses:
             try:
                 return self._generate_via_responses(
@@ -291,12 +300,13 @@ class CodexProvider:
                     quality=target_quality,
                     background=target_bg,
                     model=model,
+                    instructions=instructions,
                 )
             except Exception:
                 # 端点不可用或 mock 不支持时回退至 /images/generations
                 pass
 
-        # 2. 回退模式：调用 /images/generations
+        # 2. 方案 E 正式链路：调用标准 /images/generations (由 sub2api 网关内部托管 gpt-5.6-luna + 逐字直传系统指令)
         payload: dict[str, Any] = {
             "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
             "prompt": sanitized_prompt,
@@ -350,29 +360,37 @@ class CodexProvider:
         source_bytes: bytes | list[bytes],
         mask_bytes: bytes | None = None,
         size: str = DEFAULT_SIZE,
+        prefer_4k: bool = False,
         quality: str = DEFAULT_QUALITY,
         background: str = DEFAULT_BACKGROUND,
         model: str = DEFAULT_IMAGE_MODEL,
+        instructions: str | None = None,
     ) -> bytes:
         self._ensure_auth()
         raw_list = source_bytes if isinstance(source_bytes, list) else [source_bytes]
+        target_size = self._resolve_target_size(size, prefer_4k)
         target_quality = normalize_quality(quality)
         target_bg = normalize_background(background)
         sanitized_prompt = (
             sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
         )
 
-        # 无 mask 的参考图引导生成优先走 Responses API 流式通道
+        # 1. 若显式开启 CODEX_PREFER_RESPONSES=true，无 mask 的参考图引导生成优先走 Responses API
         if self.prefer_responses and not mask_bytes:
-            return self._generate_via_responses(
-                prompt=sanitized_prompt,
-                size=size,
-                quality=target_quality,
-                background=target_bg,
-                model=model,
-                source_bytes=raw_list,
-            )
+            try:
+                return self._generate_via_responses(
+                    prompt=sanitized_prompt,
+                    size=target_size,
+                    quality=target_quality,
+                    background=target_bg,
+                    model=model,
+                    source_bytes=raw_list,
+                    instructions=instructions,
+                )
+            except Exception:
+                pass
 
+        # 2. 方案 E 正式链路：调用标准 /images/edits (由 sub2api 网关内部托管 gpt-5.6-luna + 逐字直传系统指令)
         endpoint = f"{self.base_url}/images/edits"
         boundary = f"----CodexImageBoundary{uuid.uuid4().hex}"
         body = bytearray()
@@ -380,7 +398,7 @@ class CodexProvider:
         fields: dict[str, Any] = {
             "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
             "prompt": sanitized_prompt,
-            "size": size,
+            "size": target_size,
             "output_format": "png",
             "n": 1,
         }
@@ -435,4 +453,19 @@ class CodexProvider:
                 return base64.b64decode(items[0]["b64_json"])
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            # 4K 回退支持
+            if prefer_4k and target_size != size:
+                return self.edit(
+                    prompt=prompt,
+                    source_bytes=source_bytes,
+                    mask_bytes=mask_bytes,
+                    size=size,
+                    prefer_4k=False,
+                    quality=quality,
+                    background=background,
+                    model=model,
+                    instructions=instructions,
+                )
             raise CodexProviderError(f"Codex 图片编辑失败 HTTP {exc.code}: {detail}") from exc
+        except Exception as exc:
+            raise CodexProviderError(f"Codex 编辑执行异常: {exc}") from exc

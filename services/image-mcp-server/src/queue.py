@@ -203,6 +203,7 @@ class TaskQueueManager:
         model = p.get("model", "")
         aspect_ratio = p.get("aspect_ratio")
         resolution = p.get("resolution", "2k")
+        prefer_4k = resolution.lower() == "4k"
         if aspect_ratio:
             size_map = {
                 "16:9": "2048x1152",
@@ -212,10 +213,12 @@ class TaskQueueManager:
                 "3:4": "1344x1792",
             }
             size = size_map.get(aspect_ratio, "2048x1152")
-            if resolution.lower() == "4k" and hasattr(self.codex_provider, "_resolve_target_size"):
+            if prefer_4k and hasattr(self.codex_provider, "_resolve_target_size"):
                 size = self.codex_provider._resolve_target_size(size, prefer_4k=True)
         else:
             size = p.get("size", "2048x1152")
+            if prefer_4k and hasattr(self.codex_provider, "_resolve_target_size"):
+                size = self.codex_provider._resolve_target_size(size, prefer_4k=True)
         quality = p.get("quality", "auto")
         background = p.get("background", "auto")
 
@@ -246,6 +249,7 @@ class TaskQueueManager:
                 source_bytes=source_bytes_list if len(source_bytes_list) > 1 else source_bytes,
                 mask_bytes=mask_bytes,
                 size=size or "2048x1152",
+                prefer_4k=prefer_4k,
                 quality=quality,
                 background=background,
                 model=model or DEFAULT_IMAGE_MODEL,

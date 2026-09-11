@@ -124,8 +124,44 @@ class TestCodexProvider(unittest.TestCase):
 
         self.assertEqual(result, b"fake-sse-image")
         self.assertEqual(captured_url, "https://api.openai.com/v1/responses")
-        self.assertEqual(captured_payload.get("model"), "gpt-image-2.5-sunburst")
+        self.assertEqual(captured_payload.get("model"), provider.session_model)
+        self.assertEqual(captured_payload.get("instructions"), DEFAULT_VERBATIM_INSTRUCTIONS)
+        self.assertEqual(captured_payload.get("tools")[0].get("model"), "gpt-image-2.5-sunburst")
         self.assertTrue(captured_payload.get("stream"))
+
+    @patch("urllib.request.urlopen")
+    def test_edit_payload_format_and_4k(self, mock_urlopen):
+        captured_data = b""
+        captured_url = ""
+
+        def fake_urlopen(req, timeout=300):
+            nonlocal captured_data, captured_url
+            captured_url = req.full_url
+            captured_data = req.data
+            mock_resp = MagicMock()
+            import base64
+            fake_b64 = base64.b64encode(b"fake-edit-image").decode("utf-8")
+            resp_body = json.dumps({"data": [{"b64_json": fake_b64}]}).encode("utf-8")
+            mock_resp.read.return_value = resp_body
+            mock_resp.__enter__.return_value = mock_resp
+            return mock_resp
+
+        mock_urlopen.side_effect = fake_urlopen
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        result = provider.edit(
+            prompt="Change clothes to white summer dress",
+            source_bytes=b"fake-source-png",
+            size="1152x2048",
+            prefer_4k=True,
+            quality="high",
+            model="gpt-image-2.5-sunburst",
+        )
+
+        self.assertEqual(result, b"fake-edit-image")
+        self.assertEqual(captured_url, "https://api.openai.com/v1/images/edits")
+        # 验证 4K 映射生效：9:16 从 1152x2048 映射为 2160x3840
+        self.assertIn(b'name="size"\r\n\r\n2160x3840\r\n', captured_data)
+        self.assertIn(b'name="model"\r\n\r\ngpt-image-2.5-sunburst\r\n', captured_data)
 
 
 if __name__ == "__main__":
