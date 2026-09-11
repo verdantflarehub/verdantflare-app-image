@@ -18,7 +18,13 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore
-from .dashboard import api_create_task, api_list_tasks, api_task_stats, dashboard_page
+from .dashboard import (
+    api_create_task,
+    api_list_tasks,
+    api_task_stats,
+    api_upload_artifact,
+    dashboard_page,
+)
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
 from .queue import TaskQueueManager
@@ -59,7 +65,7 @@ def artifact_import(
         {
             "status": "completed",
             "project_id": project_id,
-            "artifact": record.model_dump(),
+            "artifact": record.to_dict(),
             "download_path": artifacts.download_path(record.artifact_id),
         }
     )
@@ -413,6 +419,8 @@ app = Starlette(
         Route("/image/api/tasks", api_create_task, methods=["POST"]),
         Route("/api/tasks/stats", api_task_stats, methods=["GET"]),
         Route("/image/api/tasks/stats", api_task_stats, methods=["GET"]),
+        Route("/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
+        Route("/image/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
         Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
         Route("/image/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
         Mount("/mcp", app=mcp_app),

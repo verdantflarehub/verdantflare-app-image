@@ -83,6 +83,62 @@ class CodexProviderError(Exception):
     pass
 
 
+def parse_sse_events(response) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    event_type = ""
+    data_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal event_type, data_lines
+        if not data_lines:
+            event_type = ""
+            return
+        current_event_type = event_type
+        raw = "\n".join(data_lines).strip()
+        event_type = ""
+        data_lines = []
+        if not raw or raw == "[DONE]":
+            return
+        try:
+            item = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if current_event_type and "type" not in item:
+            item["type"] = current_event_type
+        events.append(item)
+
+    for raw_line in response:
+        line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+        if not line:
+            flush()
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_type = line[len("event:") :].strip()
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[len("data:") :].strip())
+            continue
+
+    flush()
+    return events
+
+
+def collect_b64(val: Any) -> list[str]:
+    res = []
+    if isinstance(val, dict):
+        for k, v in val.items():
+            if k in {"result", "b64_json", "partial_image_b64"} and isinstance(v, str) and v:
+                res.append(v)
+            else:
+                res.extend(collect_b64(v))
+    elif isinstance(val, list):
+        for item in val:
+            res.extend(collect_b64(item))
+    return res
+
+
 class CodexProvider:
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
         raw_url = (
@@ -103,6 +159,10 @@ class CodexProvider:
         )
         self.auto_sanitize_negative_prompts = (
             os.environ.get("CODEX_AUTO_SANITIZE_NEGATIVE_PROMPTS", "true").lower()
+            in {"true", "1", "yes"}
+        )
+        self.prefer_responses = (
+            os.environ.get("CODEX_PREFER_RESPONSES", "true").lower()
             in {"true", "1", "yes"}
         )
 
@@ -137,6 +197,64 @@ class CodexProvider:
         if not self.api_key:
             raise CodexProviderError("缺少 API 凭据，请配置 OPENAI_API_KEY (或 OPENAI_BASE_URL)")
 
+    def _generate_via_responses(
+        self,
+        prompt: str,
+        size: str,
+        quality: str,
+        background: str,
+        model: str,
+        source_bytes: list[bytes] | None = None,
+    ) -> bytes:
+        endpoint = f"{self.base_url}/responses"
+        tool: dict[str, Any] = {
+            "type": "image_generation",
+            "size": size,
+            "quality": quality if quality != "auto" else "high",
+            "background": background,
+            "output_format": "png",
+            "partial_images": 3,
+        }
+
+        user_content: list[dict[str, Any]] = []
+        if source_bytes:
+            for b_data in source_bytes:
+                b64_img = base64.b64encode(b_data).decode("utf-8")
+                user_content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64_img}"})
+
+        user_content.append({"type": "input_text", "text": prompt})
+
+        payload = {
+            "model": model,
+            "input": [{"type": "message", "role": "user", "content": user_content}],
+            "tools": [tool],
+            "tool_choice": {"type": "image_generation"},
+            "stream": True,
+        }
+
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream, application/json",
+            },
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            events = parse_sse_events(resp)
+
+        b64_list = collect_b64(events)
+        if not b64_list:
+            for ev in events:
+                if ev.get("type") in ("response.failed", "error"):
+                    raise CodexProviderError(f"Responses 失败: {ev}")
+            raise CodexProviderError("Responses SSE 流未返回有效图像数据")
+        return base64.b64decode(b64_list[-1])
+
     def generate(
         self,
         prompt: str,
@@ -155,6 +273,21 @@ class CodexProvider:
             sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
         )
 
+        # 1. 优先使用 OpenAI Responses API 流式生成，彻底避免中继网关上的非流式超时
+        if self.prefer_responses:
+            try:
+                return self._generate_via_responses(
+                    prompt=sanitized_prompt,
+                    size=target_size,
+                    quality=target_quality,
+                    background=target_bg,
+                    model=model,
+                )
+            except Exception:
+                # 端点不可用或 mock 不支持时回退至 /images/generations
+                pass
+
+        # 2. 回退模式：调用 /images/generations
         payload: dict[str, Any] = {
             "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare
             "prompt": sanitized_prompt,
@@ -213,15 +346,30 @@ class CodexProvider:
         model: str = DEFAULT_IMAGE_MODEL,
     ) -> bytes:
         self._ensure_auth()
-        endpoint = f"{self.base_url}/images/edits"
-        boundary = f"----CodexImageBoundary{uuid.uuid4().hex}"
-        body = bytearray()
-
+        raw_list = source_bytes if isinstance(source_bytes, list) else [source_bytes]
         target_quality = normalize_quality(quality)
         target_bg = normalize_background(background)
         sanitized_prompt = (
             sanitize_prompt(prompt) if self.auto_sanitize_negative_prompts else prompt
         )
+
+        # 无 mask 的参考图引导生成优先走 Responses API 流式通道
+        if self.prefer_responses and not mask_bytes:
+            try:
+                return self._generate_via_responses(
+                    prompt=sanitized_prompt,
+                    size=size,
+                    quality=target_quality,
+                    background=target_bg,
+                    model=model,
+                    source_bytes=raw_list,
+                )
+            except Exception:
+                pass
+
+        endpoint = f"{self.base_url}/images/edits"
+        boundary = f"----CodexImageBoundary{uuid.uuid4().hex}"
+        body = bytearray()
 
         fields: dict[str, Any] = {
             "model": model,  # gpt-image-2.5-sunburst 或 gpt-image-2.5-flare

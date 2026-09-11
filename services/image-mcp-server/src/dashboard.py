@@ -479,14 +479,24 @@ async def api_create_task(request: Request) -> Response:
         "gpt-image-2.5-sunburst" if engine == "codex" else "gemini-3.1-flash-image"
     )
 
+    source_artifact_id = str(body.get("source_artifact_id", "")).strip()
+    ref_ids = body.get("reference_artifact_ids") or []
+    action = str(body.get("action", "generate")).strip().lower()
+    if source_artifact_id and action == "generate":
+        action = "edit"
+
     params = {
-        "action": "generate",
+        "action": action,
         "prompt": prompt,
         "model": resolved_model,
         "aspect_ratio": aspect_ratio,
         "resolution": resolution,
         "quality": quality,
     }
+    if source_artifact_id:
+        params["source_artifact_id"] = source_artifact_id
+    if ref_ids:
+        params["reference_artifact_ids"] = ref_ids
     instructions = body.get("instructions")
     if instructions:
         params["instructions"] = str(instructions).strip()
@@ -510,10 +520,41 @@ async def api_create_task(request: Request) -> Response:
             task_id=task.task_id,
             project_id=project_id,
             engine=engine,
-            action="generate",
+            action=action,
             params=params,
         )
 
     return JSONResponse(task.to_dict(), status_code=201)
+
+
+async def api_upload_artifact(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        form = await request.form()
+        project_id = str(form.get("project_id", "default")).strip() or "default"
+        upload_file = form.get("file")
+        if not upload_file:
+            return JSONResponse({"error": "file_is_required"}, status_code=400)
+        filename = getattr(upload_file, "filename", "upload.png") or "upload.png"
+        content = await upload_file.read()
+        artifacts_store = request.app.state.artifacts
+        rec = artifacts_store.create_from_bytes(
+            project_id=project_id,
+            filename=filename,
+            data=content,
+            media_type=getattr(upload_file, "content_type", "image/png") or "image/png",
+        )
+        return JSONResponse(
+            {
+                "status": "completed",
+                "project_id": project_id,
+                "artifact": rec.to_dict(),
+                "download_path": artifacts_store.download_path(rec.artifact_id),
+            },
+            status_code=201,
+        )
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
 
 

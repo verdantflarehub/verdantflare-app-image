@@ -88,6 +88,45 @@ class TestCodexProvider(unittest.TestCase):
 
         self.assertEqual(captured_payload.get("prompt"), "真实写真，高清摄影。")
 
+    @patch("urllib.request.urlopen")
+    def test_generate_via_responses_payload_format(self, mock_urlopen):
+        captured_payload = {}
+        captured_url = ""
+
+        def fake_urlopen(req, timeout=300):
+            nonlocal captured_payload, captured_url
+            captured_url = req.full_url
+            captured_payload = json.loads(req.data.decode("utf-8"))
+            mock_resp = MagicMock()
+            import base64
+            fake_b64 = base64.b64encode(b"fake-sse-image").decode("utf-8")
+            sse_body = [
+                b"event: response.output_item.added\r\n",
+                f'data: {{"type": "image_generation", "b64_json": "{fake_b64}"}}\r\n'.encode("utf-8"),
+                b"\r\n",
+                b"event: response.completed\r\n",
+                b"data: [DONE]\r\n",
+                b"\r\n",
+            ]
+            mock_resp.__iter__.return_value = iter(sse_body)
+            mock_resp.__enter__.return_value = mock_resp
+            return mock_resp
+
+        mock_urlopen.side_effect = fake_urlopen
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        result = provider._generate_via_responses(
+            prompt="A portrait in high quality",
+            size="1152x2048",
+            quality="high",
+            background="auto",
+            model="gpt-image-2.5-sunburst",
+        )
+
+        self.assertEqual(result, b"fake-sse-image")
+        self.assertEqual(captured_url, "https://api.openai.com/v1/responses")
+        self.assertEqual(captured_payload.get("model"), "gpt-image-2.5-sunburst")
+        self.assertTrue(captured_payload.get("stream"))
+
 
 if __name__ == "__main__":
     unittest.main()

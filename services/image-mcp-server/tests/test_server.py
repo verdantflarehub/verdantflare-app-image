@@ -65,6 +65,49 @@ class TestServer(unittest.TestCase):
             self.assertEqual(mcp_data["id"], 1)
             self.assertIn("capabilities", mcp_data["result"])
 
+    def test_artifact_import_tool(self):
+        from unittest.mock import patch, MagicMock
+        from src.server import artifact_import
+
+        with patch("src.server.artifacts.import_from_url") as mock_import:
+            from src.artifacts import ArtifactRecord
+            mock_rec = ArtifactRecord(
+                artifact_id="art-test-123",
+                project_id="test-proj",
+                filename="test.png",
+                media_type="image/png",
+                size_bytes=100,
+                sha256="abc123sha",
+                created_at="2026-09-11T00:00:00Z",
+            )
+            mock_import.return_value = mock_rec
+
+            res = artifact_import(
+                project_id="test-proj",
+                source_url="https://example.com/test.png",
+                filename="test.png",
+                expected_sha256="abc123sha",
+            )
+            self.assertIsNotNone(res)
+            self.assertEqual(len(res.content), 1)
+            import json
+            data = json.loads(res.content[0].text)
+            self.assertEqual(data["status"], "completed")
+            self.assertEqual(data["artifact"]["artifact_id"], "art-test-123")
+
+    def test_api_upload_artifact(self):
+        with TestClient(app) as client:
+            upload_files = {"file": ("test.png", b"fake-png-content", "image/png")}
+            data = {"project_id": "upload-test-project"}
+            headers = {"Authorization": "Bearer test-secret-token"}
+            resp = client.post("/api/artifacts/upload", files=upload_files, data=data, headers=headers)
+            self.assertEqual(resp.status_code, 201)
+            resp_data = resp.json()
+            self.assertEqual(resp_data["status"], "completed")
+            self.assertEqual(resp_data["project_id"], "upload-test-project")
+            self.assertTrue(resp_data["artifact"]["artifact_id"].startswith("art-"))
+            self.assertEqual(resp_data["artifact"]["filename"], "test.png")
+
 
 if __name__ == "__main__":
     unittest.main()
