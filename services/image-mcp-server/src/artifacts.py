@@ -56,9 +56,11 @@ class ArtifactStore:
         self.root_dir.mkdir(parents=True, exist_ok=True)
 
     def _project_dir(self, project_id: str) -> Path:
-        if not project_id or ".." in project_id or "/" in project_id or "\\" in project_id:
-            raise ArtifactError(f"无效的 project_id: {project_id}")
-        p = self.root_dir / project_id / "artifacts"
+        from .project_paths import project_path
+        try:
+            p = project_path(self.root_dir, project_id)
+        except ValueError as exc:
+            raise ArtifactError(str(exc)) from exc
         p.mkdir(parents=True, exist_ok=True)
         return p
 
@@ -162,11 +164,9 @@ class ArtifactStore:
                 return ArtifactRecord.from_dict(json.loads(meta_file.read_text(encoding="utf-8")))
             raise ArtifactNotFound(f"Artifact 未找到: {artifact_id} (项目: {project_id})")
 
-        for p_dir in self.root_dir.iterdir():
-            if p_dir.is_dir():
-                meta_file = p_dir / "artifacts" / f"{artifact_id}.json"
-                if meta_file.is_file():
-                    return ArtifactRecord.from_dict(json.loads(meta_file.read_text(encoding="utf-8")))
+        for meta_file in self.root_dir.rglob(f"artifacts/{artifact_id}.json"):
+            if meta_file.is_file() and meta_file.resolve().is_relative_to(self.root_dir.resolve()):
+                return ArtifactRecord.from_dict(json.loads(meta_file.read_text(encoding="utf-8")))
 
         raise ArtifactNotFound(f"Artifact 未找到: {artifact_id}")
 

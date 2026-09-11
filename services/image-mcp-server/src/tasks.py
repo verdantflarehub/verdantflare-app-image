@@ -123,6 +123,8 @@ class TaskStore:
         request_params: dict[str, Any],
         model: str | None = None,
     ) -> TaskRecord:
+        from .project_paths import validate_project_id
+        validate_project_id(project_id)
         self.ensure_ready()
         now = datetime.now(timezone.utc).isoformat()
         prompt = request_params.get("prompt", "")

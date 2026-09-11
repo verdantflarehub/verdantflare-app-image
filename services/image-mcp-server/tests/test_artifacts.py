@@ -6,6 +6,23 @@ from src.artifacts import ArtifactStore, ArtifactRecord, ArtifactNotFound, Artif
 
 
 class TestArtifacts(unittest.TestCase):
+    def test_nested_project_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ArtifactStore(root_dir=Path(tmp))
+            record = store.create_from_bytes(project_id="creator/xiaoyue", filename="test.png", data=b"image", media_type="image/png")
+            self.assertEqual(store.get(record.artifact_id).project_id, "creator/xiaoyue")
+            self.assertEqual(store.content_path(record).read_bytes(), b"image")
+
+    def test_unsafe_project_paths(self):
+        from src.project_paths import validate_project_id
+        for value in ("", "/absolute", "../escape", "a/../b", "a//b", "a/", "a/./b", "a\\b"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_project_id(value)
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            (Path(tmp) / "escape").symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(ArtifactError):
+                ArtifactStore(root_dir=Path(tmp))._project_dir("escape/project")
+
     def test_artifact_create_and_get(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
