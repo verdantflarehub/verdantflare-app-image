@@ -61,6 +61,52 @@ class TestTaskQueueManager(unittest.TestCase):
                     self.assertIsNotNone(final_rec.artifact_id)
                     self.assertGreaterEqual(final_rec.duration_seconds, 0.0)
 
+                    # 2. 测试带参考图与 aspect_ratio="9:16" 的 edit 流程
+                    art_rec = artifacts.create_from_bytes(
+                        project_id="proj-q",
+                        filename="ref.png",
+                        data=b"fake-ref-data",
+                        media_type="image/png",
+                    )
+                    mock_codex.edit.return_value = b"fake-edited-img"
+                    t2 = tasks.create(
+                        project_id="proj-q",
+                        idempotency_key="q-2",
+                        engine="codex",
+                        request_params={
+                            "action": "edit",
+                            "source_artifact_id": art_rec.artifact_id,
+                            "aspect_ratio": "9:16",
+                            "resolution": "2k",
+                            "prompt": "test edit prompt",
+                        },
+                    )
+                    await queue_mgr.enqueue(
+                        task_id=t2.task_id,
+                        project_id="proj-q",
+                        engine="codex",
+                        action="edit",
+                        params={
+                            "source_artifact_id": art_rec.artifact_id,
+                            "aspect_ratio": "9:16",
+                            "resolution": "2k",
+                            "prompt": "test edit prompt",
+                        },
+                    )
+
+                    for _ in range(50):
+                        rec2 = tasks.get(t2.task_id)
+                        if rec2.status == "completed":
+                            break
+                        await asyncio.sleep(0.05)
+
+                    final_rec2 = tasks.get(t2.task_id)
+                    self.assertEqual(final_rec2.status, "completed")
+                    mock_codex.edit.assert_called_once()
+                    call_kwargs = mock_codex.edit.call_args.kwargs
+                    self.assertEqual(call_kwargs["size"], "1152x2048")
+                    self.assertEqual(call_kwargs["prompt"], "test edit prompt")
+
                 finally:
                     await queue_mgr.stop()
 

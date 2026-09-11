@@ -165,6 +165,11 @@ class CodexProvider:
             os.environ.get("CODEX_PREFER_RESPONSES", "true").lower()
             in {"true", "1", "yes"}
         )
+        self.actor_auth = (
+            os.environ.get("CODEX_ACTOR_AUTH")
+            or os.environ.get("OPENAI_ACTOR_AUTH")
+            or "local-image-extension"
+        )
 
     def _resolve_target_size(self, size: str, prefer_4k: bool) -> str:
         if not prefer_4k:
@@ -233,14 +238,18 @@ class CodexProvider:
         }
 
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream, application/json",
+        }
+        if self.actor_auth:
+            headers["x-openai-actor-authorization"] = self.actor_auth
+
         req = urllib.request.Request(
             endpoint,
             data=body,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream, application/json",
-            },
+            headers=headers,
             method="POST",
         )
 
@@ -355,17 +364,14 @@ class CodexProvider:
 
         # 无 mask 的参考图引导生成优先走 Responses API 流式通道
         if self.prefer_responses and not mask_bytes:
-            try:
-                return self._generate_via_responses(
-                    prompt=sanitized_prompt,
-                    size=size,
-                    quality=target_quality,
-                    background=target_bg,
-                    model=model,
-                    source_bytes=raw_list,
-                )
-            except Exception:
-                pass
+            return self._generate_via_responses(
+                prompt=sanitized_prompt,
+                size=size,
+                quality=target_quality,
+                background=target_bg,
+                model=model,
+                source_bytes=raw_list,
+            )
 
         endpoint = f"{self.base_url}/images/edits"
         boundary = f"----CodexImageBoundary{uuid.uuid4().hex}"

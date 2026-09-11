@@ -201,7 +201,21 @@ class TaskQueueManager:
         ref_ids = p.get("reference_artifact_ids", [])
         mask_id = p.get("mask_artifact_id")
         model = p.get("model", "")
-        size = p.get("size", "2048x1152")
+        aspect_ratio = p.get("aspect_ratio")
+        resolution = p.get("resolution", "2k")
+        if aspect_ratio:
+            size_map = {
+                "16:9": "2048x1152",
+                "9:16": "1152x2048",
+                "1:1": "1024x1024",
+                "4:3": "1792x1344",
+                "3:4": "1344x1792",
+            }
+            size = size_map.get(aspect_ratio, "2048x1152")
+            if resolution.lower() == "4k" and hasattr(self.codex_provider, "_resolve_target_size"):
+                size = self.codex_provider._resolve_target_size(size, prefer_4k=True)
+        else:
+            size = p.get("size", "2048x1152")
         quality = p.get("quality", "auto")
         background = p.get("background", "auto")
 
