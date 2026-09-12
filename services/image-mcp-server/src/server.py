@@ -25,6 +25,7 @@ from .dashboard import (
     api_upload_artifact,
     dashboard_page,
 )
+from .faceswap import handle_faceswap
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
 from .queue import TaskQueueManager
@@ -246,6 +247,41 @@ async def image_inpaint(
             "created_at": task.created_at,
         }
     )
+
+
+@mcp.tool(name="image.faceswap")
+async def image_faceswap(
+    target_artifact_id: str,
+    source_identity_artifact_id: str,
+    identity_strength: float = 0.95,
+    restore_face: bool = True,
+    restoration_fidelity: float = 0.85,
+    project_id: str | None = None,
+    target_face_index: int = 0,
+) -> types.CallToolResult:
+    """阶段二：小月骨相置换与面容超分融合工具。
+
+    将小月基准角色卡（source_identity_artifact_id）的 512 维特征精准注入到阶段一文生图大片（target_artifact_id）中，
+    并通过 CodeFormer 执行眼眸发丝超分修复与泊松无缝贴图反变换。
+    - target_artifact_id: 阶段一原始大片 Artifact ID
+    - source_identity_artifact_id: 小月基准角色卡 Artifact ID 或资产路径
+    - identity_strength: 骨相置换强度，默认 0.95
+    - restore_face: 是否开启面部超分修复，默认 True
+    - restoration_fidelity: 超分修复保真度权重，默认 0.85
+    - project_id: 可选项目 ID（若未指定则自动从 target_artifact 继承）
+    - target_face_index: 目标图像中要替换的人脸索引，默认 0
+    """
+    res = await handle_faceswap(
+        artifacts=artifacts,
+        target_artifact_id=target_artifact_id,
+        source_identity_artifact_id=source_identity_artifact_id,
+        identity_strength=identity_strength,
+        restore_face=restore_face,
+        restoration_fidelity=restoration_fidelity,
+        project_id=project_id,
+        target_face_index=target_face_index,
+    )
+    return _result(res)
 
 
 @mcp.tool(name="image.status")

@@ -1,20 +1,24 @@
-name: Image MCP Server
+name: Image Face Fusion API
 
 on:
   push:
     branches: [release]
     paths:
-      - services/image-mcp-server/**
-      - .github/workflows/image-mcp-server.yml
+      - services/image-face-fusion-api/**
+      - .github/workflows/image-face-fusion-api.yml
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
-  group: image-mcp-server-release
+  group: image-face-fusion-api-release
   cancel-in-progress: false
+
 env:
-  SERVICE: image-mcp-server
-  VERSION: 0.1.14
+  SERVICE: image-face-fusion-api
+  VERSION: 0.1.0
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -23,16 +27,15 @@ jobs:
       - name: Run unit tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-          PYTHONPATH: services/image-mcp-server
-          IMAGE_ARTIFACT_ROOT: /tmp/image-test-artifacts
-          IMAGE_MCP_BEARER_TOKEN: test-secret-token
+          PYTHONPATH: services/image-face-fusion-api
         run: |
-          python3 -m pip install -r services/${SERVICE}/requirements.txt
+          python3 -m pip install fastapi uvicorn pydantic numpy Pillow opencv-python-headless onnxruntime
           python3 -m unittest discover -s services/${SERVICE}/tests -v
+
   build:
     needs: check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -58,5 +61,4 @@ jobs:
           push: true
           platforms: linux/amd64
           provenance: false
-          sbom: false
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}

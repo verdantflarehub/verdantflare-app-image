@@ -13,3 +13,4 @@ ENV/
 *.webp
 *.log
 .pytest_cache/
+scratch/
