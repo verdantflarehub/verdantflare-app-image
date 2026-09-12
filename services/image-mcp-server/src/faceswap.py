@@ -53,9 +53,13 @@ def resolve_source_face_path(
         Path("/data/projects/creator/assets") / f"{source_identity_artifact_id}.png",
         Path("docs/assets") / source_identity_artifact_id,
         Path("docs/assets") / f"{source_identity_artifact_id}.png",
-        Path(__file__).resolve().parents[4] / "docs" / "assets" / source_identity_artifact_id,
-        Path(__file__).resolve().parents[4] / "docs" / "assets" / f"{source_identity_artifact_id}.png",
     ]
+    parents = Path(__file__).resolve().parents
+    if len(parents) > 4:
+        search_paths.extend([
+            parents[4] / "docs" / "assets" / source_identity_artifact_id,
+            parents[4] / "docs" / "assets" / f"{source_identity_artifact_id}.png",
+        ])
     for sp in search_paths:
         if sp.is_file():
             return sp.resolve()

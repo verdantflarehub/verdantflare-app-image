@@ -31,7 +31,6 @@ ENV INSIGHTFACE_MODEL_ROOT=/models/insightface \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-VOLUME ["/models/insightface", "/data/projects"]
 EXPOSE 8000
 
 HEALTHCHECK --start-period=30s --interval=10s --timeout=5s --retries=3 \
