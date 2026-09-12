@@ -129,7 +129,60 @@ class TestCodexProvider(unittest.TestCase):
         self.assertEqual(captured_payload.get("model"), provider.session_model)
         self.assertEqual(captured_payload.get("instructions"), DEFAULT_VERBATIM_INSTRUCTIONS)
         self.assertEqual(captured_payload.get("tools")[0].get("model"), "gpt-image-2.5-sunburst")
+        self.assertEqual(captured_payload.get("tools")[0].get("action"), "generate")
         self.assertTrue(captured_payload.get("stream"))
+
+    @patch("urllib.request.urlopen")
+    def test_edit_via_responses_payload_format(self, mock_urlopen):
+        captured_payload = {}
+        captured_url = ""
+
+        def fake_urlopen(req, timeout=300):
+            nonlocal captured_payload, captured_url
+            captured_url = req.full_url
+            captured_payload = json.loads(req.data.decode("utf-8"))
+            mock_resp = MagicMock()
+            import base64
+            fake_b64 = base64.b64encode(b"fake-sse-edit-image").decode("utf-8")
+            sse_body = [
+                b"event: response.output_item.added\r\n",
+                f'data: {{"type": "image_generation", "b64_json": "{fake_b64}"}}\r\n'.encode("utf-8"),
+                b"\r\n",
+                b"event: response.completed\r\n",
+                b"data: [DONE]\r\n",
+                b"\r\n",
+            ]
+            mock_resp.__iter__.return_value = iter(sse_body)
+            mock_resp.__enter__.return_value = mock_resp
+            return mock_resp
+
+        mock_urlopen.side_effect = fake_urlopen
+        provider = CodexProvider(base_url="https://api.openai.com/v1", api_key="sk-test-12345")
+        provider.prefer_responses = True
+        result = provider.edit(
+            prompt="Change background to sunset",
+            source_bytes=b"fake-source-bytes",
+            size="1152x2048",
+            quality="high",
+            model="gpt-image-2.5-sunburst",
+        )
+
+        self.assertEqual(result, b"fake-sse-edit-image")
+        self.assertEqual(captured_url, "https://api.openai.com/v1/responses")
+        self.assertEqual(captured_payload.get("model"), provider.session_model)
+        self.assertEqual(captured_payload.get("instructions"), DEFAULT_VERBATIM_INSTRUCTIONS)
+        tool = captured_payload.get("tools")[0]
+        self.assertEqual(tool.get("type"), "image_generation")
+        self.assertEqual(tool.get("action"), "edit")
+        self.assertEqual(tool.get("model"), "gpt-image-2.5-sunburst")
+        self.assertEqual(tool.get("size"), "1152x2048")
+
+        user_content = captured_payload.get("input")[0].get("content")
+        self.assertEqual(len(user_content), 2)
+        self.assertEqual(user_content[0].get("type"), "input_image")
+        self.assertTrue(user_content[0].get("image_url", "").startswith("data:image/png;base64,"))
+        self.assertEqual(user_content[1].get("type"), "input_text")
+        self.assertEqual(user_content[1].get("text"), "Change background to sunset")
 
     @patch("urllib.request.urlopen")
     def test_edit_payload_format_and_4k(self, mock_urlopen):

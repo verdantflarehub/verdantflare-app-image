@@ -272,6 +272,7 @@ class CodexProvider:
         endpoint = f"{self.base_url}/responses"
         tool: dict[str, Any] = {
             "type": "image_generation",
+            "action": "edit" if source_bytes else "generate",
             "model": model,
             "size": size,
             "quality": quality if quality != "auto" else "high",
@@ -283,8 +284,13 @@ class CodexProvider:
         user_content: list[dict[str, Any]] = []
         if source_bytes:
             for b_data in source_bytes:
+                mime = "image/png"
+                if b_data.startswith(b"\xff\xd8\xff"):
+                    mime = "image/jpeg"
+                elif b_data.startswith(b"RIFF") and len(b_data) > 12 and b_data[8:12] == b"WEBP":
+                    mime = "image/webp"
                 b64_img = base64.b64encode(b_data).decode("utf-8")
-                user_content.append({"type": "input_image", "image_url": f"data:image/png;base64,{b64_img}"})
+                user_content.append({"type": "input_image", "image_url": f"data:{mime};base64,{b64_img}"})
 
         user_content.append({"type": "input_text", "text": prompt})
 
