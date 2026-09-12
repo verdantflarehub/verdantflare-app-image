@@ -159,20 +159,14 @@ class FaceFusionPipeline:
             except FaceNotFoundError:
                 raise
             except Exception as e:
-                logger.warning(f"Real detect_face failed, using fallback: {e}")
+                logger.error(f"Real detect_face failed: {e}")
+                raise FaceFusionPipelineError(f"Face detection failed: {e}", status_code=500)
 
-        # Standard heuristic detection fallback (for mock / test environments)
-        box = [int(w * 0.3), int(h * 0.1), int(w * 0.7), int(h * 0.4)]
-        pitch, yaw, roll = 0.0, 0.0, 0.0
-        return {
-            "face_count": 1,
-            "pitch": pitch,
-            "yaw": yaw,
-            "roll": roll,
-            "confidence": 0.965,
-            "bounding_box": box,
-            "pose_safe": True,
-        }
+        raise FaceFusionPipelineError(
+            "FaceAnalysis model (buffalo_l) is not loaded",
+            error_code="MODEL_NOT_READY",
+            status_code=503,
+        )
 
     @staticmethod
     def cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
@@ -284,55 +278,84 @@ class FaceFusionPipeline:
         out_p.parent.mkdir(parents=True, exist_ok=True)
         tmp_out = out_p.parent / f".tmp.{out_p.name}"
 
-        # If full models are present, run ONNX inference
-        if self._app is not None and self._inswapper is not None:
-            try:
-                import cv2
-                source_img = cv2.imread(str(source_p))
-                target_img = cv2.imread(str(target_p))
-                source_faces = self._app.get(source_img)
-                target_faces = self._app.get(target_img)
-                if not source_faces:
-                    raise FaceNotFoundError("No face found in source image")
-                if not target_faces or target_face_index >= len(target_faces):
-                    raise FaceNotFoundError(f"Target face index {target_face_index} not found in canvas")
+        if self._app is None or self._inswapper is None:
+            raise FaceFusionPipelineError(
+                "Required models (FaceAnalysis / Inswapper) are not loaded",
+                error_code="MODEL_NOT_READY",
+                status_code=503,
+            )
 
-                source_face = source_faces[0]
-                target_face = target_faces[target_face_index]
+        import cv2
+        source_img = cv2.imread(str(source_p))
+        target_img = cv2.imread(str(target_p))
+        if source_img is None:
+            raise FaceFusionPipelineError(f"Failed to read source image: {source_face_path}", status_code=400)
+        if target_img is None:
+            raise FaceFusionPipelineError(f"Failed to read target canvas: {target_image_path}", status_code=400)
 
-                # Run Inswapper
-                fused_img_bgr = self._inswapper.get(target_img, target_face, source_face, paste_back=True)
+        source_faces = self._app.get(source_img)
+        target_faces = self._app.get(target_img)
+        if not source_faces:
+            raise FaceNotFoundError(f"No face found in source identity image: {source_face_path}")
+        if not target_faces or target_face_index >= len(target_faces):
+            raise FaceNotFoundError(f"Target face index {target_face_index} not found in canvas")
 
-                # Post-processing: CodeFormer & Skin tone matching
-                fused_img_rgb = cv2.cvtColor(fused_img_bgr, cv2.COLOR_BGR2RGB)
-                fused_pil = Image.fromarray(fused_img_rgb)
+        # Select dominant face from source if multiple faces detected
+        if len(source_faces) > 1:
+            source_faces = sorted(
+                source_faces,
+                key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
+                reverse=True,
+            )
+        source_face = source_faces[0]
+        target_face = target_faces[target_face_index]
 
-                if restore_face:
-                    # Extract face crop for CodeFormer restoration
-                    bbox = [int(v) for v in target_face.bbox]
-                    x1, y1, x2, y2 = max(0, bbox[0]), max(0, bbox[1]), min(fused_pil.width, bbox[2]), min(fused_pil.height, bbox[3])
-                    crop = fused_pil.crop((x1, y1, x2, y2))
-                    restored_crop = self._restore_face_crop(crop, fidelity=restoration_fidelity)
-                    
-                    # Color matching against original canvas
-                    orig_crop = Image.open(target_p).convert("RGB").crop((x1, y1, x2, y2))
-                    matched_crop_np = self._match_color_distribution(np.array(restored_crop), np.array(orig_crop))
-                    matched_crop = Image.fromarray(matched_crop_np)
+        # Execute genuine Inswapper face swapping
+        fused_img_bgr = self._inswapper.get(target_img, target_face, source_face, paste_back=True)
 
-                    # Smooth feathered paste-back
-                    feather_mask = self._create_feathered_mask(matched_crop.width, matched_crop.height, blur_radius=15)
-                    fused_pil.paste(matched_crop, (x1, y1), mask=feather_mask)
+        # Post-processing: CodeFormer restoration (if model loaded) & skin-tone alignment
+        fused_img_rgb = cv2.cvtColor(fused_img_bgr, cv2.COLOR_BGR2RGB)
+        fused_pil = Image.fromarray(fused_img_rgb)
 
-                fused_pil.save(tmp_out, format="PNG", quality=100)
-                sim_score = self.cosine_similarity(source_face.normed_embedding, source_face.normed_embedding)
-            except Exception as e:
-                logger.warning(f"Native model fusion failed ({e}), using zero-copy passthrough mock")
-                self._passthrough_fuse(target_p, source_p, tmp_out, restore_face, restoration_fidelity)
-                sim_score = 0.912
+        if restore_face and self._codeformer is not None:
+            bbox = [int(v) for v in target_face.bbox]
+            x1, y1, x2, y2 = max(0, bbox[0]), max(0, bbox[1]), min(fused_pil.width, bbox[2]), min(fused_pil.height, bbox[3])
+            crop = fused_pil.crop((x1, y1, x2, y2))
+            restored_crop = self._restore_face_crop(crop, fidelity=restoration_fidelity)
+
+            orig_crop = Image.open(target_p).convert("RGB").crop((x1, y1, x2, y2))
+            matched_crop_np = self._match_color_distribution(np.array(restored_crop), np.array(orig_crop))
+            matched_crop = Image.fromarray(matched_crop_np)
+
+            feather_mask = self._create_feathered_mask(matched_crop.width, matched_crop.height, blur_radius=15)
+            fused_pil.paste(matched_crop, (x1, y1), mask=feather_mask)
+
+        # Save fused output to temporary file
+        fused_pil.save(tmp_out, format="PNG", quality=100)
+
+        # 3. Calculate true ArcFace cosine similarity against source face
+        fused_cv = cv2.cvtColor(np.array(fused_pil), cv2.COLOR_RGB2BGR)
+        fused_faces = self._app.get(fused_cv)
+        if not fused_faces:
+            fused_faces = self._app.get(fused_img_bgr)
+
+        if fused_faces:
+            tb = target_face.bbox
+            tc = ((tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0)
+            best_face = fused_faces[0]
+            if len(fused_faces) > 1:
+                min_dist = float("inf")
+                for f in fused_faces:
+                    fb = f.bbox
+                    fc = ((fb[0] + fb[2]) / 2.0, (fb[1] + fb[3]) / 2.0)
+                    dist = (tc[0] - fc[0]) ** 2 + (tc[1] - fc[1]) ** 2
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_face = f
+            sim_score = self.cosine_similarity(best_face.normed_embedding, source_face.normed_embedding)
         else:
-            # High-fidelity mock/test passthrough execution with color & restoration
-            self._passthrough_fuse(target_p, source_p, tmp_out, restore_face, restoration_fidelity)
-            sim_score = 0.914
+            logger.warning("Could not detect face in fused image for similarity calculation")
+            sim_score = 0.0
 
         # Atomic rename to final output path
         os.replace(tmp_out, out_p)
@@ -347,31 +370,3 @@ class FaceFusionPipeline:
             "inference_time_ms": latency_ms,
             "pipeline": "retinaface+arcface512+inswapper128+codeformer",
         }
-
-    def _passthrough_fuse(
-        self,
-        target_path: Path,
-        source_path: Path,
-        tmp_output: Path,
-        restore_face: bool = True,
-        restoration_fidelity: float = 0.85,
-    ) -> None:
-        """Composite face fusion simulation for testing when weights are offline."""
-        canvas = Image.open(target_path).convert("RGB")
-        w, h = canvas.size
-
-        # Simulate face ROI extraction, skin tone alignment and CodeFormer restoration
-        bbox = [int(w * 0.3), int(h * 0.1), int(w * 0.7), int(h * 0.4)]
-        x1, y1, x2, y2 = bbox
-        face_roi = canvas.crop((x1, y1, x2, y2))
-
-        if restore_face:
-            face_roi = self._restore_face_crop(face_roi, fidelity=restoration_fidelity)
-            # Match skin tone against original
-            orig_roi = Image.open(target_path).convert("RGB").crop((x1, y1, x2, y2))
-            matched_roi_np = self._match_color_distribution(np.array(face_roi), np.array(orig_roi))
-            face_roi = Image.fromarray(matched_roi_np)
-
-        feather_mask = self._create_feathered_mask(face_roi.width, face_roi.height, blur_radius=15)
-        canvas.paste(face_roi, (x1, y1), mask=feather_mask)
-        canvas.save(tmp_output, format="PNG", quality=100)

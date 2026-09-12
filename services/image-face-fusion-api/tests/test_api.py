@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from PIL import Image
 from starlette.testclient import TestClient
@@ -40,8 +41,18 @@ class TestImageFaceFusionAPI(unittest.TestCase):
         self.assertIn("execution_provider", data)
         self.assertIn("models_loaded", data)
 
-    def test_detect_face_success(self):
+    @mock.patch("src.main.pipeline.detect_face")
+    def test_detect_face_success(self, mock_detect):
         """Test POST /v1/detect succeeds for valid image."""
+        mock_detect.return_value = {
+            "face_count": 1,
+            "pitch": 2.5,
+            "yaw": -1.0,
+            "roll": 0.5,
+            "confidence": 0.98,
+            "bounding_box": [100, 200, 300, 400],
+            "pose_safe": True,
+        }
         payload = {"image_path": str(self.target_img_path)}
         resp = self.client.post("/v1/detect", json=payload)
         self.assertEqual(resp.status_code, 200)
@@ -61,8 +72,18 @@ class TestImageFaceFusionAPI(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["error_code"], "FILE_PATH_UNREACHABLE")
 
-    def test_fuse_face_success(self):
+    @mock.patch("src.main.pipeline.fuse")
+    def test_fuse_face_success(self, mock_fuse):
         """Test POST /v1/fuse executes end-to-end and outputs file with metrics."""
+        self.output_img_path.touch()
+        mock_fuse.return_value = {
+            "status": "success",
+            "output_path": str(self.output_img_path),
+            "detected_faces": 1,
+            "arcface_similarity": 0.892,
+            "inference_time_ms": 120,
+            "pipeline": "retinaface+arcface512+inswapper128+codeformer",
+        }
         payload = {
             "target_image_path": str(self.target_img_path),
             "source_face_path": str(self.source_img_path),
