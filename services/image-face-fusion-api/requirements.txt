@@ -6,3 +6,5 @@ Pillow>=10.0.0
 opencv-python-headless>=4.9.0.80
 onnxruntime-gpu>=1.17.0
 insightface>=0.7.3
+httpx>=0.27.0
+

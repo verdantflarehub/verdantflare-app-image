@@ -29,7 +29,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: services/image-face-fusion-api
         run: |
-          python3 -m pip install fastapi uvicorn pydantic numpy Pillow opencv-python-headless onnxruntime
+          python3 -m pip install fastapi uvicorn pydantic numpy Pillow opencv-python-headless onnxruntime httpx
           python3 -m unittest discover -s services/${SERVICE}/tests -v
 
   build:
