@@ -21,6 +21,16 @@ class GeminiProviderError(Exception):
     pass
 
 
+def _detect_mime_type(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"RIFF") and b"WEBP" in data[:12]:
+        return "image/webp"
+    return "image/png"
+
+
 class GeminiProvider:
     def __init__(
         self,
@@ -29,13 +39,6 @@ class GeminiProvider:
         anthropic_base_url: str | None = None,
         anthropic_token: str | None = None,
     ) -> None:
-        self.anthropic_base_url = (
-            anthropic_base_url or os.environ.get("ANTHROPIC_BASE_URL") or ""
-        ).rstrip("/")
-        self.anthropic_token = (
-            anthropic_token or os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
-        ).strip()
-
         self.api_key = (
             api_key
             or os.environ.get("GEMINI_API_KEY")
@@ -48,14 +51,21 @@ class GeminiProvider:
             or "https://generativelanguage.googleapis.com"
         ).rstrip("/")
 
+        self.anthropic_base_url = (
+            anthropic_base_url or os.environ.get("ANTHROPIC_BASE_URL") or ""
+        ).rstrip("/")
+        self.anthropic_token = (
+            anthropic_token or os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
+        ).strip()
+
     def _ensure_auth(self) -> str:
-        """返回鉴权通道: 'anthropic' 或 'google'"""
-        if self.anthropic_base_url and self.anthropic_token:
-            return "anthropic"
+        """返回鉴权通道: 优先使用 'google' 原生通道，回退到 'anthropic'"""
         if self.api_key:
             return "google"
+        if self.anthropic_base_url and self.anthropic_token:
+            return "anthropic"
         raise GeminiProviderError(
-            "缺少有效的 Gemini API 凭据，请配置 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN 或 GEMINI_API_KEY"
+            "缺少有效的 Gemini API 凭据，请配置 GEMINI_API_KEY (+ GEMINI_BASE_URL) 或 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN"
         )
 
     def _extract_image_bytes(self, data: dict[str, Any]) -> bytes:
@@ -80,6 +90,12 @@ class GeminiProvider:
         # 2. Google REST 格式
         candidates = data.get("candidates", [])
         for cand in candidates:
+            finish_reason = cand.get("finishReason")
+            if finish_reason in ("IMAGE_SAFETY", "SAFETY"):
+                raise GeminiProviderError(f"Gemini 安全审核拦截 (finishReason: {finish_reason})：内容触发了云端安全策略")
+            if finish_reason == "IMAGE_OTHER":
+                raise GeminiProviderError(f"Gemini 后置安全审查拦截 (finishReason: IMAGE_OTHER)：生成图像被云端安全策略阻断")
+
             parts = cand.get("content", {}).get("parts", [])
             for p in parts:
                 inline = p.get("inlineData")
@@ -92,7 +108,9 @@ class GeminiProvider:
         self,
         prompt: str,
         model: str,
-        source_image_bytes: bytes | None,
+        source_images: list[bytes] | None = None,
+        source_image_bytes: bytes | None = None,
+        mask_bytes: bytes | None = None,
         timeout: int = 120,
     ) -> bytes:
         base = self.anthropic_base_url
@@ -104,16 +122,37 @@ class GeminiProvider:
             url = f"{base}/v1/messages"
 
         content: list[dict[str, Any]] = []
-        if source_image_bytes:
-            b64 = base64.b64encode(source_image_bytes).decode("utf-8")
+
+        images: list[bytes] = []
+        if source_images:
+            images.extend(source_images)
+        elif source_image_bytes:
+            images.append(source_image_bytes)
+
+        for img in images:
+            b64 = base64.b64encode(img).decode("utf-8")
+            mime = _detect_mime_type(img)
             content.append({
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png",
+                    "media_type": mime,
                     "data": b64,
                 },
             })
+
+        if mask_bytes:
+            b64_mask = base64.b64encode(mask_bytes).decode("utf-8")
+            mime_mask = _detect_mime_type(mask_bytes)
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_mask,
+                    "data": b64_mask,
+                },
+            })
+
         content.append({"type": "text", "text": prompt})
 
         payload = {
@@ -147,14 +186,33 @@ class GeminiProvider:
         self,
         prompt: str,
         model: str,
-        source_image_bytes: bytes | None,
+        source_images: list[bytes] | None = None,
+        source_image_bytes: bytes | None = None,
+        mask_bytes: bytes | None = None,
         timeout: int = 120,
     ) -> bytes:
-        url = f"{self.base_url}/v1beta/models/{model}:generateContent?key={self.api_key}"
+        base = self.base_url.rstrip("/")
+        if base.endswith("/v1beta"):
+            base = base[:-7]
+        url = f"{base}/v1beta/models/{model}:generateContent?key={self.api_key}"
+
         parts: list[dict[str, Any]] = []
-        if source_image_bytes:
-            b64 = base64.b64encode(source_image_bytes).decode("utf-8")
-            parts.append({"inlineData": {"mimeType": "image/png", "data": b64}})
+
+        images: list[bytes] = []
+        if source_images:
+            images.extend(source_images)
+        elif source_image_bytes:
+            images.append(source_image_bytes)
+
+        for img in images:
+            b64 = base64.b64encode(img).decode("utf-8")
+            mime = _detect_mime_type(img)
+            parts.append({"inlineData": {"mimeType": mime, "data": b64}})
+
+        if mask_bytes:
+            b64_mask = base64.b64encode(mask_bytes).decode("utf-8")
+            mime_mask = _detect_mime_type(mask_bytes)
+            parts.append({"inlineData": {"mimeType": mime_mask, "data": b64_mask}})
 
         parts.append({"text": prompt})
         payload = {
@@ -162,13 +220,26 @@ class GeminiProvider:
             "generationConfig": {
                 "responseModalities": ["IMAGE", "TEXT"],
             },
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+            ],
         }
 
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key,
+        }
+        if self.api_key.startswith("sk-"):
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
         req = urllib.request.Request(
             url,
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
 
@@ -180,7 +251,9 @@ class GeminiProvider:
         self,
         prompt: str,
         model: str = DEFAULT_GEMINI_MODEL,
+        source_images: list[bytes] | None = None,
         source_image_bytes: bytes | None = None,
+        mask_bytes: bytes | None = None,
         retries: int = 2,
     ) -> bytes:
         channel = self._ensure_auth()
@@ -193,17 +266,21 @@ class GeminiProvider:
             curr_prompt = clean_prompt if attempt == 1 else f"{clean_prompt}\n\n{FIX_TEXT}"
 
             try:
-                if channel == "anthropic":
-                    return self._generate_anthropic(
-                        prompt=curr_prompt,
-                        model=model,
-                        source_image_bytes=source_image_bytes,
-                    )
-                else:
+                if channel == "google":
                     return self._generate_google(
                         prompt=curr_prompt,
                         model=model,
+                        source_images=source_images,
                         source_image_bytes=source_image_bytes,
+                        mask_bytes=mask_bytes,
+                    )
+                else:
+                    return self._generate_anthropic(
+                        prompt=curr_prompt,
+                        model=model,
+                        source_images=source_images,
+                        source_image_bytes=source_image_bytes,
+                        mask_bytes=mask_bytes,
                     )
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")

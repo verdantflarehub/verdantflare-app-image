@@ -244,7 +244,8 @@ class TaskQueueManager:
             img_bytes = self.gemini_provider.generate(
                 prompt=prompt,
                 model=model or DEFAULT_GEMINI_MODEL,
-                source_image_bytes=source_bytes,
+                source_images=source_bytes_list,
+                mask_bytes=mask_bytes,
             )
         else:
             img_bytes = self.codex_provider.edit(

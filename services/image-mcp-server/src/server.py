@@ -145,6 +145,7 @@ async def image_edit(
     source_artifact_id: str,
     prompt: str,
     reference_artifact_ids: list[str] | None = None,
+    mask_artifact_id: str | None = None,
     engine: str = "codex",
     model: str = "",
     size: str = "",
@@ -156,6 +157,7 @@ async def image_edit(
     遵循 GPT Image 2.5 官方编辑准则（明确指定“仅变更项”与“严格保留项”，为多参考图分配职责）。
     - source_artifact_id: 主参考底图 ID (如主体肖像底图)
     - reference_artifact_ids: 可选附加参考图 ID 列表 (如单品服装图、环境参考图)
+    - mask_artifact_id: 可选局部修改遮罩 ID
     - prompt: 编辑指令，建议使用 "Change only X, preserve exact facial features, skin tone, and body pose"
     - model: "gpt-image-2.5-sunburst" (默认) 或 "gpt-image-2.5-flare"
     - background: "auto", "transparent" (扣除背景生成透明底), "opaque"
@@ -168,6 +170,7 @@ async def image_edit(
         "action": "edit",
         "source_artifact_id": source_artifact_id,
         "reference_artifact_ids": reference_artifact_ids or [],
+        "mask_artifact_id": mask_artifact_id,
         "prompt": prompt,
         "model": resolved_model,
         "size": size,
@@ -207,11 +210,12 @@ async def image_inpaint(
     source_artifact_id: str,
     mask_artifact_id: str,
     prompt: str,
+    reference_artifact_ids: list[str] | None = None,
     engine: str = "codex",
     model: str = "",
     background: str = "auto",
 ) -> types.CallToolResult:
-    """基于遮罩（Mask）的精准局部重绘与无痕物体抹除。"""
+    """基于遮罩（Mask）的精准局部重绘与无痕物体抹除，支持可选服装/主体参考图融合。"""
     resolved_model = model or (
         DEFAULT_IMAGE_MODEL if engine.lower() == "codex" else DEFAULT_GEMINI_MODEL
     )
@@ -219,6 +223,7 @@ async def image_inpaint(
         "action": "inpaint",
         "source_artifact_id": source_artifact_id,
         "mask_artifact_id": mask_artifact_id,
+        "reference_artifact_ids": reference_artifact_ids or [],
         "prompt": prompt,
         "model": resolved_model,
         "background": background,
