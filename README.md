@@ -179,12 +179,14 @@ verdantflare-app-image/
 为了确保高并发下不压垮上游 API 中继（防 429），并保障服务在意外重启或 Pod 重建后任务不丢失，系统内置轻量自闭环的排队与持久化体系：
 
 ### 4.1 SQLite WAL 任务持久化
+
 - **存储位置**：`${IMAGE_ARTIFACT_ROOT}/tasks.db`，落在持久化 PVC（`/data`）上，天然持久化。
 - **并发与安全**：启用 SQLite WAL 模式（`PRAGMA journal_mode=WAL;`），单写多读无阻塞，毫秒级响应。
 - **任务模型**：单表记录 `task_id`、`project_id`、`idempotency_key`、`engine`、`model`、`prompt_preview`、`status`、`duration_seconds`、`artifact_id`、`error` 与全量请求参数。
 - **重启自愈**：服务启动生命周期自动执行 `recover_hanging_tasks()`，将此前因 Pod 异常退出遗留在 `running` 的未完结任务标为 `failed` 并附带说明，同时自动恢复重放 `queued` 待处理任务，杜绝状态死锁。
 
 ### 4.2 双核通道并发隔离与背压队列 (TaskQueueManager)
+
 - **通道并发隔离**：使用独立的 `asyncio.Semaphore` 限制各引擎最大并发请求数：
   - `CODEX_MAX_CONCURRENCY`（默认 2 并发）
   - `GEMINI_MAX_CONCURRENCY`（默认 5 并发）
@@ -212,21 +214,21 @@ verdantflare-app-image/
 
 生产环境所有凭据均由 Kubernetes Secret（`image-mcp-auth`）注入，严禁暴露在客户端或代码库：
 
-| 环境变量                     | 默认值                                     | 用途                                      |
-| :--------------------------- | :----------------------------------------- | :---------------------------------------- |
-| `IMAGE_ARTIFACT_ROOT`        | `/data/projects`                           | 持久化存储根目录                          |
-| `IMAGE_ASSET_IMPORT_ORIGINS` | 未设置                                     | 允许导入外部素材的 HTTPS 域名白名单       |
-| `IMAGE_MCP_BEARER_TOKEN`     | 未设置                                     | 保护 MCP 接口与产物下载的全局密钥（必填） |
-| `IMAGE_MCP_ALLOWED_HOSTS`    | `127.0.0.1:*`                              | DNS Rebinding 防护 Host 白名单            |
-| `IMAGE_MCP_ALLOWED_ORIGINS`  | `http://127.0.0.1:*`                       | DNS Rebinding 防护 Origin 白名单          |
-| `IMAGE_QUEUE_WORKERS`        | `8`                                        | 队列 Worker 协程消费池大小                |
-| `CODEX_MAX_CONCURRENCY`      | `2`                                        | Codex 渠道最大并发限制                    |
-| `GEMINI_MAX_CONCURRENCY`     | `5`                                        | Gemini 渠道最大并发限制                   |
-| `OPENAI_BASE_URL`            | -                                          | Codex 生图中继 API 根地址（由环境或 Secret 注入）                 |
-| `OPENAI_API_KEY`             | -                                          | Codex 生图 API 凭据（由 Secret 注入）     |
-| `ANTHROPIC_BASE_URL`         | -                                          | Gemini 生图中继 API 根地址（由环境或 Secret 注入）                |
-| `ANTHROPIC_AUTH_TOKEN`       | -                                          | Gemini 生图 API 凭据（由 Secret 注入）    |
-| `HTTPS_PROXY`                | -                                          | 可选的企业出网代理                        |
+| 环境变量                     | 默认值               | 用途                                               |
+| :--------------------------- | :------------------- | :------------------------------------------------- |
+| `IMAGE_ARTIFACT_ROOT`        | `/data/projects`     | 持久化存储根目录                                   |
+| `IMAGE_ASSET_IMPORT_ORIGINS` | 未设置               | 允许导入外部素材的 HTTPS 域名白名单                |
+| `IMAGE_MCP_BEARER_TOKEN`     | 未设置               | 保护 MCP 接口与产物下载的全局密钥（必填）          |
+| `IMAGE_MCP_ALLOWED_HOSTS`    | `127.0.0.1:*`        | DNS Rebinding 防护 Host 白名单                     |
+| `IMAGE_MCP_ALLOWED_ORIGINS`  | `http://127.0.0.1:*` | DNS Rebinding 防护 Origin 白名单                   |
+| `IMAGE_QUEUE_WORKERS`        | `8`                  | 队列 Worker 协程消费池大小                         |
+| `CODEX_MAX_CONCURRENCY`      | `2`                  | Codex 渠道最大并发限制                             |
+| `GEMINI_MAX_CONCURRENCY`     | `5`                  | Gemini 渠道最大并发限制                            |
+| `OPENAI_BASE_URL`            | -                    | Codex 生图中继 API 根地址（由环境或 Secret 注入）  |
+| `OPENAI_API_KEY`             | -                    | Codex 生图 API 凭据（由 Secret 注入）              |
+| `ANTHROPIC_BASE_URL`         | -                    | Gemini 生图中继 API 根地址（由环境或 Secret 注入） |
+| `ANTHROPIC_AUTH_TOKEN`       | -                    | Gemini 生图 API 凭据（由 Secret 注入）             |
+| `HTTPS_PROXY`                | -                    | 可选的企业出网代理                                 |
 
 ---
 
