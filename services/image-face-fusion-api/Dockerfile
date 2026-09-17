@@ -8,7 +8,7 @@ ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.source="https://github.com/verdantflarehub/verdantflare-app-image"
 LABEL org.opencontainers.image.title="VerdantFlare Image Face Fusion API"
-LABEL org.opencontainers.image.version="0.1.0"
+LABEL org.opencontainers.image.version="0.1.3"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -22,8 +22,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -r requirements.txt
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" .
 
 COPY src/ /app/src/
 

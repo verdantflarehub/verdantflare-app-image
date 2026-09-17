@@ -14,3 +14,8 @@ ENV/
 *.log
 .pytest_cache/
 scratch/
+
+# Python packaging outputs
+*.egg-info/
+build/
+dist/

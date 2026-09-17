@@ -70,7 +70,7 @@ verdantflare-app-image/
 └── services/
     └── image-mcp-server/             # 唯一的生产发布工程与 Docker 镜像
         ├── Dockerfile
-        ├── requirements.txt
+        ├── pyproject.toml
         ├── tests/
         │   ├── test_artifacts.py     # 存储与 SHA-256 校验单测
         │   ├── test_tasks.py         # 任务状态流转单测
@@ -271,3 +271,17 @@ verdantflare-app-image/
 上层业务套件（如 `verdantflare-music-mv`）可直接通过 HTTP POST 向 `${IMAGE_MCP_PUBLIC_BASE_URL}` 发送标准 MCP 工具调用（`image.generate`、`image.edit`、`image.inpaint`），并通过返回的 `/artifacts/{artifact_id}/content` 获取已落盘的受控图像资产。
 
 客户端统一配合安装 `verdantflare-skills/skills/verdantflare-image` 即可获得完全受控的原子图像生产能力。
+
+## Python 依赖管理
+
+每个 `services/<service>/pyproject.toml` 独立声明项目元数据和依赖；仓库根不合并不同服务的 CUDA / PyTorch 环境。常规安装使用 `python -m pip install ./services/<service>`，容器仍按 Dockerfile 复制并运行源码，项目 wheel 仅承载依赖元数据。
+
+轻量 CPU 测试依赖放在 `[dependency-groups].test`，使用 pip 25.3：
+
+```bash
+python -m pip install --upgrade pip==25.3
+# 仅适用于声明了 test 组的服务；不安装 GPU 运行时。
+python -m pip install --group services/<service>/pyproject.toml:test
+```
+
+GPU 索引、预装运行时与需要关闭构建隔离的编译步骤仍由 Dockerfile 控制，普通本地安装不能替代 GPU 镜像验证。

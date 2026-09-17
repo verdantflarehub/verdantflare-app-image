@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SERVICE: image-mcp-server
-  VERSION: 0.1.15
+  VERSION: 0.1.17
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -27,7 +27,7 @@ jobs:
           IMAGE_ARTIFACT_ROOT: /tmp/image-test-artifacts
           IMAGE_MCP_BEARER_TOKEN: test-secret-token
         run: |
-          python3 -m pip install -r services/${SERVICE}/requirements.txt
+          python3 -m pip install ./services/${SERVICE}
           python3 -m unittest discover -s services/${SERVICE}/tests -v
   build:
     needs: check
