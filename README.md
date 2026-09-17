@@ -15,7 +15,7 @@ VerdantFlare App Image 是部署在 VerdantFlare Station 上的 AI 图像资产�
 
 ## 1. 架构定位：告别套娃，单微服务收敛
 
-生图与本地重型 GPU 推理（如 MiniMax H3、UVR5）不同，底层对接的是云端 API/中继。因此，本套件**彻底废弃多层中继微服务的过度设计，也不依赖本地 CLI 子进程**，全仓库只维护**一个服务、一个镜像**：`image-mcp-server`。
+生图与编辑对接云端 API，由 `image-mcp-server` 统一提供入口。图片换脸由内部 `image-face-fusion-api` 承载官方 FaceFusion worker；两项服务独立构建。换脸契约及当前验证状态见设计仓库 [Face Fusion 规范](../docs/design/app/image/face-fusion.md)。
 
 ```mermaid
 flowchart TD
@@ -25,7 +25,7 @@ flowchart TD
         Pipeline[Music-MV 编排工作流]
     end
 
-    subgraph Service[唯一生产微服务: image-mcp-server (Port 8000)]
+    subgraph Service[生图与编辑入口: image-mcp-server (Port 8000)]
         direction TB
         Server[MCP Server 网关 & Bearer 鉴权]
         Artifacts[ArtifactStore 产物管理与哈希校验]
@@ -68,7 +68,7 @@ verdantflare-app-image/
 │   ├── test_gemini_image.py          # 本地独立调试脚本：直连 ANTHROPIC_BASE_URL 验证 gemini-3.1-flash-image 出图
 │   └── acceptance-image-workflow.sh  # 集群端到端与 MCP 契约验收脚本
 └── services/
-    └── image-mcp-server/             # 唯一的生产发布工程与 Docker 镜像
+    └── image-mcp-server/             # MCP 对外入口与独立 Docker 镜像
         ├── Dockerfile
         ├── pyproject.toml
         ├── tests/
@@ -109,7 +109,7 @@ verdantflare-app-image/
 2. **第二步：本地运行 MCP Server 单元测试**
    - 运行 `PYTHONPATH=services/image-mcp-server python3 -m unittest discover -s services/image-mcp-server/tests -p 'test_*.py'`，确认 Artifact 登记、路径隔离、Bearer 鉴权拦截与双通道鉴权逻辑全部通过。
 3. **第三步：合并至 `release` 分支自动触发镜像构建**
-   - 自动编译并推送唯一的生产镜像：`verdantflare-app:image-mcp-server-v0.1.0`。
+   - 自动编译并推送对应服务的生产镜像：`verdantflare-app:image-mcp-server-v0.1.0`。
 4. **第四步：Kubernetes 滚动发布与端到端验收**
    - 部署至成都验证集群，运行 `acceptance-image-workflow.sh` 执行 MCP 级别冒烟。
 

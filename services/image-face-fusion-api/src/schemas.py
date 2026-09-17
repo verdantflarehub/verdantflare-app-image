@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -7,7 +7,7 @@ class FuseRequest(BaseModel):
     target_image_path: str = Field(..., description="Absolute physical path of the canvas image to swap face on")
     source_face_path: str = Field(..., description="Absolute physical path of the baseline identity image")
     target_face_index: int = Field(default=0, ge=0, description="Target face index if multiple faces exist")
-    identity_strength: float = Field(default=0.95, ge=0.5, le=1.0, description="ArcFace embedding injection weight")
+    identity_strength: float = Field(default=0.95, ge=0.5, le=1.0, description="Maps [0.5,1] to official FaceFusion swapper weight [0,1]")
     restore_face: bool = Field(default=True, description="Enable CodeFormer face super-resolution restoration")
     restoration_fidelity: float = Field(default=0.85, ge=0.0, le=1.0, description="Restoration fidelity weight")
     output_path: str = Field(..., description="Absolute physical path for the output masterpiece")
@@ -20,12 +20,14 @@ class FuseResponse(BaseModel):
     detected_faces: int = Field(..., description="Number of detected faces in target image")
     arcface_similarity: float = Field(..., description="Cosine similarity score against source identity")
     inference_time_ms: int = Field(..., description="Total pipeline execution latency in milliseconds")
-    pipeline: str = Field(default="retinaface+arcface512+inswapper128+codeformer", description="Executed pipeline signature")
+    pipeline: str = Field(..., description="Actual executed pipeline signature")
+    execution: Dict[str, Any] = Field(default_factory=dict, description="Actual backend, models, hashes and parameters")
 
 
 class DetectRequest(BaseModel):
     """Request payload for face detection and pose verification."""
     image_path: str = Field(..., description="Absolute physical path of the image to detect")
+    target_face_index: int = Field(default=0, ge=0, description="Face index sorted by descending area")
 
 
 class DetectResponse(BaseModel):
@@ -45,3 +47,8 @@ class HealthResponse(BaseModel):
     cuda_available: bool = Field(..., description="Whether CUDA execution provider is available")
     execution_provider: str = Field(..., description="Active ONNX Runtime execution provider")
     models_loaded: Dict[str, bool] = Field(..., description="Status of pipeline model weights")
+
+    backend: str = "facefusion"
+    backend_version: str = "3.9.0"
+    reason: Optional[str] = None
+    model_hashes: Dict[str, str] = Field(default_factory=dict)

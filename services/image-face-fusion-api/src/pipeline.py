@@ -1,372 +1,167 @@
+"""HTTP-facing process supervisor. No ONNX sessions or upstream global state here."""
+import multiprocessing
 import os
+import tempfile
+import threading
 import time
-import math
-import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-import numpy as np
-from PIL import Image, ImageFilter, ImageOps
 
-logger = logging.getLogger("face_fusion_pipeline")
+from PIL import Image
 
-SAFE_PITCH_LIMIT = 35.0
-SAFE_YAW_LIMIT = 45.0
-SAFE_ROLL_LIMIT = 30.0
+from src.errors import FaceFusionPipelineError
+from src.settings import Settings, FACEFUSION_VERSION
 
 
-class FaceFusionPipelineError(Exception):
-    """Base exception for face fusion pipeline errors."""
-    def __init__(self, message: str, error_code: str = "PIPELINE_ERROR", status_code: int = 500):
-        super().__init__(message)
-        self.message = message
-        self.error_code = error_code
-        self.status_code = status_code
-
-
-class FaceNotFoundError(FaceFusionPipelineError):
-    def __init__(self, message: str = "No face detected in the provided image"):
-        super().__init__(message, error_code="FACE_NOT_FOUND", status_code=400)
-
-
-class PoseAngleExceededError(FaceFusionPipelineError):
-    def __init__(self, message: str = "Face pose angle exceeded safe alignment threshold"):
-        super().__init__(message, error_code="POSE_ANGLE_EXCEEDED", status_code=422)
-
-
-class FileNotFoundPipelineError(FaceFusionPipelineError):
-    def __init__(self, message: str = "Image file path unreachable"):
-        super().__init__(message, error_code="FILE_PATH_UNREACHABLE", status_code=404)
+def worker_main(connection, settings):
+    # Import here so the parent's HTTP process never imports upstream or initializes CUDA.
+    from src.worker import serve
+    serve(connection, settings)
 
 
 class FaceFusionPipeline:
-    """Core Face Fusion Pipeline orchestrating RetinaFace, ArcFace, Inswapper, and CodeFormer."""
+    def __init__(self, settings=None, worker_target=None):
+        self.settings = settings or Settings.from_env()
+        self._target = worker_target or worker_main
+        self._lock = threading.Lock()
+        self._process = None
+        self._connection = None
+        self._health = self._not_ready("Worker has not started")
 
-    def __init__(self, model_root: Optional[str] = None):
-        self.model_root = Path(model_root or os.getenv("INSIGHTFACE_MODEL_ROOT", "/models/insightface"))
-        self.cuda_available = False
-        self.execution_provider = "CPUExecutionProvider"
-        self._init_providers()
-        self.models_loaded: Dict[str, bool] = {
-            "retinaface_det_10g": False,
-            "arcface_w600k": False,
-            "inswapper_128": False,
-            "codeformer": False,
-        }
-        self._app: Optional[Any] = None
-        self._inswapper: Optional[Any] = None
-        self._codeformer: Optional[Any] = None
-        self._init_models()
+    @staticmethod
+    def _not_ready(reason):
+        return dict(status="not_ready", cuda_available=False, execution_provider="unavailable",
+                    models_loaded={}, backend="facefusion", backend_version=FACEFUSION_VERSION,
+                    reason=reason)
 
-    def _init_providers(self) -> None:
-        """Detect CUDA and set active ONNX execution provider."""
+    def health(self):
         try:
-            import onnxruntime as ort
-            available = ort.get_available_providers()
-            if "CUDAExecutionProvider" in available:
-                self.cuda_available = True
-                self.execution_provider = "CUDAExecutionProvider"
-            else:
-                self.cuda_available = False
-                self.execution_provider = "CPUExecutionProvider"
-        except Exception as e:
-            logger.warning(f"Error checking ONNX Runtime providers: {e}")
-            self.cuda_available = False
-            self.execution_provider = "CPUExecutionProvider"
+            alive = self._process is not None and self._process.is_alive()
+        except (ValueError, AttributeError):
+            alive = False
+        if not alive:
+            return self._not_ready(self._health.get("reason", "Worker exited"))
+        return dict(self._health)
 
-    def _init_models(self) -> None:
-        """Probe and load models if present in model_root."""
-        retinaface_path = self.model_root / "models" / "buffalo_l" / "det_10g.onnx"
-        arcface_path = self.model_root / "models" / "buffalo_l" / "w600k_r50.onnx"
-        inswapper_path = self.model_root / "models" / "inswapper_128.onnx"
-        codeformer_path = self.model_root / "models" / "codeformer.onnx"
+    def _stop(self):
+        if self._process is not None:
+            if self._process.is_alive():
+                self._process.terminate()
+            self._process.join(timeout=3)
+            if self._process.is_alive():
+                self._process.kill()
+                self._process.join(timeout=3)
+            self._process.close()
+        if self._connection is not None:
+            self._connection.close()
+        self._process = self._connection = None
 
-        self.models_loaded["retinaface_det_10g"] = retinaface_path.is_file()
-        self.models_loaded["arcface_w600k"] = arcface_path.is_file()
-        self.models_loaded["inswapper_128"] = inswapper_path.is_file()
-        self.models_loaded["codeformer"] = codeformer_path.is_file()
+    def close(self):
+        with self._lock:
+            self._stop()
+            self._health = self._not_ready("Worker stopped")
 
-        # 1. Initialize InsightFace detector and embedding extractor
-        if self.models_loaded["retinaface_det_10g"] and self.models_loaded["arcface_w600k"]:
+    def _receive(self, timeout):
+        try:
+            if not self._connection.poll(timeout):
+                raise FaceFusionPipelineError("FaceFusion worker timed out", "WORKER_TIMEOUT", 504)
+            return self._connection.recv()
+        except (EOFError, BrokenPipeError, OSError) as exc:
+            raise FaceFusionPipelineError("FaceFusion worker exited", "WORKER_EXITED", 503) from exc
+
+    def _start(self, timeout=None):
+        if self._process is not None and self._process.is_alive():
+            return
+        self._stop()
+        self._health = self._not_ready("Worker is initializing")
+        context = multiprocessing.get_context("spawn")
+        self._connection, child = context.Pipe()
+        self._process = context.Process(target=self._target, args=(child, self.settings), daemon=True)
+        self._process.start()
+        child.close()
+        try:
+            self._health = self._receive(timeout if timeout is not None else self.settings.startup_timeout)
+        except FaceFusionPipelineError as exc:
+            self._health = self._not_ready(exc.message)
+            self._stop()
+            raise
+
+    def start(self):
+        with self._lock:
             try:
-                import insightface
-                from insightface.app import FaceAnalysis
-                providers = [self.execution_provider]
-                self._app = FaceAnalysis(name="buffalo_l", root=str(self.model_root), providers=providers)
-                self._app.prepare(ctx_id=0 if self.cuda_available else -1, det_size=(640, 640))
-                logger.info("InsightFace FaceAnalysis initialized successfully.")
-            except Exception as e:
-                logger.warning(f"Failed to initialize FaceAnalysis from {self.model_root}: {e}")
+                self._start()
+            except FaceFusionPipelineError:
+                pass  # HTTP stays live; readiness exposes the startup failure.
 
-        # 2. Initialize Inswapper model
-        if self.models_loaded["inswapper_128"]:
+    def _call(self, operation, payload):
+        if not self._lock.acquire(blocking=False):
+            raise FaceFusionPipelineError("FaceFusion worker is busy", "WORKER_BUSY", 503)
+        try:
+            deadline = time.monotonic() + self.settings.timeout
+            self._start(min(self.settings.timeout, self.settings.startup_timeout))
+            if self._health["status"] != "healthy":
+                raise FaceFusionPipelineError(self._health.get("reason", "Models not ready"), "MODEL_NOT_READY", 503)
             try:
-                import insightface
-                self._inswapper = insightface.model_zoo.get_model(str(inswapper_path), download=False)
-                logger.info("Inswapper model loaded successfully.")
-            except Exception as e:
-                logger.warning(f"Failed to load Inswapper model: {e}")
+                self._connection.send((operation, payload))
+                reply = self._receive(max(0, deadline - time.monotonic()))
+            except (FaceFusionPipelineError, BrokenPipeError, OSError) as exc:
+                self._health = self._not_ready("Worker failed; next request will restart it")
+                self._stop()
+                if isinstance(exc, FaceFusionPipelineError):
+                    raise
+                raise FaceFusionPipelineError("FaceFusion worker exited", "WORKER_EXITED", 503) from exc
+            if "error" in reply:
+                raise FaceFusionPipelineError(**reply["error"])
+            return reply["result"]
+        finally:
+            self._lock.release()
 
-        # 3. Initialize CodeFormer restoration model
-        if self.models_loaded["codeformer"]:
-            try:
-                import onnxruntime as ort
-                opts = ort.SessionOptions()
-                opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                providers = [self.execution_provider]
-                self._codeformer = ort.InferenceSession(str(codeformer_path), sess_options=opts, providers=providers)
-                logger.info("CodeFormer model loaded successfully.")
-            except Exception as e:
-                logger.warning(f"Failed to load CodeFormer session: {e}")
-
-    def detect_face(self, image_path: str) -> Dict[str, Any]:
-        """Detect faces and compute head pose pitch/yaw/roll."""
-        path = Path(image_path)
+    def _image_path(self, value):
+        path = Path(value).resolve()
         if not path.is_file():
-            raise FileNotFoundPipelineError(f"Image not found at {image_path}")
-
+            raise FaceFusionPipelineError("Image path is unreachable", "FILE_PATH_UNREACHABLE", 404)
         try:
-            img_pil = Image.open(path).convert("RGB")
-            w, h = img_pil.size
-        except Exception as e:
-            raise FaceFusionPipelineError(f"Failed to read image {image_path}: {e}", status_code=400)
+            with Image.open(path) as image:
+                if image.width * image.height > self.settings.max_pixels:
+                    raise FaceFusionPipelineError("Image exceeds pixel limit", "IMAGE_TOO_LARGE", 413)
+                image.verify()
+        except FaceFusionPipelineError:
+            raise
+        except Exception as exc:
+            raise FaceFusionPipelineError("Invalid input image", "INVALID_IMAGE", 400) from exc
+        return str(path)
 
-        # Real model inference if loaded
-        if self._app is not None:
+    def detect_face(self, image_path, target_face_index=0):
+        return self._call("detect", dict(image_path=self._image_path(image_path), target_face_index=target_face_index))
+
+    def fuse(self, target_image_path, source_face_path, target_face_index=0,
+             identity_strength=0.95, restore_face=True, restoration_fidelity=0.85, output_path=""):
+        started = time.perf_counter()
+        target = self._image_path(target_image_path)
+        source = self._image_path(source_face_path)
+        if not 0.5 <= identity_strength <= 1 or not 0 <= restoration_fidelity <= 1 or target_face_index < 0:
+            raise FaceFusionPipelineError("Invalid fusion parameters", "INVALID_PARAMETERS", 422)
+        output = Path(output_path).absolute()
+        if not output_path or output.suffix.lower() != ".png":
+            raise FaceFusionPipelineError("Output must be a PNG path", "INVALID_OUTPUT_PATH", 422)
+        if output.exists() or output.is_symlink():
+            raise FaceFusionPipelineError("Output already exists", "OUTPUT_EXISTS", 409)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".facefusion-", suffix=".png", dir=output.parent)
+        os.close(fd)
+        try:
+            result = self._call("fuse", dict(target_image_path=target, source_face_path=source,
+                target_face_index=target_face_index, identity_strength=identity_strength,
+                restore_face=restore_face, restoration_fidelity=restoration_fidelity, output_path=temporary))
+            with Image.open(temporary) as image:
+                if image.format != "PNG":
+                    raise FaceFusionPipelineError("Worker returned invalid output", "INVALID_OUTPUT", 500)
+                image.verify()
+            # Atomic no-clobber publication, after worker success; timeouts never publish an artifact.
             try:
-                import cv2
-                img_cv = cv2.imread(str(path))
-                faces = self._app.get(img_cv)
-                if not faces:
-                    raise FaceNotFoundError(f"No face detected in {image_path}")
-                face = faces[0]
-                box = [int(v) for v in face.bbox]
-                pitch, yaw, roll = 0.0, 0.0, 0.0
-                if hasattr(face, "pose") and face.pose is not None:
-                    pitch, yaw, roll = float(face.pose[0]), float(face.pose[1]), float(face.pose[2])
-                conf = float(face.det_score) if hasattr(face, "det_score") else 0.95
-                pose_safe = (abs(pitch) <= SAFE_PITCH_LIMIT and 
-                             abs(yaw) <= SAFE_YAW_LIMIT and 
-                             abs(roll) <= SAFE_ROLL_LIMIT)
-                return {
-                    "face_count": len(faces),
-                    "pitch": round(pitch, 2),
-                    "yaw": round(yaw, 2),
-                    "roll": round(roll, 2),
-                    "confidence": round(conf, 4),
-                    "bounding_box": box,
-                    "pose_safe": pose_safe,
-                }
-            except FaceNotFoundError:
-                raise
-            except Exception as e:
-                logger.error(f"Real detect_face failed: {e}")
-                raise FaceFusionPipelineError(f"Face detection failed: {e}", status_code=500)
-
-        raise FaceFusionPipelineError(
-            "FaceAnalysis model (buffalo_l) is not loaded",
-            error_code="MODEL_NOT_READY",
-            status_code=503,
-        )
-
-    @staticmethod
-    def cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
-        """Calculate cosine similarity between two feature vectors."""
-        norm1 = np.linalg.norm(v1)
-        norm2 = np.linalg.norm(v2)
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-        return float(np.dot(v1, v2) / (norm1 * norm2))
-
-    @staticmethod
-    def _match_color_distribution(source_np: np.ndarray, reference_np: np.ndarray) -> np.ndarray:
-        """Adaptive histogram and moment matching to align skin color and lighting."""
-        # Convert RGB to float
-        src = source_np.astype(np.float32)
-        ref = reference_np.astype(np.float32)
-
-        # Simplified LAB approximation in RGB channels (Luminance + Color Chrominance)
-        matched = np.zeros_like(src)
-        for i in range(3):
-            src_mean, src_std = np.mean(src[:, :, i]), np.std(src[:, :, i])
-            ref_mean, ref_std = np.mean(ref[:, :, i]), np.std(ref[:, :, i])
-
-            if src_std > 1e-4:
-                scaled = (src[:, :, i] - src_mean) * (ref_std / src_std) + ref_mean
-            else:
-                scaled = src[:, :, i] - src_mean + ref_mean
-            matched[:, :, i] = np.clip(scaled, 0.0, 255.0)
-
-        return matched.astype(np.uint8)
-
-    @staticmethod
-    def _create_feathered_mask(width: int, height: int, blur_radius: int = 15) -> Image.Image:
-        """Generate smooth elliptical feathered alpha mask to eliminate border seams."""
-        mask = Image.new("L", (width, height), 0)
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(mask)
-        # Inset margin by 10%
-        mx = int(width * 0.1)
-        my = int(height * 0.1)
-        draw.ellipse((mx, my, width - mx, height - my), fill=255)
-        # Apply Gaussian blur for soft feathering
-        feathered = mask.filter(ImageFilter.GaussianBlur(radius=blur_radius))
-        return feathered
-
-    def _restore_face_crop(self, face_crop_pil: Image.Image, fidelity: float = 0.85) -> Image.Image:
-        """Super-resolve face crop using CodeFormer or high-pass texture enhancement."""
-        if self._codeformer is not None:
-            try:
-                # Preprocess to 512x512 normalized tensor
-                orig_size = face_crop_pil.size
-                img_512 = face_crop_pil.resize((512, 512), Image.Resampling.BILINEAR)
-                arr = np.array(img_512, dtype=np.float32) / 255.0
-                # Normalize to [-1, 1]
-                arr = (arr - 0.5) / 0.5
-                tensor = np.transpose(arr, (2, 0, 1))[np.newaxis, :]  # (1, 3, 512, 512)
-
-                inputs = {self._codeformer.get_inputs()[0].name: tensor}
-                if len(self._codeformer.get_inputs()) > 1:
-                    inputs[self._codeformer.get_inputs()[1].name] = np.array([fidelity], dtype=np.float32)
-
-                outputs = self._codeformer.run(None, inputs)
-                out_tensor = outputs[0][0]  # (3, 512, 512)
-                out_arr = np.transpose(out_tensor, (1, 2, 0))
-                out_arr = np.clip((out_arr * 0.5 + 0.5) * 255.0, 0, 255).astype(np.uint8)
-                restored_512 = Image.fromarray(out_arr)
-                return restored_512.resize(orig_size, Image.Resampling.LANCZOS)
-            except Exception as e:
-                logger.warning(f"CodeFormer ONNX execution failed ({e}), falling back to sharpener")
-
-        # Texture enhancement fallback (UnsharpMask protecting micro-textures & highlights)
-        radius = 2.0
-        percent = int(120 * fidelity)
-        threshold = 3
-        enhanced = face_crop_pil.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=threshold))
-        return enhanced
-
-    def fuse(
-        self,
-        target_image_path: str,
-        source_face_path: str,
-        target_face_index: int = 0,
-        identity_strength: float = 0.95,
-        restore_face: bool = True,
-        restoration_fidelity: float = 0.85,
-        output_path: str = "",
-    ) -> Dict[str, Any]:
-        """Execute face fusion with Inswapper, skin-tone matching, and CodeFormer restoration."""
-        start_time = time.perf_counter()
-
-        target_p = Path(target_image_path)
-        source_p = Path(source_face_path)
-
-        if not target_p.is_file():
-            raise FileNotFoundPipelineError(f"Target canvas image not found: {target_image_path}")
-        if not source_p.is_file():
-            raise FileNotFoundPipelineError(f"Source baseline face image not found: {source_face_path}")
-
-        # 1. Pose check
-        detect_res = self.detect_face(target_image_path)
-        if not detect_res["pose_safe"]:
-            raise PoseAngleExceededError(
-                f"Target pose angle exceeded safe limits: pitch={detect_res['pitch']}°, "
-                f"yaw={detect_res['yaw']}°, roll={detect_res['roll']}°"
-            )
-
-        # 2. Pipeline processing
-        out_p = Path(output_path)
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        tmp_out = out_p.parent / f".tmp.{out_p.name}"
-
-        if self._app is None or self._inswapper is None:
-            raise FaceFusionPipelineError(
-                "Required models (FaceAnalysis / Inswapper) are not loaded",
-                error_code="MODEL_NOT_READY",
-                status_code=503,
-            )
-
-        import cv2
-        source_img = cv2.imread(str(source_p))
-        target_img = cv2.imread(str(target_p))
-        if source_img is None:
-            raise FaceFusionPipelineError(f"Failed to read source image: {source_face_path}", status_code=400)
-        if target_img is None:
-            raise FaceFusionPipelineError(f"Failed to read target canvas: {target_image_path}", status_code=400)
-
-        source_faces = self._app.get(source_img)
-        target_faces = self._app.get(target_img)
-        if not source_faces:
-            raise FaceNotFoundError(f"No face found in source identity image: {source_face_path}")
-        if not target_faces or target_face_index >= len(target_faces):
-            raise FaceNotFoundError(f"Target face index {target_face_index} not found in canvas")
-
-        # Select dominant face from source if multiple faces detected
-        if len(source_faces) > 1:
-            source_faces = sorted(
-                source_faces,
-                key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
-                reverse=True,
-            )
-        source_face = source_faces[0]
-        target_face = target_faces[target_face_index]
-
-        # Execute genuine Inswapper face swapping
-        fused_img_bgr = self._inswapper.get(target_img, target_face, source_face, paste_back=True)
-
-        # Post-processing: CodeFormer restoration (if model loaded) & skin-tone alignment
-        fused_img_rgb = cv2.cvtColor(fused_img_bgr, cv2.COLOR_BGR2RGB)
-        fused_pil = Image.fromarray(fused_img_rgb)
-
-        if restore_face and self._codeformer is not None:
-            bbox = [int(v) for v in target_face.bbox]
-            x1, y1, x2, y2 = max(0, bbox[0]), max(0, bbox[1]), min(fused_pil.width, bbox[2]), min(fused_pil.height, bbox[3])
-            crop = fused_pil.crop((x1, y1, x2, y2))
-            restored_crop = self._restore_face_crop(crop, fidelity=restoration_fidelity)
-
-            orig_crop = Image.open(target_p).convert("RGB").crop((x1, y1, x2, y2))
-            matched_crop_np = self._match_color_distribution(np.array(restored_crop), np.array(orig_crop))
-            matched_crop = Image.fromarray(matched_crop_np)
-
-            feather_mask = self._create_feathered_mask(matched_crop.width, matched_crop.height, blur_radius=15)
-            fused_pil.paste(matched_crop, (x1, y1), mask=feather_mask)
-
-        # Save fused output to temporary file
-        fused_pil.save(tmp_out, format="PNG", quality=100)
-
-        # 3. Calculate true ArcFace cosine similarity against source face
-        fused_cv = cv2.cvtColor(np.array(fused_pil), cv2.COLOR_RGB2BGR)
-        fused_faces = self._app.get(fused_cv)
-        if not fused_faces:
-            fused_faces = self._app.get(fused_img_bgr)
-
-        if fused_faces:
-            tb = target_face.bbox
-            tc = ((tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0)
-            best_face = fused_faces[0]
-            if len(fused_faces) > 1:
-                min_dist = float("inf")
-                for f in fused_faces:
-                    fb = f.bbox
-                    fc = ((fb[0] + fb[2]) / 2.0, (fb[1] + fb[3]) / 2.0)
-                    dist = (tc[0] - fc[0]) ** 2 + (tc[1] - fc[1]) ** 2
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_face = f
-            sim_score = self.cosine_similarity(best_face.normed_embedding, source_face.normed_embedding)
-        else:
-            logger.warning("Could not detect face in fused image for similarity calculation")
-            sim_score = 0.0
-
-        # Atomic rename to final output path
-        os.replace(tmp_out, out_p)
-
-        latency_ms = int((time.perf_counter() - start_time) * 1000)
-
-        return {
-            "status": "success",
-            "output_path": str(out_p.resolve()),
-            "detected_faces": detect_res["face_count"],
-            "arcface_similarity": round(sim_score, 4),
-            "inference_time_ms": latency_ms,
-            "pipeline": "retinaface+arcface512+inswapper128+codeformer",
-        }
+                os.link(temporary, output)
+            except FileExistsError as exc:
+                raise FaceFusionPipelineError("Output already exists", "OUTPUT_EXISTS", 409) from exc
+            result.update(output_path=str(output.resolve()), inference_time_ms=int((time.perf_counter()-started)*1000))
+            return result
+        finally:
+            Path(temporary).unlink(missing_ok=True)

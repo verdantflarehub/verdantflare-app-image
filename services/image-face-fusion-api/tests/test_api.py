@@ -31,15 +31,20 @@ class TestImageFaceFusionAPI(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_health_check(self):
-        """Test GET /health probe returns valid status and provider."""
-        resp = self.client.get("/health")
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["status"], "healthy")
-        self.assertIn("cuda_available", data)
-        self.assertIn("execution_provider", data)
-        self.assertIn("models_loaded", data)
+    def test_health_unready_and_liveness(self):
+        with mock.patch("src.main.pipeline.health", return_value={
+            "status": "not_ready", "cuda_available": False,
+            "execution_provider": "unavailable", "models_loaded": {},
+        }):
+            self.assertEqual(self.client.get("/health").status_code, 503)
+        self.assertEqual(self.client.get("/live").status_code, 200)
+
+    def test_health_ready(self):
+        with mock.patch("src.main.pipeline.health", return_value={
+            "status": "healthy", "cuda_available": False,
+            "execution_provider": "CPUExecutionProvider", "models_loaded": {"fixture": True},
+        }):
+            self.assertEqual(self.client.get("/health").status_code, 200)
 
     @mock.patch("src.main.pipeline.detect_face")
     def test_detect_face_success(self, mock_detect):
@@ -53,9 +58,10 @@ class TestImageFaceFusionAPI(unittest.TestCase):
             "bounding_box": [100, 200, 300, 400],
             "pose_safe": True,
         }
-        payload = {"image_path": str(self.target_img_path)}
+        payload = {"image_path": str(self.target_img_path), "target_face_index": 1}
         resp = self.client.post("/v1/detect", json=payload)
         self.assertEqual(resp.status_code, 200)
+        mock_detect.assert_called_once_with(str(self.target_img_path), 1)
         data = resp.json()
         self.assertGreaterEqual(data["face_count"], 1)
         self.assertIn("pitch", data)
@@ -82,7 +88,7 @@ class TestImageFaceFusionAPI(unittest.TestCase):
             "detected_faces": 1,
             "arcface_similarity": 0.892,
             "inference_time_ms": 120,
-            "pipeline": "retinaface+arcface512+inswapper128+codeformer",
+            "pipeline": "facefusion-3.9.0+hyperswap_1a_256+codeformer",
         }
         payload = {
             "target_image_path": str(self.target_img_path),
@@ -100,7 +106,7 @@ class TestImageFaceFusionAPI(unittest.TestCase):
         self.assertTrue(self.output_img_path.is_file())
         self.assertGreaterEqual(data["arcface_similarity"], 0.85)
         self.assertGreaterEqual(data["inference_time_ms"], 0)
-        self.assertEqual(data["pipeline"], "retinaface+arcface512+inswapper128+codeformer")
+        self.assertEqual(data["pipeline"], "facefusion-3.9.0+hyperswap_1a_256+codeformer")
 
     def test_fuse_face_validation_error(self):
         """Test POST /v1/fuse rejects invalid identity_strength."""

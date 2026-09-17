@@ -264,17 +264,16 @@ async def image_faceswap(
     project_id: str | None = None,
     target_face_index: int = 0,
 ) -> types.CallToolResult:
-    """阶段二：小月骨相置换与面容超分融合工具。
+    """图片换脸与可选人脸增强工具。
 
-    将小月基准角色卡（source_identity_artifact_id）的 512 维特征精准注入到阶段一文生图大片（target_artifact_id）中，
-    并通过 CodeFormer 执行眼眸发丝超分修复与泊松无缝贴图反变换。
+    将源身份应用到目标图片的指定人脸，保留实际处理参数与模型信息。
     - target_artifact_id: 阶段一原始大片 Artifact ID
-    - source_identity_artifact_id: 小月基准角色卡 Artifact ID 或资产路径
-    - identity_strength: 骨相置换强度，默认 0.95
+    - source_identity_artifact_id: 源身份图片 Artifact ID 或资产路径
+    - identity_strength: 身份强度 [0.5,1]，默认 0.95
     - restore_face: 是否开启面部超分修复，默认 True
     - restoration_fidelity: 超分修复保真度权重，默认 0.85
     - project_id: 可选项目 ID（若未指定则自动从 target_artifact 继承）
-    - target_face_index: 目标图像中要替换的人脸索引，默认 0
+    - target_face_index: 按人脸面积降序排列的目标索引，默认 0
     """
     res = await handle_faceswap(
         artifacts=artifacts,

@@ -91,6 +91,7 @@ class TestFaceSwap(unittest.TestCase):
         # 模拟后端微服务执行生成输出文件
         async def fake_post(url, json=None, **kwargs):
             out_path = Path(json["output_path"])
+            self.assertEqual(out_path.suffix, ".png")
             out_path.parent.mkdir(parents=True, exist_ok=True)
             # 写入一个融合后的测试图片
             out_img = Image.new("RGB", (2160, 3840), color=(0, 255, 0))
@@ -105,7 +106,8 @@ class TestFaceSwap(unittest.TestCase):
                 "detected_faces": 1,
                 "arcface_similarity": 0.925,
                 "inference_time_ms": 480,
-                "pipeline": "retinaface+arcface512+inswapper128+codeformer",
+                "pipeline": "facefusion-3.9.0+hyperswap_1a_256+codeformer",
+                "execution": {"backend": "facefusion", "version": "3.9.0", "face_swapper_weight": 0.9},
             }
             return mock_resp
 
@@ -138,6 +140,8 @@ class TestFaceSwap(unittest.TestCase):
             retrieved = self.store.get(fused_art_id, self.project_id)
             self.assertIsNotNone(retrieved)
             self.assertEqual(retrieved.metadata["type"], "face_fusion")
+            self.assertEqual(retrieved.metadata["execution"]["version"], "3.9.0")
+            self.assertEqual(res["metrics"]["execution"]["face_swapper_weight"], 0.9)
             self.assertEqual(retrieved.metadata["arcface_similarity"], 0.925)
         finally:
             loop.close()

@@ -1,17 +1,19 @@
 [project]
 name = "verdantflare-image-face-fusion-api"
-version = "0.1.3"
+version = "0.2.0"
 description = "VerdantFlare image-face-fusion-api service"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.28.0",
   "pydantic>=2.6.0",
-  "numpy>=1.24.0",
+  "numpy==2.4.6",
   "Pillow>=10.0.0",
-  "opencv-python-headless>=4.9.0.80",
-  "onnxruntime-gpu>=1.17.0",
-  "insightface>=0.7.3",
+  "opencv-python-headless==5.0.0.93",
+  "onnxruntime-gpu==1.29.0",
+  "onnx==1.22.0",
+  "scipy==1.18.0",
+  "tqdm==4.70.0",
   "httpx>=0.27.0",
 ]
 
@@ -28,9 +30,12 @@ test = [
   "fastapi>=0.110.0",
   "uvicorn>=0.28.0",
   "pydantic>=2.6.0",
-  "numpy>=1.24.0",
+  "numpy==2.4.6",
   "Pillow>=10.0.0",
-  "opencv-python-headless>=4.9.0.80",
-  "onnxruntime>=1.17.0",
+  "opencv-python-headless==5.0.0.93",
+  "onnxruntime==1.29.0",
+  "onnx==1.22.0",
+  "scipy==1.18.0",
+  "tqdm==4.70.0",
   "httpx>=0.27.0",
 ]

@@ -105,7 +105,7 @@ async def handle_faceswap(
 ) -> dict[str, Any]:
     """执行阶段二骨相置换与面容超分融合，内部向 image-face-fusion-api 发起零网络拷贝 RPC。"""
     # 1. 字段校验与范围规约
-    strength = max(0.0, min(1.0, float(identity_strength)))
+    strength = max(0.5, min(1.0, float(identity_strength)))
     fidelity = max(0.0, min(1.0, float(restoration_fidelity)))
     face_idx = max(0, int(target_face_index))
 
@@ -139,10 +139,7 @@ async def handle_faceswap(
 
     # 4. 规划零网络拷贝物理输出路径
     output_artifact_id = f"art-{uuid.uuid4().hex[:16]}"
-    ext = Path(target_rec.filename).suffix or ".png"
-    output_filename = f"fused-{target_rec.filename}"
-    if not output_filename.endswith(ext):
-        output_filename = f"{output_filename}{ext}"
+    output_filename = f"fused-{Path(target_rec.filename).stem}.png"
 
     project_dir = artifacts._project_dir(resolved_project_id)
     output_physical_path = project_dir / f"{output_artifact_id}-{output_filename}"
@@ -150,7 +147,7 @@ async def handle_faceswap(
     # 5. 构造微服务请求负载
     api_url = os.environ.get("IMAGE_FACE_FUSION_API_URL", "http://image-face-fusion-api:8000").rstrip("/")
     fuse_endpoint = f"{api_url}/v1/fuse"
-    timeout_sec = float(os.environ.get("IMAGE_FACE_FUSION_TIMEOUT", "15.0"))
+    timeout_sec = float(os.environ.get("IMAGE_FACE_FUSION_TIMEOUT", "150.0"))
 
     payload = {
         "target_image_path": str(target_path),
@@ -239,7 +236,8 @@ async def handle_faceswap(
             "arcface_similarity": fuse_data.get("arcface_similarity", 0.0),
             "detected_faces": fuse_data.get("detected_faces", 1),
             "inference_time_ms": fuse_data.get("inference_time_ms", 0),
-            "pipeline": fuse_data.get("pipeline", "retinaface+arcface512+inswapper128+codeformer"),
+            "pipeline": fuse_data.get("pipeline", ""),
+            "execution": fuse_data.get("execution", {}),
         },
     )
 
@@ -256,6 +254,7 @@ async def handle_faceswap(
             "inference_time_ms": fuse_data.get("inference_time_ms", 0),
             "detected_faces": fuse_data.get("detected_faces", 1),
             "pipeline": fuse_data.get("pipeline", ""),
+            "execution": fuse_data.get("execution", {}),
             "width": width,
             "height": height,
         },

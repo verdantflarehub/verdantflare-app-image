@@ -37,9 +37,12 @@ def main():
     print("================================================================================")
 
     pipeline = FaceFusionPipeline()
-    print(f"[*] CUDA Available: {pipeline.cuda_available}")
-    print(f"[*] Active Execution Provider: {pipeline.execution_provider}")
-    print(f"[*] Model Weights Loaded: {pipeline.models_loaded}")
+    import atexit
+    atexit.register(pipeline.close)
+    pipeline.start()
+    print(f"[*] Worker health: {pipeline.health()}")
+    if pipeline.health()["status"] != "healthy":
+        raise SystemExit("FaceFusion is not ready; prepare configured models before testing")
 
     source_path = Path(args.source)
     # Check if relative to design repo root
@@ -51,20 +54,14 @@ def main():
     if args.self_test:
         print("\n--- [RUNNING SELF-TEST] ---")
         if not source_path.is_file():
-            # Generate dummy identity image for offline test
-            tmp_source = repo_root / "scratch" / "dummy_identity.png"
-            tmp_source.parent.mkdir(parents=True, exist_ok=True)
-            Image.new("RGB", (1024, 1536), color=(220, 200, 190)).save(tmp_source)
-            source_path = tmp_source
-            print(f"[*] Using synthetic identity image: {source_path}")
-        else:
-            print(f"[*] Source Identity: {source_path}")
+            raise SystemExit("Self-comparison requires an existing source face image")
+        print(f"[*] Source Identity: {source_path}")
 
         detect_res = pipeline.detect_face(str(source_path))
         print(f"[✔] Face Detection: {detect_res['face_count']} face(s), Confidence: {detect_res['confidence']}")
         print(f"    Head Pose: Pitch={detect_res['pitch']}°, Yaw={detect_res['yaw']}°, Roll={detect_res['roll']}° (Safe: {detect_res['pose_safe']})")
 
-        out_path = repo_root / "scratch" / "self_test_output.png"
+        out_path = Path(args.output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         fuse_res = pipeline.fuse(
@@ -74,10 +71,10 @@ def main():
             output_path=str(out_path),
         )
         print(f"[✔] Self-Fusion Status: {fuse_res['status']}")
-        print(f"    Similarity: {fuse_res['arcface_similarity']} (Expected >= 0.88)")
+        print(f"    Similarity: {fuse_res['arcface_similarity']}")
         print(f"    Latency: {fuse_res['inference_time_ms']}ms")
         print(f"    Output: {fuse_res['output_path']}")
-        print("\n[RESULT] SELF-TEST PASSED SUCCESSFULLY!\n")
+        print("\n[RESULT] Self-comparison inference completed; visual review is still required.\n")
         return
 
     # Normal execution
