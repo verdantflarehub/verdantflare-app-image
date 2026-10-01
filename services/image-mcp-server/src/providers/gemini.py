@@ -38,6 +38,7 @@ class GeminiProvider:
         base_url: str | None = None,
         anthropic_base_url: str | None = None,
         anthropic_token: str | None = None,
+        proxy_url: str | None = None,
     ) -> None:
         self.api_key = (
             api_key
@@ -57,6 +58,24 @@ class GeminiProvider:
         self.anthropic_token = (
             anthropic_token or os.environ.get("ANTHROPIC_AUTH_TOKEN") or ""
         ).strip()
+        # Google AI Studio 在部分集群需要显式 HTTP CONNECT 代理；使用专用
+        # GEMINI_PROXY_URL，避免把所有供应商请求隐式改走海外代理。
+        self.proxy_url = (
+            proxy_url
+            or os.environ.get("GEMINI_PROXY_URL")
+            or os.environ.get("GEMINI_HTTPS_PROXY")
+            or ""
+        ).strip().rstrip("/")
+
+    def _urlopen(self, request: urllib.request.Request, timeout: int):
+        if not self.proxy_url:
+            return urllib.request.urlopen(request, timeout=timeout)
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler(
+                {"http": self.proxy_url, "https": self.proxy_url}
+            )
+        )
+        return opener.open(request, timeout=timeout)
 
     def _ensure_auth(self) -> str:
         """返回鉴权通道: 优先使用 'google' 原生通道，回退到 'anthropic'"""
@@ -178,7 +197,7 @@ class GeminiProvider:
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with self._urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return self._extract_image_bytes(data)
 
@@ -243,7 +262,7 @@ class GeminiProvider:
             method="POST",
         )
 
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with self._urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return self._extract_image_bytes(data)
 
@@ -293,4 +312,3 @@ class GeminiProvider:
             time.sleep(2)
 
         raise GeminiProviderError("Gemini 响应未返回有效图像数据")
-

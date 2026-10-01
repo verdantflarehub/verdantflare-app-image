@@ -3,9 +3,9 @@
 本地独立调试脚本：通过 Google Gemini API 或 Antigravity / Anthropic Messages 协议测试 Gemini 图像生成。
 
 支持双协议驱动：
-  1. Anthropic Messages 协议 (优先检测 ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)
+  1. Google AI Studio Official REST API (优先检测 GEMINI_API_KEY + 可选 GEMINI_BASE_URL)
      默认模型：gemini-3.1-flash-image
-  2. Google Official REST API (检测 GEMINI_API_KEY + 可选 GEMINI_BASE_URL)
+  2. Anthropic Messages 协议（仅作为显式兼容回退）
      默认模型：gemini-3.1-flash-image
 
 功能覆盖：
@@ -225,10 +225,12 @@ def main() -> int:
 
     # 确定调用通道
     channel = "unknown"
-    if args.protocol == "anthropic" or (args.protocol == "auto" and anthropic_base_url and anthropic_token):
+    if args.protocol == "anthropic":
         channel = "anthropic"
     elif args.protocol == "google" or (args.protocol == "auto" and gemini_key):
         channel = "google"
+    elif args.protocol == "auto" and anthropic_base_url and anthropic_token:
+        channel = "anthropic"
 
     print("⚙️ Gemini 图像生成运行配置:")
     print(f"  - 调度模式: {channel.upper()} (protocol: {args.protocol})")

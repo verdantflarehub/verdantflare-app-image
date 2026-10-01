@@ -9,7 +9,7 @@ VerdantFlare App Image 是部署在 VerdantFlare Station 上的 AI 图像资产�
 系统**不依赖任何本地 CLI（不通过 Codex CLI 或 Gemini CLI）**，底层全面采用标准 HTTP API 中继，内置**双核 API 驱动**：
 
 1. **Codex 图像引擎**：基于 `OPENAI_BASE_URL` + `OPENAI_API_KEY`，调用 OpenAI Responses API / Images Edits API，权威出图模型指定为 **`gpt-image-2.5-sunburst`**（亦支持 `gpt-image-2.5-flare`）；
-2. **Gemini 图像引擎**：基于 `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`，调用 Anthropic Messages 协议中继接口（`/v1/messages`），权威出图模型指定为 **`gemini-3.1-flash-image`**，内建纯净图与多模态指令编辑支持。
+2. **Gemini 图像引擎**：基于 `GEMINI_BASE_URL` + `GEMINI_API_KEY`，调用 Google AI Studio 原生 Gemini REST API（`/v1beta/models/*:generateContent`），权威出图模型指定为 **`gemini-3.1-flash-image`**，内建纯净图与多模态指令编辑支持。
 
 ---
 
@@ -32,7 +32,7 @@ flowchart TD
 
         subgraph Providers[内置双核 API 驱动模块]
             CodexP[providers/codex.py<br/>OpenAI Responses / gpt-image-2.5-sunburst]
-            GeminiP[providers/gemini.py<br/>Anthropic Messages / gemini-3.1-flash-image]
+            GeminiP[providers/gemini.py<br/>Google AI Studio / gemini-3.1-flash-image]
         end
 
         Server --> Artifacts
@@ -41,7 +41,7 @@ flowchart TD
 
     subgraph External[云端 API 中继]
         Sub2OpenAI[OpenAI 中继: OPENAI_BASE_URL]
-        Sub2Anthropic[Anthropic 中继: ANTHROPIC_BASE_URL]
+        AIStudio[Google AI Studio: GEMINI_BASE_URL]
     end
 
     subgraph Storage[持久化存储]
@@ -50,7 +50,7 @@ flowchart TD
 
     Client -->|标准 Streamable HTTP / MCP 协议| Server
     CodexP -->|HTTP POST /v1/responses| Sub2OpenAI
-    GeminiP -->|HTTP POST /v1/messages| Sub2Anthropic
+    GeminiP -->|HTTP POST /v1beta/models/*:generateContent| AIStudio
     Artifacts -->|原子落盘| PVC
 ```
 
@@ -65,7 +65,7 @@ verdantflare-app-image/
 ├── README.md
 ├── scripts/
 │   ├── test_codex_image.py           # 本地独立调试脚本：直连 OPENAI_BASE_URL 验证 Responses/Edits 出图与 4K 回退
-│   ├── test_gemini_image.py          # 本地独立调试脚本：直连 ANTHROPIC_BASE_URL 验证 gemini-3.1-flash-image 出图
+│   ├── test_gemini_image.py          # 本地独立调试脚本：直连 Google AI Studio 验证 gemini-3.1-flash-image 出图
 │   └── acceptance-image-workflow.sh  # 集群端到端与 MCP 契约验收脚本
 └── services/
     └── image-mcp-server/             # MCP 对外入口与独立 Docker 镜像
@@ -94,8 +94,8 @@ verdantflare-app-image/
      ```bash
      OPENAI_BASE_URL="https://<openai-relay-endpoint>/v1"
      OPENAI_API_KEY="sk-..."
-     ANTHROPIC_BASE_URL="https://<anthropic-relay-endpoint>"
-     ANTHROPIC_AUTH_TOKEN="sk-..."
+     GEMINI_BASE_URL="https://generativelanguage.googleapis.com"
+     GEMINI_API_KEY="AIza..."
      ```
    - 测试 Codex 渠道：
      ```bash
@@ -226,8 +226,9 @@ verdantflare-app-image/
 | `GEMINI_MAX_CONCURRENCY`     | `5`                  | Gemini 渠道最大并发限制                            |
 | `OPENAI_BASE_URL`            | -                    | Codex 生图中继 API 根地址（由环境或 Secret 注入）  |
 | `OPENAI_API_KEY`             | -                    | Codex 生图 API 凭据（由 Secret 注入）              |
-| `ANTHROPIC_BASE_URL`         | -                    | Gemini 生图中继 API 根地址（由环境或 Secret 注入） |
-| `ANTHROPIC_AUTH_TOKEN`       | -                    | Gemini 生图 API 凭据（由 Secret 注入）             |
+| `GEMINI_BASE_URL`            | `https://generativelanguage.googleapis.com` | Google AI Studio Gemini API 根地址 |
+| `GEMINI_API_KEY`             | -                    | Google AI Studio API Key（由环境或 Secret 注入） |
+| `GEMINI_PROXY_URL`           | -                    | Gemini 专用 HTTP/HTTPS 代理（成都使用 OpenClash Service） |
 | `HTTPS_PROXY`                | -                    | 可选的企业出网代理                                 |
 
 ---

@@ -144,7 +144,39 @@ class TestGeminiProvider(unittest.TestCase):
         self.assertIn("text", parts[3])
         self.assertEqual(payload["generationConfig"]["responseModalities"], ["IMAGE", "TEXT"])
 
+    def test_generate_google_uses_explicit_proxy(self):
+        import io
+        import json
+        from unittest.mock import MagicMock
+
+        provider = GeminiProvider(
+            api_key="google-key",
+            base_url="https://generativelanguage.googleapis.com",
+            proxy_url="http://openclash.beagle-openclash.svc.cluster.local:7890",
+        )
+        raw_b64 = base64.b64encode(b"proxied-result").decode("utf-8")
+        mock_response = io.BytesIO(
+            json.dumps({
+                "candidates": [
+                    {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": raw_b64}}]}}
+                ]
+            }).encode("utf-8")
+        )
+        fake_opener = MagicMock()
+        fake_opener.open.return_value = mock_response
+
+        with patch("urllib.request.build_opener", return_value=fake_opener) as build_opener:
+            result = provider.generate(prompt="A blue circle")
+
+        self.assertEqual(result, b"proxied-result")
+        build_opener.assert_called_once()
+        proxy_handler = build_opener.call_args.args[0]
+        self.assertEqual(
+            proxy_handler.proxies["https"],
+            "http://openclash.beagle-openclash.svc.cluster.local:7890",
+        )
+        fake_opener.open.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
-
