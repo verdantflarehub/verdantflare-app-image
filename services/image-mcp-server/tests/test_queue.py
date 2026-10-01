@@ -5,11 +5,16 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from src.artifacts import ArtifactStore
-from src.queue import TaskQueueManager
+from src.queue import TaskQueueManager, _image_storage_type
 from src.tasks import TaskStore
 
 
 class TestTaskQueueManager(unittest.TestCase):
+    def test_image_storage_type_matches_common_headers(self):
+        self.assertEqual(_image_storage_type(b"\x89PNG\r\n\x1a\nrest"), (".png", "image/png"))
+        self.assertEqual(_image_storage_type(b"\xff\xd8\xffrest"), (".jpg", "image/jpeg"))
+        self.assertEqual(_image_storage_type(b"RIFF1234WEBPrest"), (".webp", "image/webp"))
+
     def test_queue_execution_and_concurrency(self):
         async def run_test():
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -115,4 +120,3 @@ class TestTaskQueueManager(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

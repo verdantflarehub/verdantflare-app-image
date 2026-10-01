@@ -21,6 +21,19 @@ class TaskJob:
     params: dict[str, Any]
 
 
+def _image_storage_type(data: bytes) -> tuple[str, str]:
+    """Return an extension and media type matching the returned image bytes."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png", "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg", "image/jpeg"
+    if data.startswith(b"RIFF") and b"WEBP" in data[:12]:
+        return ".webp", "image/webp"
+    # Keep test/fallback provider bytes usable while preserving the historical
+    # PNG contract for providers that return an undecorated payload.
+    return ".png", "image/png"
+
+
 class TaskQueueManager:
     def __init__(
         self,
@@ -177,12 +190,13 @@ class TaskQueueManager:
                 instructions=instructions,
             )
 
-        filename = f"gen-{job.task_id}.png"
+        extension, media_type = _image_storage_type(img_bytes)
+        filename = f"gen-{job.task_id}{extension}"
         record = self.artifacts.create_from_bytes(
             project_id=job.project_id,
             filename=filename,
             data=img_bytes,
-            media_type="image/png",
+            media_type=media_type,
             metadata={
                 "engine": engine,
                 "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
@@ -259,12 +273,13 @@ class TaskQueueManager:
                 model=model or DEFAULT_IMAGE_MODEL,
             )
 
-        filename = f"edit-{job.task_id}.png"
+        extension, media_type = _image_storage_type(img_bytes)
+        filename = f"edit-{job.task_id}{extension}"
         record = self.artifacts.create_from_bytes(
             project_id=job.project_id,
             filename=filename,
             data=img_bytes,
-            media_type="image/png",
+            media_type=media_type,
             metadata={
                 "engine": engine,
                 "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
@@ -278,4 +293,3 @@ class TaskQueueManager:
             },
         )
         self.tasks.update_status(job.task_id, "running", artifact_id=record.artifact_id)
-
