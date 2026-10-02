@@ -29,6 +29,7 @@ from .faceswap import handle_faceswap
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
 from .queue import TaskQueueManager
+from .registry import EtcdRegistry
 from .tasks import TaskNotFound, TaskStore
 
 artifacts = ArtifactStore.from_environment()
@@ -43,6 +44,109 @@ queue_manager = TaskQueueManager(
 )
 
 mcp = MCPServer("VerdantFlare Image")
+
+IMAGE_TOOLS_SCHEMA = [
+    {
+        "name": "image.create",
+        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.5) or Gemini.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Image description prompt"},
+                "engine": {"type": "string", "enum": ["codex", "gemini"], "default": "codex"},
+                "model": {"type": "string", "description": "Model identifier, e.g. gpt-image-2.5-sunburst"},
+                "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4"], "default": "16:9"},
+                "resolution": {"type": "string", "enum": ["2k", "4k"], "default": "2k"},
+                "quality": {"type": "string", "default": "high"},
+                "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
+                "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter"},
+                "project_id": {"type": "string", "description": "Project ID"},
+                "idempotency_key": {"type": "string", "description": "Unique idempotency key"},
+            },
+            "required": ["prompt"],
+        },
+    },
+    {
+        "name": "image.edit",
+        "description": "Edit an existing reference image with multimodal prompt directives.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_artifact_id": {"type": "string", "description": "Base image artifact ID"},
+                "prompt": {"type": "string", "description": "Editing instructions"},
+                "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
+                "mask_artifact_id": {"type": "string"},
+                "engine": {"type": "string", "default": "codex"},
+                "model": {"type": "string"},
+                "quality": {"type": "string", "default": "auto"},
+                "background": {"type": "string", "default": "auto"},
+                "project_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["source_artifact_id", "prompt"],
+        },
+    },
+    {
+        "name": "image.inpaint",
+        "description": "Inpaint a specified area using a mask artifact.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_artifact_id": {"type": "string", "description": "Base image artifact ID"},
+                "mask_artifact_id": {"type": "string", "description": "Mask image artifact ID"},
+                "prompt": {"type": "string", "description": "Inpainting instructions"},
+                "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
+                "engine": {"type": "string", "default": "codex"},
+                "model": {"type": "string"},
+                "background": {"type": "string", "default": "auto"},
+                "project_id": {"type": "string"},
+                "idempotency_key": {"type": "string"},
+            },
+            "required": ["source_artifact_id", "mask_artifact_id", "prompt"],
+        },
+    },
+    {
+        "name": "image.faceswap",
+        "description": "Swap face identity onto a target image with optional enhancement.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_artifact_id": {"type": "string", "description": "Target image artifact ID"},
+                "source_identity_artifact_id": {"type": "string", "description": "Source identity artifact ID"},
+                "identity_strength": {"type": "number", "default": 0.95},
+                "restore_face": {"type": "boolean", "default": true},
+                "restoration_fidelity": {"type": "number", "default": 0.85},
+                "project_id": {"type": "string"},
+                "target_face_index": {"type": "integer", "default": 0},
+            },
+            "required": ["target_artifact_id", "source_identity_artifact_id"],
+        },
+    },
+    {
+        "name": "image.status",
+        "description": "Query status and metadata of an image generation task.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task ID"},
+            },
+            "required": ["task_id"],
+        },
+    },
+    {
+        "name": "image.result",
+        "description": "Retrieve final generated image artifact and download path for a completed task.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task ID"},
+            },
+            "required": ["task_id"],
+        },
+    },
+]
+
+registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA)
 
 
 def _result(value: dict[str, Any]) -> types.CallToolResult:
@@ -135,6 +239,36 @@ async def image_generate(
             "status": task.status,
             "created_at": task.created_at,
         }
+    )
+
+
+@mcp.tool(name="image.create")
+async def image_create(
+    prompt: str,
+    project_id: str = "default",
+    idempotency_key: str = "",
+    engine: str = "codex",
+    model: str = "",
+    aspect_ratio: str = "16:9",
+    resolution: str = "2k",
+    quality: str = "high",
+    background: str = "auto",
+    instructions: str | None = None,
+) -> types.CallToolResult:
+    """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
+    import uuid
+    actual_idem = idempotency_key or f"idem_{uuid.uuid4().hex[:12]}"
+    return await image_generate(
+        project_id=project_id,
+        idempotency_key=actual_idem,
+        prompt=prompt,
+        engine=engine,
+        model=model,
+        aspect_ratio=aspect_ratio,
+        resolution=resolution,
+        quality=quality,
+        background=background,
+        instructions=instructions,
     )
 
 
@@ -431,12 +565,14 @@ async def lifespan(app: Starlette):
     app.state.artifacts = artifacts
     app.state.queue_manager = queue_manager
     await queue_manager.start()
+    await registry.start()
     try:
         if getattr(mcp.session_manager, "_has_started", False):
             mcp.session_manager._has_started = False
         async with mcp.session_manager.run():
             yield
     finally:
+        await registry.stop()
         await queue_manager.stop()
 
 
