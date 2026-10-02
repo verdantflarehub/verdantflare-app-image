@@ -114,7 +114,7 @@ IMAGE_TOOLS_SCHEMA = [
                 "target_artifact_id": {"type": "string", "description": "Target image artifact ID"},
                 "source_identity_artifact_id": {"type": "string", "description": "Source identity artifact ID"},
                 "identity_strength": {"type": "number", "default": 0.95},
-                "restore_face": {"type": "boolean", "default": true},
+                "restore_face": {"type": "boolean", "default": True},
                 "restoration_fidelity": {"type": "number", "default": 0.85},
                 "project_id": {"type": "string"},
                 "target_face_index": {"type": "integer", "default": 0},

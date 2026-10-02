@@ -1,6 +1,6 @@
 [project]
 name = "verdantflare-image-mcp-server"
-version = "0.1.20"
+version = "0.1.21"
 description = "VerdantFlare image-mcp-server service"
 requires-python = ">=3.11"
 dependencies = [
