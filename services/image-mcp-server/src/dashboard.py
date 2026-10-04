@@ -409,10 +409,16 @@ def check_auth(request: Request) -> bool:
 
 
 async def dashboard_page(request: Request) -> Response:
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Content-Type-Options": "nosniff",
+    }
     if STATIC_HTML_PATH.exists():
         content = STATIC_HTML_PATH.read_text(encoding="utf-8")
-        return HTMLResponse(content)
-    return HTMLResponse(DASHBOARD_HTML)
+        return HTMLResponse(content, headers=headers)
+    return HTMLResponse(DASHBOARD_HTML, headers=headers)
 
 
 async def api_list_tasks(request: Request) -> Response:
