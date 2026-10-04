@@ -1600,9 +1600,6 @@
           imgEl.src = url;
           imgEl.alt = title || '';
           imgEl.loading = 'lazy';
-          imgEl.style.opacity = '0';
-          imgEl.style.transition = 'opacity 0.25s ease';
-          imgEl.onload = () => { imgEl.style.opacity = '1'; };
           const placeholder = thumb.querySelector('.card-thumb-placeholder');
           if (placeholder) placeholder.remove();
           thumb.insertBefore(imgEl, thumb.firstChild);
@@ -1993,6 +1990,7 @@
             const typeName = action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
             const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
             const modelShort = modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
+            const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
             const sourceArtifactId = req.source_artifact_id || '';
             const imgUrl = artifactBlobMap.get(artifactId) || '';
