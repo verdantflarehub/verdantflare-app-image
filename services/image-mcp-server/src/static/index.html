@@ -1445,11 +1445,17 @@
     });
 
     // Notify Parent Ready
-    window.addEventListener('DOMContentLoaded', () => {
+    function notifyReady() {
       if (isEmbedded) {
         parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'ready' }, hostOrigin);
       }
-    });
+    }
+    if (document.readyState === 'loading') {
+      window.addEventListener('DOMContentLoaded', notifyReady);
+    } else {
+      notifyReady();
+    }
+    window.addEventListener('load', notifyReady);
 
     // Universal API Request Wrapper
     async function requestApi(path, options = {}) {
