@@ -625,6 +625,48 @@
       transition: transform 0.3s ease;
     }
 
+    .card-thumb-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: var(--bg-surface);
+      color: var(--text-muted);
+    }
+
+    .card-thumb-placeholder.pulse {
+      background: linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-card) 50%, var(--bg-surface) 100%);
+      background-size: 200% 200%;
+      animation: vf-thumb-shimmer 2.2s ease infinite;
+    }
+
+    @keyframes vf-thumb-shimmer {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    .thumb-spinner {
+      width: 26px;
+      height: 26px;
+      color: var(--accent);
+      animation: vf-spin 1.1s linear infinite;
+    }
+
+    @keyframes vf-spin {
+      100% { transform: rotate(360deg); }
+    }
+
+    .thumb-status-text {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.2px;
+    }
+
     .task-card:hover .card-thumb img {
       transform: scale(1.02);
     }
@@ -1512,121 +1554,8 @@
     const initialNav = location.hash.slice(1);
     if (initialNav) switchView(initialNav, false);
 
-    // Mock Data Base
-    const MOCK_TASKS = [
-      {
-        id: "img_sunburst_4k_0891",
-        title: "全身落地镜对镜芭蕾舞者写真",
-        prompt: "全身落地镜前对镜自拍，年轻女性芭蕾舞者，纯黑色高领修身芭蕾练习服，粉色缎面芭蕾足尖鞋绑带丝丝清晰。木质舞蹈地板泛着温润微光，落地镜边缘与倒影层次通透，单反全画幅点对点商业写真，零重影无多肢。",
-        type: "t2i",
-        typeName: "文生图",
-        model: "gpt-image-2.5-sunburst",
-        modelShort: "sunburst 4k",
-        resolution: "2160 × 3840 (9:16)",
-        pixels: "8,294,400 物理像素 (真 4K)",
-        duration: "7.8s",
-        status: "succeeded",
-        project: "ballet-dancer",
-        time: "10-04 11:20",
-        img: "https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85",
-        is4k: true,
-        hasCompare: false
-      },
-      {
-        id: "img_face_fusion_0412",
-        title: "小月真人 IP 奢华时尚大片 (骨相换脸)",
-        prompt: "小月真人专属骨相置换，佩戴祖母绿钻石项链，法式黑色丝绒抹胸礼服，复古波浪发丝垂肩。晚宴香槟杯微醺光斑，CodeFormer 高保真眼部微观重建，电影画幅质感。",
-        type: "faceswap",
-        typeName: "骨相换脸",
-        model: "image-face-fusion",
-        modelShort: "face-fusion",
-        resolution: "2048 × 2048 (1:1)",
-        pixels: "4,194,304 物理像素",
-        duration: "9.2s",
-        status: "succeeded",
-        project: "xiaoyue-fashion",
-        time: "10-04 10:56",
-        img: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=85",
-        imgBefore: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=85",
-        is4k: false,
-        hasCompare: true
-      },
-      {
-        id: "img_inpaint_0723",
-        title: "赛博朋克雨夜街道服装局部重绘",
-        prompt: "赛博朋克雨夜霓虹街道，将人物下半身黑色工装裤局部重绘为带有高光走线的外骨骼装甲护膝，保持原图雨水反光与霓虹倒影连续性。",
-        type: "inpaint",
-        typeName: "局部重绘",
-        model: "gpt-image-2.5-sunburst",
-        modelShort: "sunburst 4k",
-        resolution: "3840 × 2160 (16:9)",
-        pixels: "8,294,400 物理像素 (真 4K)",
-        duration: "8.4s",
-        status: "succeeded",
-        project: "cyberpunk-film",
-        time: "10-04 10:41",
-        img: "https://images.unsplash.com/photo-1508739773434-c26b3d09e071?auto=format&fit=crop&w=800&q=85",
-        imgBefore: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=800&q=85",
-        is4k: true,
-        hasCompare: true
-      },
-      {
-        id: "img_sunburst_4k_0890",
-        title: "深空科幻指挥舱远景空间纵深",
-        prompt: "暗调科幻指挥舱舷窗前，巨型环状行星光环缓缓转动，全息战术星图投射出幽蓝与青绿色光线。多层控制台操作界面，颗粒感与电影宽银幕纵深。",
-        type: "t2i",
-        typeName: "文生图",
-        model: "gpt-image-2.5-sunburst",
-        modelShort: "sunburst 4k",
-        resolution: "3840 × 2160 (16:9)",
-        pixels: "8,294,400 物理像素 (真 4K)",
-        duration: "6.9s",
-        status: "succeeded",
-        project: "scifi-cockpit",
-        time: "10-04 10:18",
-        img: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=85",
-        is4k: true,
-        hasCompare: false
-      },
-      {
-        id: "img_flare_fast_0219",
-        title: "分镜概念打光草图 · 工业区追踪",
-        prompt: "快速分镜概念设计，雨夜废弃化工厂钢架楼梯，警探手电光束穿透浓雾，低对比度高宽容度电影速写。",
-        type: "t2i",
-        typeName: "文生图",
-        model: "gpt-image-2.5-flare",
-        modelShort: "flare",
-        resolution: "1920 × 1080 (16:9)",
-        pixels: "2,073,600 物理像素",
-        duration: "生成中 74% (3.4s)",
-        status: "running",
-        project: "cyberpunk-film",
-        time: "刚刚",
-        img: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=800&q=85",
-        is4k: false,
-        hasCompare: false
-      },
-      {
-        id: "img_sunburst_queued_0102",
-        title: "极简现代挑高室内落地窗",
-        prompt: "极简主义建筑设计，挑高起居室，大面积微水泥墙面与天然胡桃木家具，清晨阳光斜射在地毯上的几何阴影。",
-        type: "t2i",
-        typeName: "文生图",
-        model: "gpt-image-2.5-sunburst",
-        modelShort: "sunburst 4k",
-        resolution: "3840 × 2160 (16:9)",
-        pixels: "8,294,400 物理像素 (真 4K)",
-        duration: "排队中 #1",
-        status: "queued",
-        project: "creator-demo",
-        time: "1分钟前",
-        img: "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=800&q=85",
-        is4k: true,
-        hasCompare: false
-      }
-    ];
-
-    let allTasks = [...MOCK_TASKS];
+    // Real Tasks Store (Driven purely by /api/tasks backend)
+    let allTasks = [];
     let currentFilter = "all";
     let activeTask = null;
     let selectedMode = "t2i";
@@ -1651,14 +1580,44 @@
       document.getElementById("countRunning").textContent = allTasks.filter(t => t.status === "running").length;
       document.getElementById("countQueued").textContent = allTasks.filter(t => t.status === "queued").length;
 
+      if (filtered.length === 0) {
+        galleryContainer.innerHTML = `
+          <div class="empty-state-box" style="grid-column: 1 / -1; padding: 64px 24px; text-align: center; border: 1px dashed var(--line); border-radius: 14px; background: var(--panel); margin-top: 4px;">
+            <div style="font-size: 32px; margin-bottom: 12px;">🎨</div>
+            <h3 style="font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 8px;">${allTasks.length === 0 ? '暂无图像生成任务记录' : '无匹配筛选的任务'}</h3>
+            <p style="font-size: 13px; color: var(--muted); margin: 0 auto; max-width: 420px; line-height: 1.6;">
+              ${allTasks.length === 0 ? '当前工作区暂无历史任务。请在上方输入画面描述与提示词，选择模型与画幅后点击“立即生成”，任务将提交至 5090 集群进行处理。' : '没有找到符合当前筛选条件的任务记录，可尝试切换筛选标签或清空搜索关键字。'}
+            </p>
+          </div>
+        `;
+        return;
+      }
+
       galleryContainer.innerHTML = filtered.map(t => `
         <article class="task-card" onclick="openInspector('${t.id}')">
           <div class="card-thumb">
-            <img src="${t.img}" alt="${t.title}" loading="lazy"/>
+            ${t.img ? `
+              <img src="${t.img}" alt="${t.title}" loading="lazy"/>
+            ` : `
+              <div class="card-thumb-placeholder ${t.status === 'running' ? 'pulse' : ''}">
+                <div class="thumb-icon-wrap">
+                  ${t.status === 'running' ? `
+                    <svg class="thumb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
+                    </svg>
+                  ` : (t.status === 'failed' ? `
+                    <span style="font-size: 22px;">⚠️</span>
+                  ` : `
+                    <span style="font-size: 22px;">⏳</span>
+                  `)}
+                </div>
+                <span class="thumb-status-text">${t.status === 'running' ? '5090 算力渲染中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…')}</span>
+              </div>
+            `}
             <div class="card-top-badges">
               <span class="tag-badge ${t.is4k ? 'accent' : ''}">${t.is4k ? '4K 点对点' : '2K'}</span>
               <span class="tag-badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : '')}">
-                ${t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : '排队中')}
+                ${t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
               </span>
             </div>
             <div class="card-time-row">
@@ -1714,10 +1673,16 @@
       const singleImg = document.getElementById("imgSingle");
       const btnDownload = document.getElementById("btnDownload");
 
-      btnDownload.href = task.img;
-      btnDownload.download = `${task.id}.png`;
+      if (task.img) {
+        btnDownload.href = task.img;
+        btnDownload.download = `${task.id}.png`;
+        btnDownload.style.display = "";
+      } else {
+        btnDownload.removeAttribute('href');
+        btnDownload.style.display = "none";
+      }
 
-      if (task.hasCompare && task.imgBefore) {
+      if (task.hasCompare && task.imgBefore && task.img) {
         compareBox.style.display = "block";
         singleImg.style.display = "none";
         document.getElementById("imgAfter").src = task.img;
@@ -1727,7 +1692,12 @@
       } else {
         compareBox.style.display = "none";
         singleImg.style.display = "block";
-        singleImg.src = task.img;
+        if (task.img) {
+          singleImg.src = task.img;
+        } else {
+          singleImg.src = "";
+          singleImg.alt = task.status === 'running' ? "5090 算力渲染中…" : (task.status === 'failed' ? "生成失败" : "排队调度中…");
+        }
       }
 
       inspectorDrawer.classList.add("open");
@@ -1847,41 +1817,22 @@
           type: selectedMode,
           typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
           model,
-          modelShort: model.includes('sunburst') ? 'sunburst 4k' : 'flare',
+          modelShort: model.includes('sunburst') ? 'sunburst 4k' : (model.includes('gemini') ? 'gemini-3.1-f' : 'flare'),
           resolution: is4k ? "2160 × 3840 (9:16)" : "1920 × 1080 (16:9)",
           pixels: is4k ? "8,294,400 物理像素 (真 4K)" : "2,073,600 物理像素",
-          duration: "执行中 (刚刚)",
-          status: "running",
+          duration: "排队调度中",
+          status: res.status || "queued",
           project: proj,
           time: "刚刚",
-          img: "https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85",
+          img: "",
           is4k,
           hasCompare: false
         };
         allTasks.unshift(createdTask);
         renderGallery();
+        setTimeout(syncBackendTasks, 800);
       } catch (err) {
-        // Fallback local visual creation
-        const fallbackTask = {
-          id: `img_${Date.now().toString().slice(-4)}`,
-          title: prompt.slice(0, 22) + "…",
-          prompt,
-          type: selectedMode,
-          typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
-          model,
-          modelShort: model.includes('sunburst') ? 'sunburst 4k' : 'flare',
-          resolution: is4k ? "2160 × 3840 (9:16)" : "1920 × 1080 (16:9)",
-          pixels: is4k ? "8,294,400 物理像素 (真 4K)" : "2,073,600 物理像素",
-          duration: "排队中 #1",
-          status: "queued",
-          project: proj,
-          time: "刚刚",
-          img: "https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85",
-          is4k,
-          hasCompare: false
-        };
-        allTasks.unshift(fallbackTask);
-        renderGallery();
+        alert('提交生成任务失败: ' + (err.message || '网络连接异常'));
       } finally {
         btnSubmit.disabled = false;
         btnSubmit.innerHTML = `
@@ -1923,40 +1874,49 @@
     // Live Tasks Sync
     async function syncBackendTasks() {
       try {
-        const [tasksRes] = await Promise.all([
-          requestApi('/api/tasks?limit=50')
-        ]);
-        if (tasksRes && Array.isArray(tasksRes.tasks) && tasksRes.tasks.length > 0) {
-          const liveItems = tasksRes.tasks.map(t => ({
-            id: t.task_id,
-            title: (t.prompt || '图像任务').slice(0, 24) + '…',
-            prompt: t.prompt || '',
-            type: t.action || 't2i',
-            typeName: t.action === 'faceswap' ? '骨相换脸' : (t.action === 'inpaint' ? '局部重绘' : '文生图'),
-            model: t.model || t.engine || 'gpt-image-2.5-sunburst',
-            modelShort: (t.model || t.engine || 'sunburst').includes('sunburst') ? 'sunburst 4k' : 'flare',
-            resolution: t.params?.resolution === '4k' ? '3840 × 2160 (16:9)' : '1920 × 1080 (16:9)',
-            pixels: t.params?.resolution === '4k' ? '8,294,400 物理像素 (真 4K)' : '2,073,600 物理像素',
-            duration: t.duration ? `${t.duration.toFixed(1)}s` : (t.status === 'succeeded' ? '已完成' : (t.status === 'running' ? '生成中' : '排队中')),
-            status: t.status === 'completed' ? 'succeeded' : t.status,
-            project: t.project_id || 'default',
-            time: t.created_at ? new Date(t.created_at).toLocaleTimeString() : '刚刚',
-            img: t.result_artifact_id ? `/artifacts/${t.result_artifact_id}/content` : 'https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85',
-            is4k: t.params?.resolution === '4k',
-            hasCompare: t.action === 'faceswap' || t.action === 'inpaint'
-          }));
-          const liveIds = new Set(liveItems.map(x => x.id));
-          allTasks = [...liveItems, ...MOCK_TASKS.filter(m => !liveIds.has(m.id))];
+        const tasksRes = await requestApi('/api/tasks?limit=50');
+        if (tasksRes && Array.isArray(tasksRes.tasks)) {
+          allTasks = tasksRes.tasks.map(t => {
+            const req = t.request_params || {};
+            const is4k = req.resolution === '4k';
+            const action = req.action || 't2i';
+            const typeName = action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
+            const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
+            const modelShort = modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
+            const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
+            const imgUrl = t.artifact_id ? (isEmbedded ? `/apps/image/artifacts/${t.artifact_id}/content` : `/artifacts/${t.artifact_id}/content`) : '';
+            const imgBeforeUrl = req.source_artifact_id ? (isEmbedded ? `/apps/image/artifacts/${req.source_artifact_id}/content` : `/artifacts/${req.source_artifact_id}/content`) : '';
+
+            return {
+              id: t.task_id,
+              title: (t.prompt_preview || req.prompt || '图像任务').slice(0, 24) + '…',
+              prompt: t.prompt_preview || req.prompt || '',
+              type: action,
+              typeName,
+              model: modelName,
+              modelShort,
+              resolution: is4k ? '3840 × 2160 (16:9)' : '1920 × 1080 (16:9)',
+              pixels: is4k ? '8,294,400 物理像素 (真 4K)' : '2,073,600 物理像素',
+              duration: dur,
+              status: t.status === 'completed' ? 'succeeded' : t.status,
+              project: t.project_id || 'default',
+              time: t.created_at ? new Date(t.created_at).toLocaleTimeString() : '刚刚',
+              img: imgUrl,
+              imgBefore: imgBeforeUrl,
+              is4k,
+              hasCompare: Boolean(imgBeforeUrl && (action === 'faceswap' || action === 'inpaint' || action === 'edit'))
+            };
+          });
           renderGallery();
         }
       } catch (e) {
-        // Fallback to initial mock tasks
+        console.error('Failed to sync backend tasks:', e);
       }
     }
 
     renderGallery();
     syncBackendTasks();
-    setInterval(syncBackendTasks, 15000);
+    setInterval(syncBackendTasks, 5000);
   </script>
 </body>
 </html>
