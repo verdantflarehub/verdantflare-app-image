@@ -1504,7 +1504,7 @@
       if (isEmbedded && window.studioRequest) {
         const res = await window.studioRequest(path, options);
         if (!res.ok) throw new Error('API ' + res.status);
-        return res.json();
+        return options.blob ? res.blob() : res.json();
       }
       const token = new URLSearchParams(location.search).get('token') || localStorage.getItem('image_mcp_token') || '';
       const headers = { ...(options.headers || {}) };
@@ -1516,7 +1516,7 @@
       }
       const res = await fetch(path, { ...options, headers, body });
       if (!res.ok) throw new Error('API ' + res.status);
-      return res.json();
+      return options.blob ? res.blob() : res.json();
     }
 
     // Tab Navigation Logic
@@ -1560,6 +1560,87 @@
     let activeTask = null;
     let selectedMode = "t2i";
 
+    // Artifact Blob URL Cache & Queue Loader (Opaque iframe safe)
+    const artifactBlobMap = new Map();
+    const artifactLoadingMap = new Map();
+
+    async function getArtifactBlobUrl(artifactId) {
+      if (!artifactId) return '';
+      if (artifactBlobMap.has(artifactId)) {
+        return artifactBlobMap.get(artifactId);
+      }
+      if (artifactLoadingMap.has(artifactId)) {
+        return artifactLoadingMap.get(artifactId);
+      }
+
+      const p = (async () => {
+        try {
+          const blob = await requestApi(`/artifacts/${artifactId}/content`, { blob: true });
+          const url = URL.createObjectURL(blob);
+          artifactBlobMap.set(artifactId, url);
+          return url;
+        } catch (err) {
+          console.warn(`Artifact ${artifactId} load failed:`, err);
+          return '';
+        } finally {
+          artifactLoadingMap.delete(artifactId);
+        }
+      })();
+
+      artifactLoadingMap.set(artifactId, p);
+      return p;
+    }
+
+    function updateCardThumb(taskId, url, title) {
+      const card = galleryContainer.querySelector(`.task-card[data-task-id="${taskId}"]`);
+      if (card) {
+        const thumb = card.querySelector('.card-thumb');
+        if (thumb && !thumb.querySelector('img')) {
+          const imgEl = document.createElement('img');
+          imgEl.src = url;
+          imgEl.alt = title || '';
+          imgEl.loading = 'lazy';
+          imgEl.style.opacity = '0';
+          imgEl.style.transition = 'opacity 0.25s ease';
+          imgEl.onload = () => { imgEl.style.opacity = '1'; };
+          const placeholder = thumb.querySelector('.card-thumb-placeholder');
+          if (placeholder) placeholder.remove();
+          thumb.insertBefore(imgEl, thumb.firstChild);
+        }
+      }
+    }
+
+    let thumbnailLoadInProgress = false;
+    async function loadThumbnails() {
+      if (thumbnailLoadInProgress) return;
+      thumbnailLoadInProgress = true;
+      try {
+        for (const t of allTasks) {
+          if (t.artifactId && !artifactBlobMap.has(t.artifactId)) {
+            const url = await getArtifactBlobUrl(t.artifactId);
+            if (url) {
+              t.img = url;
+              updateCardThumb(t.id, url, t.title);
+              if (activeTask && activeTask.id === t.id) {
+                updateInspectorImages(activeTask);
+              }
+            }
+          }
+          if (t.sourceArtifactId && !artifactBlobMap.has(t.sourceArtifactId)) {
+            const url = await getArtifactBlobUrl(t.sourceArtifactId);
+            if (url) {
+              t.imgBefore = url;
+              if (activeTask && activeTask.id === t.id) {
+                updateInspectorImages(activeTask);
+              }
+            }
+          }
+        }
+      } finally {
+        thumbnailLoadInProgress = false;
+      }
+    }
+
     // DOM Elements
     const galleryContainer = document.getElementById("galleryContainer");
     const inputSearch = document.getElementById("inputSearch");
@@ -1594,14 +1675,14 @@
       }
 
       galleryContainer.innerHTML = filtered.map(t => `
-        <article class="task-card" onclick="openInspector('${t.id}')">
+        <article class="task-card" data-task-id="${t.id}" onclick="openInspector('${t.id}')">
           <div class="card-thumb">
             ${t.img ? `
               <img src="${t.img}" alt="${t.title}" loading="lazy"/>
             ` : `
-              <div class="card-thumb-placeholder ${t.status === 'running' ? 'pulse' : ''}">
+              <div class="card-thumb-placeholder ${t.status === 'running' || (t.status === 'succeeded' && t.artifactId) ? 'pulse' : ''}">
                 <div class="thumb-icon-wrap">
-                  ${t.status === 'running' ? `
+                  ${t.status === 'running' || (t.status === 'succeeded' && t.artifactId) ? `
                     <svg class="thumb-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"></circle>
                     </svg>
@@ -1611,7 +1692,7 @@
                     <span style="font-size: 22px;">⏳</span>
                   `)}
                 </div>
-                <span class="thumb-status-text">${t.status === 'running' ? '5090 算力渲染中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…')}</span>
+                <span class="thumb-status-text">${t.status === 'running' ? '5090 算力渲染中…' : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…'))}</span>
               </div>
             `}
             <div class="card-top-badges">
@@ -1655,20 +1736,8 @@
 
     inputSearch.addEventListener("input", renderGallery);
 
-    // Inspector Drawer
-    window.openInspector = function(id) {
-      const task = allTasks.find(t => t.id === id);
+    function updateInspectorImages(task) {
       if (!task) return;
-      activeTask = task;
-
-      document.getElementById("drawerHeading").textContent = task.title;
-      document.getElementById("drawerPromptText").textContent = task.prompt;
-      document.getElementById("specTaskId").textContent = task.id;
-      document.getElementById("specModel").textContent = task.model;
-      document.getElementById("specResolution").textContent = task.resolution;
-      document.getElementById("specDuration").textContent = task.duration;
-      document.getElementById("specProject").textContent = task.project;
-
       const compareBox = document.getElementById("compareContainer");
       const singleImg = document.getElementById("imgSingle");
       const btnDownload = document.getElementById("btnDownload");
@@ -1696,8 +1765,47 @@
           singleImg.src = task.img;
         } else {
           singleImg.src = "";
-          singleImg.alt = task.status === 'running' ? "5090 算力渲染中…" : (task.status === 'failed' ? "生成失败" : "排队调度中…");
+          singleImg.alt = task.status === 'running' ? "5090 算力渲染中…" : (task.status === 'succeeded' && task.artifactId ? "加载画作中…" : (task.status === 'failed' ? "生成失败" : "排队调度中…"));
         }
+      }
+    }
+
+    // Inspector Drawer
+    window.openInspector = function(id) {
+      const task = allTasks.find(t => t.id === id);
+      if (!task) return;
+      activeTask = task;
+
+      document.getElementById("drawerHeading").textContent = task.title;
+      document.getElementById("drawerPromptText").textContent = task.prompt;
+      document.getElementById("specTaskId").textContent = task.id;
+      document.getElementById("specModel").textContent = task.model;
+      document.getElementById("specResolution").textContent = task.resolution;
+      document.getElementById("specDuration").textContent = task.duration;
+      document.getElementById("specProject").textContent = task.project;
+
+      updateInspectorImages(task);
+
+      if (task.artifactId && !task.img) {
+        getArtifactBlobUrl(task.artifactId).then(url => {
+          if (url) {
+            task.img = url;
+            if (activeTask && activeTask.id === task.id) {
+              updateInspectorImages(activeTask);
+            }
+            updateCardThumb(task.id, url, task.title);
+          }
+        });
+      }
+      if (task.sourceArtifactId && !task.imgBefore) {
+        getArtifactBlobUrl(task.sourceArtifactId).then(url => {
+          if (url) {
+            task.imgBefore = url;
+            if (activeTask && activeTask.id === task.id) {
+              updateInspectorImages(activeTask);
+            }
+          }
+        });
       }
 
       inspectorDrawer.classList.add("open");
@@ -1823,8 +1931,10 @@
           duration: "排队调度中",
           status: res.status || "queued",
           project: proj,
-          time: "刚刚",
+          artifactId: "",
+          sourceArtifactId: "",
           img: "",
+          imgBefore: "",
           is4k,
           hasCompare: false
         };
@@ -1883,9 +1993,10 @@
             const typeName = action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
             const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
             const modelShort = modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
-            const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
-            const imgUrl = t.artifact_id ? (isEmbedded ? `/apps/image/artifacts/${t.artifact_id}/content` : `/artifacts/${t.artifact_id}/content`) : '';
-            const imgBeforeUrl = req.source_artifact_id ? (isEmbedded ? `/apps/image/artifacts/${req.source_artifact_id}/content` : `/artifacts/${req.source_artifact_id}/content`) : '';
+            const artifactId = t.artifact_id || '';
+            const sourceArtifactId = req.source_artifact_id || '';
+            const imgUrl = artifactBlobMap.get(artifactId) || '';
+            const imgBeforeUrl = artifactBlobMap.get(sourceArtifactId) || '';
 
             return {
               id: t.task_id,
@@ -1901,13 +2012,16 @@
               status: t.status === 'completed' ? 'succeeded' : t.status,
               project: t.project_id || 'default',
               time: t.created_at ? new Date(t.created_at).toLocaleTimeString() : '刚刚',
+              artifactId,
+              sourceArtifactId,
               img: imgUrl,
               imgBefore: imgBeforeUrl,
               is4k,
-              hasCompare: Boolean(imgBeforeUrl && (action === 'faceswap' || action === 'inpaint' || action === 'edit'))
+              hasCompare: Boolean(sourceArtifactId && (action === 'faceswap' || action === 'inpaint' || action === 'edit'))
             };
           });
           renderGallery();
+          loadThumbnails();
         }
       } catch (e) {
         console.error('Failed to sync backend tasks:', e);

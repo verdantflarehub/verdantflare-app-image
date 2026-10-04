@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SERVICE: image-mcp-server
-  VERSION: 0.1.28
+  VERSION: 0.1.29
 jobs:
   build:
     runs-on: ubuntu-latest
