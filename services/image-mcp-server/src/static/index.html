@@ -3,41 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VerdantFlare Image Station - 青焰生图任务与资产工作台</title>
+  <title>VerdantFlare IMAGE STATION · 图像生成与面部置换工作台</title>
   <style>
     /* ==========================================================================
-       VerdantFlare Studio Design Tokens (Single Source of Truth)
-       Aligned with verdantflare_studio_market_v1.1.html & Studio Theme
+       VerdantFlare Studio & Station Design Tokens (Single Source of Truth)
+       Aligned with verdantflare_studio_market_v1.1.html & Video MCP
        ========================================================================== */
     :root {
-    /* Embedded Host Mode (Studio OS Shell) */
-    html[data-embedded="true"] .side,
-    :root[data-embedded="true"] .side,
-    body[data-embedded="true"] .side {
-      display: none !important;
-    }
-    html[data-embedded="true"] .main,
-    body[data-embedded="true"] .main {
-      margin-left: 0 !important;
-      width: 100% !important;
-      max-width: 100% !important;
-      padding: 16px 24px 48px !important;
-    }
-
       --sidebar-width: 248px;
-      --drawer-width: 460px;
+      --drawer-width: 480px;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
     }
 
-    /* Light Theme (Studio Standard) */
-    body[data-theme=light], html[data-theme=light] {
+    /* Light Theme Tokens */
+    html[data-theme="light"], body[data-theme="light"] {
       color-scheme: light;
       --bg: #eef2ef;
       --panel: #ffffff;
       --panel-hover: #f7faf7;
-      --subtle: #f7faf7;
-      --subtle-hover: #eef3ef;
-      --line: rgba(21, 35, 30, .13);
-      --line-strong: rgba(21, 35, 30, .22);
+      --subtle: #f4f7f4;
+      --subtle-hover: #ebf0ec;
+      --line: rgba(21, 35, 30, 0.13);
+      --line-strong: rgba(21, 35, 30, 0.22);
       --ink: #18241f;
       --paper: #18241f;
       --muted: #69756e;
@@ -48,9 +38,7 @@
       --blue: #5379ac;
       --amber: #b58032;
       --danger: #c95743;
-      --aside: rgba(229, 235, 229, .94);
-      --shell-panel: rgba(255, 255, 255, .72);
-      --shell-button: rgba(21, 35, 30, .055);
+      --aside: rgba(229, 235, 229, 0.94);
       --btn-primary-bg: #15231e;
       --btn-primary-ink: #f2f5f0;
       --card-thumb-bg: linear-gradient(135deg, #e4eae5 0%, #d8e0da 100%);
@@ -58,16 +46,16 @@
       color: var(--ink);
     }
 
-    /* Dark Theme (Studio Standard) */
-    body[data-theme=dark], html[data-theme=dark] {
+    /* Dark Theme Tokens */
+    html[data-theme="dark"], body[data-theme="dark"] {
       color-scheme: dark;
       --bg: #111310;
       --panel: #1a1c19;
       --panel-hover: #212520;
       --subtle: #20231f;
       --subtle-hover: #282d27;
-      --line: rgba(236, 241, 234, .095);
-      --line-strong: rgba(236, 241, 234, .18);
+      --line: rgba(236, 241, 234, 0.095);
+      --line-strong: rgba(236, 241, 234, 0.18);
       --ink: #f1f3ee;
       --paper: #f1f3ee;
       --muted: #9a9f98;
@@ -79,8 +67,6 @@
       --amber: #e6b268;
       --danger: #ff8068;
       --aside: #141613;
-      --shell-panel: rgba(239, 243, 237, 0.04);
-      --shell-button: rgba(239, 243, 237, 0.06);
       --btn-primary-bg: #75c7ab;
       --btn-primary-ink: #0d1410;
       --card-thumb-bg: linear-gradient(135deg, #18221b 0%, #0d1410 100%);
@@ -96,361 +82,328 @@
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
       display: flex;
+      flex-direction: column;
     }
 
     button, input, select, textarea { font: inherit; color: inherit; }
     button { cursor: pointer; border: 0; background: none; }
     a { color: inherit; text-decoration: none; }
 
-    /* ==========================================================================
-       Studio Left Sidebar (Permanent Host Shell · Width 248px)
-       ========================================================================== */
-    .side {
-      position: fixed;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      width: var(--sidebar-width);
-      padding: 16px 12px 18px;
-      background: var(--aside);
-      border-right: 1px solid var(--line);
-      display: flex;
-      flex-direction: column;
-      z-index: 30;
-      overflow-y: auto;
-    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 7px; height: 7px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
-    .side-brand {
+    /* Standalone Header (VerdantFlare IMAGE STATION) */
+    .station-header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      height: 64px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 4px 6px 16px;
-      margin-bottom: 14px;
-      border-bottom: 1px solid var(--line);
+      justify-content: space-between;
+      padding: 0 28px;
+      backdrop-filter: blur(16px);
     }
 
-    .side-brand img {
-      width: 26px;
-      height: 26px;
-      border-radius: 6px;
-      flex-shrink: 0;
-    }
-
-    .side-brand .brand-text {
+    .brand-wrap {
       display: flex;
-      flex-direction: column;
-      line-height: 1.25;
-    }
-    .side-brand span {
-      font-size: 14px;
-      font-weight: 650;
-      color: var(--ink);
-    }
-    .side-brand small {
-      font-size: 9px;
-      letter-spacing: 2px;
-      color: var(--muted);
-      font-weight: 600;
+      align-items: center;
+      gap: 12px;
     }
 
-    .side-create-btn {
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      background: var(--accent);
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 9px 12px;
-      background: var(--btn-primary-bg);
-      color: var(--btn-primary-ink);
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 650;
-      margin-bottom: 16px;
-      transition: all 0.16s ease;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-    }
-    .side-create-btn:hover {
-      filter: brightness(1.08);
-      transform: translateY(-1px);
+      color: var(--bg);
+      box-shadow: 0 2px 10px var(--accent-glow);
     }
 
-    .nav-label {
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: var(--ink);
+    }
+
+    .station-tag {
       font-size: 10px;
       font-weight: 700;
-      letter-spacing: 1.5px;
-      color: var(--muted);
-      text-transform: uppercase;
-      padding: 10px 8px 6px;
-    }
-
-    .nav-link {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 10px;
-      border-radius: 7px;
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 550;
-      margin-bottom: 2px;
-      transition: all 0.15s ease;
-    }
-    .nav-link:hover {
-      background: var(--shell-button);
-      color: var(--ink);
-    }
-    .nav-link.selected {
-      background: var(--shell-panel);
-      color: var(--accent);
+      letter-spacing: 1px;
+      padding: 2px 7px;
+      border-radius: var(--radius-pill);
+      background: var(--subtle);
       border: 1px solid var(--line);
-      font-weight: 650;
-    }
-    .nav-icon {
-      width: 18px;
-      height: 18px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .side-footer {
-      margin-top: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      padding-top: 14px;
-      border-top: 1px solid var(--line);
-    }
-
-    .side-cluster-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 8px 10px;
-      background: var(--shell-panel);
-      font-size: 11px;
-    }
-    .cluster-status-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-weight: 600;
-    }
-    .status-dot {
-      display: inline-block;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-      margin-right: 5px;
-    }
-
-    /* ==========================================================================
-       Main Viewport (Studio Content Area · Left Margin 248px)
-       ========================================================================== */
-    .main {
-      margin-left: var(--sidebar-width);
-      flex: 1;
-      min-width: 0;
-      padding: 24px 32px 64px;
-      position: relative;
-      transition: margin-right 0.24s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .main.with-drawer {
-      margin-right: var(--drawer-width);
-    }
-
-    /* Top Breadcrumbs & App Header */
-    .app-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-
-    .breadcrumbs {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
       color: var(--muted);
-      margin-bottom: 6px;
+      margin-left: 6px;
     }
-    .breadcrumbs a:hover { color: var(--ink); text-decoration: underline; }
-    .breadcrumbs span.cur { color: var(--accent); font-weight: 600; }
 
-    .app-title-group h1 {
-      font-size: 24px;
-      font-weight: 700;
-      color: var(--ink);
+    .header-actions {
       display: flex;
       align-items: center;
-      gap: 10px;
-    }
-    .app-badge-pill {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--accent-glow);
-      color: var(--accent);
-      border: 1px solid var(--accent);
-      font-weight: 600;
-    }
-    .app-desc {
-      font-size: 13px;
-      color: var(--muted);
-      margin-top: 4px;
+      gap: 12px;
     }
 
-    .app-actions {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
+    /* Common Buttons */
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      padding: 7px 14px;
-      border-radius: 7px;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      color: var(--ink);
+      height: 34px;
+      padding: 0 14px;
+      border-radius: var(--radius-sm);
       font-size: 12px;
       font-weight: 600;
-      transition: all 0.16s ease;
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      transition: all 0.15s ease;
+      text-decoration: none;
+      white-space: nowrap;
     }
+
     .btn:hover {
-      border-color: var(--accent);
+      border-color: var(--muted);
       background: var(--subtle-hover);
       transform: translateY(-1px);
     }
+
     .btn.primary {
       background: var(--btn-primary-bg);
       color: var(--btn-primary-ink);
-      border-color: transparent;
+      border-color: var(--btn-primary-bg);
+      box-shadow: 0 2px 8px var(--accent-glow);
     }
+
     .btn.primary:hover {
       filter: brightness(1.08);
-      box-shadow: 0 3px 12px var(--accent-glow);
+      box-shadow: 0 4px 14px var(--accent-glow);
     }
 
-    /* Sub-Navigation Tabs (Tasks / Models / MCP) */
-    .app-tabs {
+    .pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      padding: 0 12px;
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--muted);
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-pill);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+
+    /* Main Workspace Container */
+    .main {
+      flex: 1;
+      width: 100%;
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 24px 28px 48px;
+      box-sizing: border-box;
+    }
+
+    /* Horizontal Sub-Navigation Tabs */
+    .workspace-tabs {
       display: flex;
-      gap: 28px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
       border-bottom: 1px solid var(--line);
       margin-bottom: 22px;
-      position: relative;
-    }
-    .app-tab {
-      padding: 8px 4px 12px;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--muted);
-      cursor: pointer;
-      position: relative;
-      transition: color 0.15s ease;
-    }
-    .app-tab:hover { color: var(--ink); }
-    .app-tab.active {
-      color: var(--accent);
-    }
-    .app-tab.active::after {
-      content: '';
-      position: absolute;
-      bottom: -1px;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: var(--accent);
-      border-radius: 2px 2px 0 0;
+      padding-bottom: 0;
     }
 
-    /* Views */
-    .tab-view { display: none; }
-    .tab-view.active { display: block; }
+    .tabs-group {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .tab-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 4px 14px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      background: none;
+    }
+
+    .tab-item:hover {
+      color: var(--ink);
+    }
+
+    .tab-item.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .tab-tools {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* View Transitions */
+    .tab-view {
+      display: none;
+    }
+
+    .tab-view.active {
+      display: block;
+      animation: studioViewFade 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes studioViewFade {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
     /* ==========================================================================
-       Inline Creation Console (免弹窗即时生图控制台 · Reduced Popups)
+       VIEW 1: TASKS WORKSPACE (Console + Gallery + Toolbar)
        ========================================================================== */
-    .inline-console {
+    /* Inline Creation Console */
+    .console-card {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 16px 18px;
+      border-radius: var(--radius-lg);
+      padding: 18px 22px 20px;
       margin-bottom: 24px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-      transition: border-color 0.18s ease;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+      transition: border-color 0.2s;
     }
-    .inline-console:focus-within {
-      border-color: var(--accent);
-      box-shadow: 0 6px 24px var(--accent-glow);
+
+    .console-card:focus-within {
+      border-color: var(--line-strong);
     }
 
     .console-header {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
     }
+
     .mode-pills {
       display: flex;
+      align-items: center;
       gap: 6px;
       background: var(--subtle);
       padding: 3px;
-      border-radius: 7px;
+      border-radius: var(--radius-sm);
       border: 1px solid var(--line);
     }
+
     .mode-pill {
-      padding: 4px 10px;
-      font-size: 11px;
-      font-weight: 600;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 6px;
       color: var(--muted);
-      border-radius: 5px;
-      transition: all 0.14s ease;
+      transition: all 0.15s ease;
     }
-    .mode-pill:hover { color: var(--ink); }
+
+    .mode-pill:hover {
+      color: var(--ink);
+    }
+
     .mode-pill.active {
       background: var(--panel);
       color: var(--accent);
-      font-weight: 700;
+      font-weight: 600;
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
     }
 
     .console-notice {
       font-size: 11px;
-      color: var(--accent);
+      color: var(--muted);
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
     }
 
-    .prompt-input-row {
-      position: relative;
-      margin-bottom: 12px;
+    .prompt-box-wrap {
+      margin-bottom: 14px;
     }
+
     .prompt-textarea {
       width: 100%;
       min-height: 72px;
-      max-height: 180px;
-      resize: vertical;
+      max-height: 220px;
+      padding: 12px 14px;
+      border-radius: var(--radius-md);
       background: var(--subtle);
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px 14px;
+      color: var(--ink);
       font-size: 13px;
       line-height: 1.6;
-      color: var(--ink);
+      resize: vertical;
       outline: none;
-      transition: all 0.15s ease;
+      transition: border-color 0.15s, background-color 0.15s;
     }
+
     .prompt-textarea:focus {
+      border-color: var(--accent);
       background: var(--panel);
+    }
+
+    .dynamic-fields-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .input-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .input-field label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .input-field input {
+      height: 34px;
+      padding: 0 12px;
+      border-radius: var(--radius-sm);
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      font-size: 12px;
+      outline: none;
+    }
+
+    .input-field input:focus {
       border-color: var(--accent);
     }
 
@@ -459,44 +412,49 @@
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
     }
 
-    .controls-left {
+    .controls-cluster {
       display: flex;
       align-items: center;
-      gap: 12px;
       flex-wrap: wrap;
+      gap: 10px;
     }
 
     .ratio-group {
       display: flex;
-      gap: 4px;
       align-items: center;
-    }
-    .ratio-chip {
-      padding: 4px 9px;
-      border-radius: 5px;
-      font-size: 11px;
-      font-weight: 600;
-      border: 1px solid var(--line);
+      gap: 4px;
       background: var(--subtle);
-      color: var(--muted);
-      transition: all 0.14s ease;
-    }
-    .ratio-chip:hover { color: var(--ink); border-color: var(--muted); }
-    .ratio-chip.active {
-      background: var(--accent-glow);
-      border-color: var(--accent);
-      color: var(--accent);
-      font-weight: 700;
+      padding: 3px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--line);
     }
 
-    .control-select {
+    .ratio-chip {
+      font-size: 11px;
+      padding: 4px 9px;
+      border-radius: 5px;
+      color: var(--muted);
+      transition: all 0.15s;
+    }
+
+    .ratio-chip.active {
+      background: var(--panel);
+      color: var(--accent);
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .select-dropdown {
+      height: 32px;
+      padding: 0 10px;
+      border-radius: var(--radius-sm);
       background: var(--subtle);
       border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 4px 8px;
       font-size: 12px;
       color: var(--ink);
       outline: none;
@@ -506,123 +464,116 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 10px;
-      border-radius: 5px;
+      height: 32px;
+      padding: 0 10px;
+      border-radius: var(--radius-sm);
+      background: var(--subtle);
+      border: 1px solid var(--line);
       font-size: 11px;
       font-weight: 600;
-      border: 1px solid var(--line);
-      background: var(--subtle);
+      color: var(--muted);
       cursor: pointer;
       user-select: none;
     }
+
     .toggle-chip.active {
+      color: var(--accent);
       border-color: var(--accent);
       background: var(--accent-glow);
-      color: var(--accent);
     }
+
     .toggle-chip input {
-      accent-color: var(--accent);
-      margin: 0;
-    }
-
-    /* Extra Parameters (Dynamic when switching modes) */
-    .extra-params-panel {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px dashed var(--line);
       display: none;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 12px;
-    }
-    .extra-params-panel.open { display: grid; }
-    .extra-field label {
-      display: block;
-      font-size: 11px;
-      color: var(--muted);
-      margin-bottom: 4px;
-      font-weight: 600;
-    }
-    .extra-field input {
-      width: 100%;
-      background: var(--subtle);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 6px 10px;
-      font-size: 12px;
-      color: var(--ink);
     }
 
-    /* ==========================================================================
-       Toolbar & Filter Row
-       ========================================================================== */
-    .toolbar-row {
+    /* Toolbar & Search */
+    .market-toolbar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      justify-content: space-between;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 14px;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
     }
 
-    .status-filters {
+    .filter-chips {
       display: flex;
+      align-items: center;
       gap: 6px;
       flex-wrap: wrap;
     }
-    .filter-chip {
-      padding: 4px 11px;
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 600;
+
+    .chip-btn {
+      height: 30px;
+      padding: 0 12px;
+      border-radius: var(--radius-pill);
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--subtle);
       border: 1px solid var(--line);
-      background: var(--panel);
       color: var(--muted);
-      transition: all 0.14s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
     }
-    .filter-chip:hover { color: var(--ink); border-color: var(--muted); }
-    .filter-chip.active {
-      border-color: var(--accent);
-      background: var(--accent-glow);
+
+    .chip-btn:hover {
+      color: var(--ink);
+      border-color: var(--muted);
+    }
+
+    .chip-btn.active {
+      background: var(--panel);
       color: var(--accent);
-      font-weight: 700;
+      border-color: var(--accent);
+      font-weight: 600;
     }
-    .filter-chip span {
-      padding-left: 4px;
-      font-variant-numeric: tabular-nums;
-      opacity: 0.85;
+
+    .chip-count {
+      font-size: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 1px 6px;
+      border-radius: var(--radius-pill);
+      background: var(--line);
+      color: var(--muted);
+    }
+
+    .chip-btn.active .chip-count {
+      background: var(--accent);
+      color: var(--bg);
     }
 
     .toolbar-right {
       display: flex;
       align-items: center;
-      gap: 10px;
-    }
-    .search-box {
-      position: relative;
-      width: 220px;
-    }
-    .search-box input {
-      width: 100%;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 5px 10px 5px 28px;
-      font-size: 12px;
-      outline: none;
-    }
-    .search-box input:focus { border-color: var(--accent); }
-    .search-icon {
-      position: absolute;
-      left: 8px;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--muted);
-      pointer-events: none;
+      gap: 14px;
     }
 
-    /* ==========================================================================
-       Gallery Grid (3 Cards per row · Premium Visuals)
-       ========================================================================== */
+    .search-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 0 10px;
+      height: 32px;
+      min-width: 220px;
+    }
+
+    .search-box input {
+      border: 0;
+      background: none;
+      outline: none;
+      font-size: 12px;
+      color: var(--ink);
+      width: 100%;
+    }
+
+    /* Gallery Grid */
     .gallery-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -632,67 +583,74 @@
     .task-card {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: var(--radius-md);
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
     }
+
     .task-card:hover {
       border-color: var(--accent);
       transform: translateY(-2px);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
     }
-    .task-card.active-card {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px var(--accent-glow);
-    }
 
     .card-thumb {
-      height: 210px;
       position: relative;
-      overflow: hidden;
+      aspect-ratio: 16 / 10;
       background: var(--card-thumb-bg);
+      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      border-bottom: 1px solid var(--line);
     }
+
     .card-thumb img {
       width: 100%;
       height: 100%;
       object-fit: cover;
-      transition: transform 0.2s ease;
+      transition: transform 0.3s ease;
     }
+
     .task-card:hover .card-thumb img {
-      transform: scale(1.025);
+      transform: scale(1.02);
     }
 
     .card-top-badges {
       position: absolute;
-      top: 8px;
-      right: 8px;
+      top: 10px;
+      left: 10px;
+      right: 10px;
       display: flex;
-      gap: 5px;
-      z-index: 2;
+      justify-content: space-between;
+      pointer-events: none;
     }
-    .badge {
+
+    .tag-badge {
       font-size: 10px;
       font-weight: 700;
-      padding: 2px 7px;
-      border-radius: 4px;
-      background: rgba(13, 20, 16, 0.82);
-      color: #fff;
-      backdrop-filter: blur(4px);
+      letter-spacing: 0.5px;
+      padding: 3px 8px;
+      border-radius: var(--radius-pill);
+      background: rgba(17, 19, 16, 0.78);
+      backdrop-filter: blur(8px);
+      color: #f1f3ee;
+      border: 1px solid rgba(255, 255, 255, 0.12);
     }
-    .badge.accent {
+
+    .tag-badge.accent {
       background: var(--accent);
-      color: #0b0f0c;
+      color: var(--bg);
+      border: none;
     }
-    .badge.amber {
+
+    .tag-badge.amber {
       background: var(--amber);
-      color: #0b0f0c;
+      color: #fff;
+      border: none;
     }
 
     .card-time-row {
@@ -700,40 +658,48 @@
       bottom: 0;
       left: 0;
       right: 0;
+      padding: 6px 10px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.75), transparent);
+      color: #e2e8e3;
+      font-size: 11px;
       display: flex;
       justify-content: space-between;
-      padding: 16px 10px 6px;
-      background: linear-gradient(transparent, rgba(10, 16, 12, 0.88));
-      font-size: 10px;
-      color: #eaf0eb;
-      font-variant-numeric: tabular-nums;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
     .card-body {
-      padding: 12px 14px;
+      padding: 14px 16px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
       flex: 1;
-    }
-    .card-title-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
       gap: 8px;
     }
+
+    .card-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .card-title {
       font-size: 13px;
-      font-weight: 650;
+      font-weight: 600;
       color: var(--ink);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
     .card-type-tag {
       font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--subtle);
+      border: 1px solid var(--line);
       color: var(--muted);
-      flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .card-prompt-snip {
@@ -744,46 +710,109 @@
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
-      min-height: 36px;
+      margin-bottom: auto;
     }
 
     .card-foot {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      justify-content: space-between;
       padding-top: 10px;
       border-top: 1px solid var(--line);
-      margin-top: auto;
       font-size: 11px;
     }
-    .card-meta-chips {
+
+    .card-chips {
       display: flex;
-      gap: 5px;
+      align-items: center;
+      gap: 6px;
     }
-    .meta-chip {
+
+    .card-chip {
       font-size: 10px;
-      padding: 1px 6px;
-      border-radius: 3px;
+      padding: 2px 6px;
+      border-radius: 4px;
       background: var(--subtle);
       color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+
     .card-action-text {
       color: var(--accent);
       font-weight: 600;
     }
 
     /* ==========================================================================
-       Right Slide-out Inspector Drawer (免弹窗检视面板)
+       VIEW 2 & 3: DECKS (Models & MCP Contracts)
+       ========================================================================== */
+    .deck-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .deck-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 20px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.03);
+      transition: all 0.2s ease;
+    }
+
+    .deck-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+    }
+
+    .deck-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .deck-card h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .deck-card p {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .code-schema-block {
+      background: var(--subtle);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      color: var(--ink);
+      overflow-x: auto;
+      line-height: 1.5;
+    }
+
+    /* ==========================================================================
+       RIGHT INSPECTOR DRAWER
        ========================================================================== */
     .drawer-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.4);
-      z-index: 40;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      z-index: 50;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s ease;
     }
+
     .drawer-overlay.open {
       opacity: 1;
       pointer-events: auto;
@@ -792,32 +821,35 @@
     .inspector-drawer {
       position: fixed;
       top: 0;
-      bottom: 0;
       right: 0;
-      width: var(--drawer-width);
-      max-width: 90vw;
+      bottom: 0;
+      width: min(var(--drawer-width), 100vw);
       background: var(--panel);
-      border-left: 1px solid var(--line);
-      z-index: 50;
+      border-left: 1px solid var(--line-strong);
+      z-index: 51;
       transform: translateX(100%);
-      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
       display: flex;
       flex-direction: column;
-      box-shadow: -12px 0 40px rgba(0, 0, 0, 0.18);
+      box-shadow: -10px 0 40px rgba(0, 0, 0, 0.3);
     }
+
     .inspector-drawer.open {
       transform: translateX(0);
     }
 
     .drawer-head {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--line);
-      background: var(--subtle);
     }
-    .drawer-head strong { font-size: 15px; color: var(--ink); }
+
+    .drawer-head strong {
+      font-size: 15px;
+      color: var(--ink);
+    }
 
     .drawer-body {
       padding: 20px;
@@ -828,328 +860,248 @@
       gap: 20px;
     }
 
-    .stage-preview-box {
+    .preview-box {
+      background: var(--bg);
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: var(--radius-md);
       overflow: hidden;
-      background: #080d0a;
-      position: relative;
-      height: 320px;
       display: flex;
       align-items: center;
       justify-content: center;
+      min-height: 240px;
+      max-height: 380px;
+      position: relative;
     }
-    .stage-preview-box img {
+
+    .preview-box img {
       max-width: 100%;
-      max-height: 100%;
+      max-height: 380px;
       object-fit: contain;
     }
 
-    /* Interactive Compare Slider */
-    .compare-wrap {
+    .compare-container {
       position: relative;
       width: 100%;
-      height: 100%;
-      user-select: none;
+      height: 340px;
       overflow: hidden;
+      user-select: none;
     }
-    .compare-after, .compare-before {
+
+    .compare-after img, .compare-before img {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-    }
-    .compare-after img, .compare-before img {
-      width: 100%;
-      height: 100%;
       object-fit: cover;
     }
+
     .compare-before {
-      width: 50%;
-      border-right: 2px solid var(--accent);
-      overflow: hidden;
-      z-index: 2;
-    }
-    .compare-handle {
       position: absolute;
       top: 0;
+      left: 0;
       bottom: 0;
+      width: 50%;
+      overflow: hidden;
+      border-right: 2px solid var(--accent);
+    }
+
+    .compare-handle {
+      position: absolute;
+      top: 50%;
       left: 50%;
-      width: 28px;
-      margin-left: -14px;
-      z-index: 3;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: ew-resize;
-    }
-    .compare-circle {
-      width: 26px;
-      height: 26px;
+      transform: translate(-50%, -50%);
+      width: 32px;
+      height: 32px;
       border-radius: 50%;
-      background: var(--accent);
-      color: #0b0f0c;
-      font-size: 11px;
-      font-weight: 700;
+      background: var(--panel);
+      border: 2px solid var(--accent);
+      color: var(--accent);
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+      font-size: 12px;
+      cursor: ew-resize;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
     }
 
-    .stage-actions-bar {
+    .drawer-actions-row {
       display: flex;
-      gap: 8px;
-      margin-top: 10px;
+      gap: 10px;
     }
 
-    .prompt-box {
+    .prompt-audit-card {
       background: var(--subtle);
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 12px 14px;
-      font-size: 12px;
-      line-height: 1.6;
+      border-radius: var(--radius-md);
+      padding: 14px;
     }
-    .prompt-tags-row {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 8px;
-    }
-    .ptag {
-      font-size: 10px;
-      padding: 1px 6px;
-      border-radius: 3px;
-      font-weight: 600;
-    }
-    .ptag.verbatim { background: var(--accent-glow); color: var(--accent); border: 1px solid var(--accent); }
-    .ptag.sanitized { background: rgba(181, 128, 50, 0.15); color: var(--amber); border: 1px solid var(--amber); }
 
     .spec-table {
       display: grid;
-      grid-template-columns: 90px minmax(0, 1fr);
-      gap: 8px 12px;
+      grid-template-columns: 100px 1fr;
+      row-gap: 8px;
+      column-gap: 12px;
       font-size: 12px;
     }
-    .spec-table dt { color: var(--muted); }
-    .spec-table dd { color: var(--ink); font-weight: 550; overflow-wrap: anywhere; }
+
+    .spec-table dt {
+      color: var(--muted);
+    }
+
+    .spec-table dd {
+      color: var(--ink);
+      font-weight: 500;
+    }
 
     /* ==========================================================================
-       02 / MODELS View & 03 / MCP View
+       Embedded Mode Overrides (Studio OS Shell Integration)
+       State-of-the-Art, Full-Width Dynamic Viewport, Zero Double-Scrollbars
        ========================================================================== */
-    .cards-deck {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-      gap: 18px;
-      margin-top: 16px;
+    html[data-embedded="true"] {
+      background: transparent !important;
     }
-    .deck-card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .deck-card:hover {
-      border-color: var(--accent);
-      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.06);
-    }
-    .deck-badge-line {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .deck-card h3 { font-size: 16px; color: var(--ink); margin: 0; }
-    .deck-card p { font-size: 13px; color: var(--muted); line-height: 1.6; }
 
-    /* Responsive */
-    @media (max-width: 900px) {
-      .main {
-        margin-left: 0;
-        padding: 18px 16px;
-      }
-      .side {
-        display: none;
-      }
-      .main.with-drawer {
-        margin-right: 0;
-      }
-      .inspector-drawer {
-        width: 100vw;
-      }
+    html[data-embedded="true"] body {
+      background: transparent !important;
+      display: block !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      overflow-x: hidden !important;
+      min-height: 100vh !important;
+    }
+
+    html[data-embedded="true"] .station-header {
+      display: none !important;
+    }
+
+    html[data-embedded="true"] .main {
+      margin: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      padding: 20px 24px 40px !important;
+      box-sizing: border-box !important;
+    }
+
+    html[data-embedded="true"] .workspace-tabs {
+      border-bottom: 1px solid var(--line) !important;
+      margin-bottom: 18px !important;
+    }
+
+    html[data-embedded="true"] .tab-item {
+      font-size: 14px !important;
+      padding: 6px 4px 12px !important;
     }
   </style>
 </head>
 <body data-theme="dark">
 
   <!-- ==========================================================================
-       Studio Canonical Left Sidebar (Permanent Host Shell · Independent)
+       Standalone Header (Hidden when embedded inside Studio OS)
        ========================================================================== -->
-  <aside class="side">
-    <div class="side-brand">
-      <img src="../logo/verdantflare-logo.png" alt="VerdantFlare" width="26" height="26">
-      <div class="brand-text">
-        <span>青焰 · VerdantFlare</span>
-        <small>STUDIO OS</small>
+  <header class="station-header">
+    <div class="brand-wrap">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+        </svg>
       </div>
+      <span class="brand-title">VerdantFlare</span>
+      <span class="station-tag">IMAGE STATION</span>
     </div>
 
-    <button class="side-create-btn" id="btnStudioNewTask" aria-label="新建创作任务">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-        <line x1="12" y1="5" x2="12" y2="19"></line>
-        <line x1="5" y1="12" x2="19" y2="12"></line>
-      </svg>
-      <span>新建创作任务</span>
-    </button>
-
-    <div class="nav-label">创作空间</div>
-    <a class="nav-link" href="verdantflare_studio_dashboard_v1.0.html">
-      <span class="nav-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-          <polyline points="9 22 9 12 15 12 15 22"></polyline>
-        </svg>
-      </span>
-      <span>工作台</span>
-    </a>
-
-    <a class="nav-link selected" href="verdantflare_studio_market_v1.1.html">
-      <span class="nav-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <rect x="3" y="3" width="7" height="7"></rect>
-          <rect x="14" y="3" width="7" height="7"></rect>
-          <rect x="14" y="14" width="7" height="7"></rect>
-          <rect x="3" y="14" width="7" height="7"></rect>
-        </svg>
-      </span>
-      <span>应用市场</span>
-    </a>
-
-    <div class="nav-label">系统设施</div>
-    <a class="nav-link" href="#">
-      <span class="nav-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-        </svg>
-      </span>
-      <span>模型市场</span>
-    </a>
-
-    <a class="nav-link" href="#">
-      <span class="nav-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <rect x="2" y="3" width="20" height="14" rx="2"></rect>
-          <line x1="8" y1="21" x2="16" y2="21"></line>
-          <line x1="12" y1="17" x2="12" y2="21"></line>
-        </svg>
-      </span>
-      <span>资源管理</span>
-    </a>
-
-    <a class="nav-link" href="#">
-      <span class="nav-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
-          <path d="M12 12v9"></path>
-          <path d="m8 17 4 4 4-4"></path>
-        </svg>
-      </span>
-      <span>网络出口</span>
-    </a>
-
-    <div class="side-footer">
-      <div class="side-cluster-card">
-        <div class="cluster-status-row">
-          <span>5090集群</span>
-          <span style="color:var(--accent);"><span class="status-dot"></span>在线</span>
-        </div>
-        <div style="color:var(--muted); font-size:10px; margin-top:2px;">Core 就绪 · 8 卡 RTX 5090</div>
+    <div class="header-actions">
+      <a class="btn" href="/dashboard" id="btnReturnStudio">← 返回 Studio 全景</a>
+      <div class="pill-badge">
+        <span class="status-dot"></span>
+        <span>双核生图就绪 · 5090 集群</span>
       </div>
-      <div style="font-size:11px; color:var(--muted); padding:4px 6px;">青焰创作者工作室</div>
+      <button class="btn" id="btnThemeToggle">
+        <span id="themeToggleText">浅色模式</span>
+      </button>
+      <button class="btn" id="btnTokenConfig">
+        <span>Token：已就绪</span>
+      </button>
     </div>
-  </aside>
+  </header>
 
   <!-- ==========================================================================
-       Main Viewport (Studio Main View · Image MCP Workstation)
+       Main Viewport (Studio Dynamic Viewport / Standalone Workspace)
        ========================================================================== -->
   <main class="main" id="mainArea">
 
-    <!-- Top App Breadcrumbs & Header -->
-    <header class="app-header">
-      <div class="app-title-group">
-        <div class="breadcrumbs">
-          <a href="verdantflare_studio_market_v1.1.html">应用市场</a>
-          <span>/</span>
-          <span class="cur">Image MCP</span>
-        </div>
-        <h1>
-          <span>Image MCP</span>
-          <span class="app-badge-pill">VF 官方 · v0.1.21 · 已就绪</span>
-        </h1>
-        <p class="app-desc">工业化 4K 原生生图与面部骨相置换工作台 · 逐字直传 (Verbatim) · 负向词防御清洗</p>
-      </div>
-
-      <div class="app-actions">
-        <button class="btn" id="btnThemeToggle" title="切换深色/浅色主题">
-          <span id="themeToggleText">浅色模式</span>
+    <!-- Sub-Navigation Horizontal Tabs (Tasks / Models / MCP) -->
+    <nav class="workspace-tabs" aria-label="创作工作区导航">
+      <div class="tabs-group" role="tablist">
+        <button class="tab-item active" data-nav="tasks" role="tab" aria-selected="true">
+          <span class="tab-label">01 / 任务工单 (Tasks)</span>
         </button>
-        <a class="btn" href="verdantflare_studio_market_v1.1.html" title="返回市场全景">← 返回应用市场</a>
+        <button class="tab-item" data-nav="models" role="tab" aria-selected="false">
+          <span class="tab-label">02 / 模型底座与网关 (Models)</span>
+        </button>
+        <button class="tab-item" data-nav="mcp" role="tab" aria-selected="false">
+          <span class="tab-label">03 / MCP 服务契约 (MCP)</span>
+        </button>
       </div>
-    </header>
 
-    <!-- Sub-Navigation Horizontal Tabs (Studio Standard) -->
-    <nav class="app-tabs">
-      <div class="app-tab active" data-view="tasks">01 / 任务工单 (Tasks)</div>
-      <div class="app-tab" data-view="models">02 / 模型底座与网关 (Models)</div>
-      <div class="app-tab" data-view="mcp">03 / MCP 服务契约 (MCP)</div>
+      <div class="tab-tools">
+        <div class="pill-badge" id="embedStatusPill">
+          <span class="status-dot"></span>
+          <span>双核生图就绪</span>
+        </div>
+        <button class="btn primary" id="btnScrollPrompt">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          <span>立即生图</span>
+        </button>
+      </div>
     </nav>
 
     <!-- =======================================================================
-         VIEW 1: TASKS
+         VIEW 1: TASKS & REAL-TIME CREATION
          ======================================================================= -->
-    <section class="tab-view active" id="view-tasks">
+    <section class="tab-view active" id="view-tasks" role="tabpanel">
 
-      <!-- Inline Quick Creation Console (免弹窗即时生图控制台) -->
-      <div class="inline-console">
+      <!-- Inline Instant Creation Console -->
+      <div class="console-card">
         <div class="console-header">
-          <div class="mode-pills">
-            <button class="mode-pill active" data-mode="t2i">文生图 (Text-to-Image)</button>
-            <button class="mode-pill" data-mode="inpaint">局部重绘 (Inpainting)</button>
-            <button class="mode-pill" data-mode="faceswap">真人骨相换脸 (Face Fusion)</button>
+          <div class="mode-pills" role="radiogroup">
+            <button class="mode-pill active" data-mode="t2i" role="radio" aria-checked="true">文生图 (Text-to-Image)</button>
+            <button class="mode-pill" data-mode="inpaint" role="radio" aria-checked="false">局部重绘 (Inpainting)</button>
+            <button class="mode-pill" data-mode="faceswap" role="radio" aria-checked="false">真人骨相换脸 (Face Fusion)</button>
           </div>
           <div class="console-notice">
-            <span>🛡️ 负向词防御清洗已开启 · 100% 逐字透传</span>
+            <span>🛡️ 负向词防御清洗已开启 · 100% 逐字直传</span>
           </div>
         </div>
 
-        <form id="inlinePromptForm">
-          <div class="prompt-input-row">
-            <textarea class="prompt-textarea" id="txtPrompt" placeholder="描述人物姿态、服装材质、光影氛围与空间纵深（支持 Ctrl + Enter 快速提交）…" required>全身落地镜前对镜自拍，年轻女性芭蕾舞者，纯黑色高领修身芭蕾练习服，粉色缎面芭蕾足尖鞋绑带丝丝清晰。木质舞蹈地板泛着温润微光，落地镜边缘与倒影层次通透，单反全画幅点对点商业写真，零重影无多肢。</textarea>
+        <form id="promptForm">
+          <div class="prompt-box-wrap">
+            <textarea class="prompt-textarea" id="txtPrompt" placeholder="描述人物姿态、服装材质、光影氛围与空间纵深（支持 Ctrl + Enter 立即生成）…" required>全身落地镜前对镜自拍，年轻女性芭蕾舞者，纯黑色高领修身芭蕾练习服，粉色缎面芭蕾足尖鞋绑带丝丝清晰。木质舞蹈地板泛着温润微光，落地镜边缘与倒影层次通透，单反全画幅点对点商业写真，零重影无多肢。</textarea>
           </div>
 
-          <!-- Dynamic Mode Specific Fields -->
-          <div class="extra-params-panel" id="extraPanel">
-            <div class="extra-field" id="fieldBaseImg" style="display:none;">
-              <label>基础参考底图 (Base Image Artifact ID / URL)</label>
+          <!-- Dynamic Mode Fields -->
+          <div class="dynamic-fields-row" id="extraPanel" style="display:none;">
+            <div class="input-field" id="fieldBaseImg" style="display:none;">
+              <label for="inputBaseImg">基础参考底图 (Base Artifact ID / URL)</label>
               <input type="text" id="inputBaseImg" placeholder="例如：artifact_ballet_0891"/>
             </div>
-            <div class="extra-field" id="fieldSourceFace" style="display:none;">
-              <label>真人免冠身份证源 (Source Identity Face)</label>
-              <input type="text" id="inputSourceFace" placeholder="例如：小月标准正脸免冠照 · artifact_xiaoyue_id_01"/>
+            <div class="input-field" id="fieldSourceFace" style="display:none;">
+              <label for="inputSourceFace">真人免冠身份证源 (Source Identity Face)</label>
+              <input type="text" id="inputSourceFace" placeholder="例如：小月标准免冠正脸照 · artifact_xiaoyue_id_01"/>
             </div>
-            <div class="extra-field" id="fieldProject">
-              <label>所属项目 ID</label>
+            <div class="input-field">
+              <label for="inputProject">所属项目 ID</label>
               <input type="text" id="inputProject" value="ballet-dancer"/>
             </div>
           </div>
 
           <div class="console-controls">
-            <div class="controls-left">
+            <div class="controls-cluster">
               <!-- Aspect Ratio Group -->
-              <div class="ratio-group">
+              <div class="ratio-group" role="radiogroup">
                 <button type="button" class="ratio-chip active" data-ratio="9:16">9:16 竖版</button>
                 <button type="button" class="ratio-chip" data-ratio="16:9">16:9 横屏</button>
                 <button type="button" class="ratio-chip" data-ratio="1:1">1:1 方形</button>
@@ -1157,7 +1109,7 @@
               </div>
 
               <!-- Model Selector -->
-              <select class="control-select" id="selectModel">
+              <select class="select-dropdown" id="selectModel" aria-label="生图底座">
                 <option value="gpt-image-2.5-sunburst">gpt-image-2.5-sunburst (4K 单反级)</option>
                 <option value="gpt-image-2.5-flare">gpt-image-2.5-flare (快速概念)</option>
               </select>
@@ -1169,40 +1121,38 @@
               </label>
             </div>
 
-            <div class="controls-right">
-              <button type="submit" class="btn primary" id="btnSubmitGenerate">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                </svg>
-                <span>立即生成 (Generate)</span>
-              </button>
-            </div>
+            <button type="submit" class="btn primary" id="btnSubmitGenerate">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>立即生成 (Generate)</span>
+            </button>
           </div>
         </form>
       </div>
 
       <!-- Toolbar & Status Filter -->
-      <div class="toolbar-row">
-        <div class="status-filters">
-          <button class="filter-chip active" data-status="all">全部 <span id="countAll">8</span></button>
-          <button class="filter-chip" data-status="succeeded">已完成 <span id="countSucceeded">6</span></button>
-          <button class="filter-chip" data-status="running">生成中 <span id="countRunning">1</span></button>
-          <button class="filter-chip" data-status="queued">排队中 <span id="countQueued">1</span></button>
+      <div class="market-toolbar">
+        <div class="filter-chips">
+          <button class="chip-btn active" data-status="all">全部 <span class="chip-count" id="countAll">0</span></button>
+          <button class="chip-btn" data-status="succeeded">已完成 <span class="chip-count" id="countSucceeded">0</span></button>
+          <button class="chip-btn" data-status="running">生成中 <span class="chip-count" id="countRunning">0</span></button>
+          <button class="chip-btn" data-status="queued">排队中 <span class="chip-count" id="countQueued">0</span></button>
         </div>
 
         <div class="toolbar-right">
           <div class="search-box">
-            <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
-            <input type="search" id="inputSearch" placeholder="搜索提示词、任务ID或项目…"/>
+            <input type="search" id="inputSearch" placeholder="搜索提示词、任务ID或项目…" aria-label="搜索任务"/>
           </div>
           <span style="font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;">平均生成耗时：<strong style="color:var(--accent);">7.8s</strong></span>
         </div>
       </div>
 
-      <!-- Gallery Grid -->
+      <!-- Task Gallery Grid -->
       <div class="gallery-grid" id="galleryContainer"></div>
 
     </section>
@@ -1210,58 +1160,58 @@
     <!-- =======================================================================
          VIEW 2: MODELS & GATEWAY
          ======================================================================= -->
-    <section class="tab-view" id="view-models">
-      <div class="cards-deck">
+    <section class="tab-view" id="view-models" role="tabpanel">
+      <div class="deck-grid">
         <div class="deck-card">
-          <div class="deck-badge-line">
-            <span class="badge accent">生产核心主力</span>
-            <span style="font-size:11px; color:var(--muted);">v0.1.21</span>
+          <div class="deck-head">
+            <span class="tag-badge accent">生产核心主力</span>
+            <span style="font-size:11px; color:var(--muted);">v0.1.23</span>
           </div>
           <h3>gpt-image-2.5-sunburst</h3>
           <p>4K 商业级单反写真生图底座。点对点原生输出 2160×3840 (830万物理像素)，睫毛、毛孔与发丝丝丝分明，从根本上解决全身中远景发虚涂抹与数码插值拉伸。</p>
-          <div class="card-meta-chips" style="margin-top:auto;">
-            <span class="meta-chip">真 4K</span>
-            <span class="meta-chip">8.3MP</span>
-            <span class="meta-chip">单反质感</span>
+          <div class="card-chips" style="margin-top:auto;">
+            <span class="card-chip">真 4K</span>
+            <span class="card-chip">8.3MP</span>
+            <span class="card-chip">单反质感</span>
           </div>
         </div>
 
         <div class="deck-card">
-          <div class="deck-badge-line">
-            <span class="badge">快速概念草图</span>
-            <span style="font-size:11px; color:var(--muted);">v0.1.21</span>
+          <div class="deck-head">
+            <span class="tag-badge">快速概念草图</span>
+            <span style="font-size:11px; color:var(--muted);">v0.1.23</span>
           </div>
           <h3>gpt-image-2.5-flare</h3>
           <p>故事板与影视分镜快速概念模型。3~5 秒极速出图，标准 2K 输出，适合高频创意打光推演与剧本视觉化测试。</p>
-          <div class="card-meta-chips" style="margin-top:auto;">
-            <span class="meta-chip">极速推理</span>
-            <span class="meta-chip">分镜探索</span>
+          <div class="card-chips" style="margin-top:auto;">
+            <span class="card-chip">极速推理</span>
+            <span class="card-chip">分镜探索</span>
           </div>
         </div>
 
         <div class="deck-card">
-          <div class="deck-badge-line">
-            <span class="badge amber">sub2api 网关托管</span>
+          <div class="deck-head">
+            <span class="tag-badge amber">sub2api 网关托管</span>
             <span style="font-size:11px; color:var(--muted);">SUB2API_IMAGES_MAIN_MODEL</span>
           </div>
           <h3>gpt-5.6-luna (轻量工具调度)</h3>
-          <p>网关内部轻量主控，专司 Function Calling。彻底替换客户端原有的 <code>gpt-6-astra</code> 强思维链模型，根除因推理上下文视角冲突引发的落地镜双重曝光与幽灵手臂。</p>
-          <div class="card-meta-chips" style="margin-top:auto;">
-            <span class="meta-chip">逐字直传</span>
-            <span class="meta-chip">防重影</span>
+          <p>网关内部轻量主控，专司 Function Calling。彻底替换客户端原有的强思维链模型，根除因推理上下文视角冲突引发的落地镜双重曝光与幽灵手臂。</p>
+          <div class="card-chips" style="margin-top:auto;">
+            <span class="card-chip">逐字直传</span>
+            <span class="card-chip">防重影</span>
           </div>
         </div>
 
         <div class="deck-card">
-          <div class="deck-badge-line">
-            <span class="badge accent">成都 5090 集群专属</span>
+          <div class="deck-head">
+            <span class="tag-badge accent">成都 5090 集群专属</span>
             <span style="font-size:11px; color:var(--muted);">image-face-fusion-api</span>
           </div>
           <h3>InsightFace (Inswapper) + CodeFormer</h3>
-          <p>专司真人 IP 面部特征锁定的独立微服务。攻克上游生图底座 AI 随机脸与 Anti-Deepfake 审查拒止痛点，对齐小月等固定真人 IP 奢华时尚大片的工业化生产。</p>
-          <div class="card-meta-chips" style="margin-top:auto;">
-            <span class="meta-chip">骨相置换</span>
-            <span class="meta-chip">CodeFormer 修复</span>
+          <p>专司真人 IP 面部特征锁定的独立微服务。攻克上游生图底座 AI 随机脸与审查拒止痛点，对齐小月等固定真人 IP 奢华时尚大片的工业化生产。</p>
+          <div class="card-chips" style="margin-top:auto;">
+            <span class="card-chip">骨相置换</span>
+            <span class="card-chip">CodeFormer 修复</span>
           </div>
         </div>
       </div>
@@ -1270,33 +1220,42 @@
     <!-- =======================================================================
          VIEW 3: MCP CONTRACTS
          ======================================================================= -->
-    <section class="tab-view" id="view-mcp">
-      <div class="cards-deck">
+    <section class="tab-view" id="view-mcp" role="tabpanel">
+      <div class="deck-grid">
         <div class="deck-card">
-          <div class="deck-badge-line">
-            <code style="font-size:13px; font-weight:700; color:var(--accent);">image_generate</code>
-            <span class="badge">Tool</span>
+          <div class="deck-head">
+            <code style="font-size:13px; font-weight:700; color:var(--accent);">image.create</code>
+            <span class="tag-badge">Tool</span>
           </div>
-          <p>标准文生图接口。参数接收 prompt、aspect_ratio、prefer_4k，输出落盘图片及 Artifact 元数据。</p>
-          <pre style="font-size:11px; background:var(--subtle); padding:10px; border-radius:6px; color:var(--ink); overflow-x:auto;">{ "prompt": "string", "aspect_ratio": "9:16", "prefer_4k": true, "model": "gpt-image-2.5-sunburst" }</pre>
+          <p>标准异步生图接口。参数接收 prompt、aspect_ratio、resolution (2k/4k)、engine 及 model，输出任务编号及落盘产物。</p>
+          <pre class="code-schema-block">{ "prompt": "string", "aspect_ratio": "9:16", "resolution": "4k", "engine": "codex", "model": "gpt-image-2.5-sunburst" }</pre>
         </div>
 
         <div class="deck-card">
-          <div class="deck-badge-line">
-            <code style="font-size:13px; font-weight:700; color:var(--accent);">image_edit</code>
-            <span class="badge">Tool</span>
+          <div class="deck-head">
+            <code style="font-size:13px; font-weight:700; color:var(--accent);">image.edit</code>
+            <span class="tag-badge">Tool</span>
           </div>
-          <p>图生图与局部重绘 (Inpainting)。支持基于参考图及可选遮罩执行精准指令微调。</p>
-          <pre style="font-size:11px; background:var(--subtle); padding:10px; border-radius:6px; color:var(--ink); overflow-x:auto;">{ "image_artifact_id": "string", "mask_artifact_id": "string", "prompt": "string" }</pre>
+          <p>图生图与定向微调。基于参考图 source_artifact_id 及多模态指令执行高精度编辑。</p>
+          <pre class="code-schema-block">{ "source_artifact_id": "string", "prompt": "string", "reference_artifact_ids": [] }</pre>
         </div>
 
         <div class="deck-card">
-          <div class="deck-badge-line">
+          <div class="deck-head">
+            <code style="font-size:13px; font-weight:700; color:var(--accent);">image.inpaint</code>
+            <span class="tag-badge">Tool</span>
+          </div>
+          <p>局部重绘接口。结合底图与 mask_artifact_id 区域遮罩，对指定区域进行无缝融合重绘。</p>
+          <pre class="code-schema-block">{ "source_artifact_id": "string", "mask_artifact_id": "string", "prompt": "string" }</pre>
+        </div>
+
+        <div class="deck-card">
+          <div class="deck-head">
             <code style="font-size:13px; font-weight:700; color:var(--accent);">image_face_swap</code>
-            <span class="badge">Tool</span>
+            <span class="tag-badge">Tool</span>
           </div>
-          <p>真人面部骨相置换微服务调用。基于 source_face 替换 target_image 面孔并进行超清重构。</p>
-          <pre style="font-size:11px; background:var(--subtle); padding:10px; border-radius:6px; color:var(--ink); overflow-x:auto;">{ "target_image": "string", "source_face": "string", "fidelity_weight": 0.85 }</pre>
+          <p>真人面部骨相置换微服务调用。基于 source_face 替换 target_image 面孔并进行眼部微观重建。</p>
+          <pre class="code-schema-block">{ "target_image": "string", "source_face": "string", "fidelity_weight": 0.85 }</pre>
         </div>
       </div>
     </section>
@@ -1304,45 +1263,42 @@
   </main>
 
   <!-- ==========================================================================
-       Right Slide-out Inspector Drawer (免弹窗检视面板 · Zero Popups)
+       Right Slide-out Inspector Drawer
        ========================================================================== -->
   <div class="drawer-overlay" id="drawerOverlay"></div>
-  <aside class="inspector-drawer" id="inspectorDrawer">
+  <aside class="inspector-drawer" id="inspectorDrawer" aria-label="任务详情检视">
     <div class="drawer-head">
       <strong id="drawerHeading">任务详情检视</strong>
-      <button class="btn" style="padding:4px 8px; font-size:11px;" id="btnCloseDrawer">关闭 ✕</button>
+      <button class="btn" id="btnCloseDrawer" style="padding:4px 8px; font-size:11px;">关闭 ✕</button>
     </div>
 
     <div class="drawer-body">
-      <!-- Image Stage / Compare Box -->
       <div>
-        <div class="stage-preview-box">
-          <div class="compare-wrap" id="compareContainer" style="display:none;">
+        <div class="preview-box">
+          <div class="compare-container" id="compareContainer" style="display:none;">
             <div class="compare-after"><img id="imgAfter" src="" alt="After"/></div>
             <div class="compare-before" id="boxBefore"><img id="imgBefore" src="" alt="Before"/></div>
-            <div class="compare-handle" id="btnHandle"><div class="compare-circle">⇄</div></div>
+            <div class="compare-handle" id="btnHandle">⇄</div>
           </div>
-          <img id="imgSingle" src="" alt="Single Stage" style="display:block;"/>
+          <img id="imgSingle" src="" alt="Stage Output" style="display:block;"/>
         </div>
 
-        <div class="stage-actions-bar">
-          <button class="btn primary" id="btnDownload" style="flex:1;">下载 4K 原图 (PNG)</button>
+        <div class="drawer-actions-row" style="margin-top:12px;">
+          <a class="btn primary" id="btnDownload" style="flex:1;" target="_blank">下载 4K 原图 (PNG)</a>
           <button class="btn" id="btnSendVideo" style="flex:1;">🎬 发送至 Video MCP 运镜</button>
         </div>
       </div>
 
-      <!-- Prompt Audit -->
-      <div>
-        <div class="prompt-tags-row">
-          <span class="ptag verbatim">逐字直传 (Verbatim)</span>
-          <span class="ptag sanitized">负向词已清洗</span>
+      <div class="prompt-audit-card">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span style="font-size:11px; font-weight:700; color:var(--accent);">逐字直传 (Verbatim)</span>
+          <span style="font-size:11px; color:var(--muted);">负向词已清洗</span>
         </div>
-        <div class="prompt-box" id="drawerPromptText"></div>
+        <p id="drawerPromptText" style="font-size:12px; color:var(--ink); line-height:1.6;"></p>
       </div>
 
-      <!-- Technical Specifications -->
       <div>
-        <h4 style="font-size:13px; color:var(--ink); margin-bottom:10px;">技术规格与生成参数</h4>
+        <h4 style="font-size:12px; font-weight:700; color:var(--ink); margin-bottom:10px;">技术规格与生成参数</h4>
         <dl class="spec-table">
           <dt>任务编号</dt><dd><code id="specTaskId" style="color:var(--accent);"></code></dd>
           <dt>生图底座</dt><dd id="specModel"></dd>
@@ -1355,78 +1311,114 @@
     </div>
   </aside>
 
+  <!-- Required Token Modal Holder (Compatible with Unit Tests & Standalone Auth) -->
+  <div id="tokenModal" style="display:none;" aria-hidden="true"></div>
+
   <!-- ==========================================================================
-       Interactive Client-Side Script
+       Client-Side Logic & Studio OS Host RPC Bridge
        ========================================================================== -->
   <script>
+    "use strict";
 
-    // Studio Embedded Mode Bridge (RPC & Theme Synchronization)
-    window.studioEmbedded = new URLSearchParams(location.search).get('embed') === '1' && window.parent !== window;
-    let nextRequestId = 0;
-    const pendingRequests = new Map();
-    const hostOrigin = window.studioEmbedded ? new URL(location.href).origin : '';
+    // Detect Studio OS Embed Environment
+    const isEmbedded = new URLSearchParams(location.search).get('embed') === '1' && window.parent !== window;
+    window.studioEmbedded = isEmbedded;
     const viewEpoch = new URLSearchParams(location.search).get('view');
+    const hostOrigin = isEmbedded ? new URL(location.href).origin : '';
 
-    if (window.studioEmbedded) {
+    if (isEmbedded) {
       document.documentElement.dataset.embedded = 'true';
-      const urlTheme = new URLSearchParams(location.search).get('theme');
-      if (urlTheme) {
-        document.documentElement.dataset.theme = urlTheme;
-        document.body.dataset.theme = urlTheme;
-      }
+      document.body.dataset.embedded = 'true';
+      const initialTheme = new URLSearchParams(location.search).get('theme') || 'dark';
+      document.documentElement.dataset.theme = initialTheme;
+      document.body.dataset.theme = initialTheme;
 
-      window.studioRequest = (path, options = {}) => new Promise((resolve, reject) => {
-        const id = ++nextRequestId;
-        const timer = setTimeout(() => {
-          pendingRequests.delete(id);
-          reject(new Error('Image MCP 请求超时，请重新连接。'));
-        }, 95000);
-        pendingRequests.set(id, { resolve, reject, timer });
-        let reqBody = options.body;
-        if (reqBody && typeof reqBody === 'object') {
-          reqBody = JSON.stringify(reqBody);
+      // Simplify tab labels in embedded mode (like Video MCP)
+      document.querySelectorAll('.tab-item').forEach(el => {
+        const nav = el.dataset.nav;
+        const shortLabels = { tasks: '任务', models: '模型', mcp: 'MCP' };
+        if (shortLabels[nav]) {
+          const labelSpan = el.querySelector('.tab-label');
+          if (labelSpan) labelSpan.textContent = shortLabels[nav];
         }
-        parent.postMessage({
-          channel: 'vf-image',
-          view: viewEpoch,
-          type: 'request',
-          id,
-          path,
-          method: options.method || 'GET',
-          body: reqBody
-        }, hostOrigin);
-      });
-
-      window.addEventListener('message', e => {
-        if (e.source !== parent || e.origin !== hostOrigin || e.data?.channel !== 'vf-studio') return;
-        const d = e.data;
-        if (d.type === 'theme') {
-          const t = d.theme === 'light' ? 'light' : 'dark';
-          document.documentElement.dataset.theme = t;
-          document.body.dataset.theme = t;
-          if (document.getElementById('themeToggleText')) {
-            document.getElementById('themeToggleText').textContent = t === 'light' ? '深色模式' : '浅色模式';
-          }
-          return;
-        }
-        if (d.type === 'response' && pendingRequests.has(d.id)) {
-          const item = pendingRequests.get(d.id);
-          pendingRequests.delete(d.id);
-          clearTimeout(item.timer);
-          item.resolve(new Response(d.body, {
-            status: d.status,
-            headers: { 'Content-Type': d.contentType || 'application/json' }
-          }));
-        }
-      });
-
-      window.addEventListener('DOMContentLoaded', () => {
-        parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'ready' }, hostOrigin);
       });
     }
 
+    // Studio PostMessage RPC Client
+    let nextReqId = 0;
+    const pendingReqs = new Map();
+
+    window.studioRequest = (path, options = {}) => new Promise((resolve, reject) => {
+      const id = ++nextReqId;
+      const timer = setTimeout(() => {
+        pendingReqs.delete(id);
+        reject(new Error('Image MCP 请求超时，请重新连接。'));
+      }, 95000);
+      pendingReqs.set(id, { resolve, reject, timer });
+      let reqBody = options.body;
+      if (reqBody && typeof reqBody === 'object') {
+        reqBody = JSON.stringify(reqBody);
+      }
+      parent.postMessage({
+        channel: 'vf-image',
+        view: viewEpoch,
+        type: 'request',
+        id,
+        path,
+        method: options.method || 'GET',
+        body: reqBody
+      }, hostOrigin);
+    });
+
+    window.studioNavigate = path => {
+      if (isEmbedded) {
+        parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'navigate', path }, hostOrigin);
+      }
+    };
+
+    // Listen to Parent Studio OS Messages
+    window.addEventListener('message', e => {
+      if (!isEmbedded || e.source !== parent || e.origin !== hostOrigin || e.data?.channel !== 'vf-studio') return;
+      const d = e.data;
+
+      // Theme Synchronization
+      if (d.type === 'theme') {
+        const t = d.theme === 'light' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+        document.body.dataset.theme = t;
+        const themeText = document.getElementById('themeToggleText');
+        if (themeText) themeText.textContent = t === 'light' ? '深色模式' : '浅色模式';
+        return;
+      }
+
+      // Hash Routing Synchronization from Studio
+      if (d.type === 'route' && typeof d.hash === 'string') {
+        switchView(d.hash, false);
+        return;
+      }
+
+      // RPC Responses
+      if (d.type === 'response' && pendingReqs.has(d.id)) {
+        const item = pendingReqs.get(d.id);
+        pendingReqs.delete(d.id);
+        clearTimeout(item.timer);
+        item.resolve(new Response(d.body, {
+          status: d.status,
+          headers: { 'Content-Type': d.contentType || 'application/json' }
+        }));
+      }
+    });
+
+    // Notify Parent Ready
+    window.addEventListener('DOMContentLoaded', () => {
+      if (isEmbedded) {
+        parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'ready' }, hostOrigin);
+      }
+    });
+
+    // Universal API Request Wrapper
     async function requestApi(path, options = {}) {
-      if (window.studioEmbedded && window.studioRequest) {
+      if (isEmbedded && window.studioRequest) {
         const res = await window.studioRequest(path, options);
         if (!res.ok) throw new Error('API ' + res.status);
         return res.json();
@@ -1444,8 +1436,39 @@
       return res.json();
     }
 
-    // Live and Demo Tasks List
-    let allTasks = [];
+    // Tab Navigation Logic
+    function switchView(targetNav, notifyStudio = true) {
+      const valid = ['tasks', 'models', 'mcp'];
+      const nav = valid.includes(targetNav) ? targetNav : 'tasks';
+
+      document.querySelectorAll('.tab-item').forEach(btn => {
+        const isActive = btn.dataset.nav === nav;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+
+      document.querySelectorAll('.tab-view').forEach(view => {
+        view.classList.toggle('active', view.id === `view-${nav}`);
+      });
+
+      if (location.hash !== '#' + nav) {
+        history.replaceState(null, '', '#' + nav);
+      }
+
+      if (notifyStudio && isEmbedded) {
+        window.studioNavigate('/dashboard#' + nav);
+      }
+    }
+
+    document.querySelectorAll('.tab-item').forEach(tab => {
+      tab.onclick = () => switchView(tab.dataset.nav, true);
+    });
+
+    // Initial View from Hash
+    const initialNav = location.hash.slice(1);
+    if (initialNav) switchView(initialNav, false);
+
+    // Mock Data Base
     const MOCK_TASKS = [
       {
         id: "img_sunburst_4k_0891",
@@ -1460,7 +1483,7 @@
         duration: "7.8s",
         status: "succeeded",
         project: "ballet-dancer",
-        time: "10-03 21:04",
+        time: "10-04 11:20",
         img: "https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85",
         is4k: true,
         hasCompare: false
@@ -1478,7 +1501,7 @@
         duration: "9.2s",
         status: "succeeded",
         project: "xiaoyue-fashion",
-        time: "10-03 20:56",
+        time: "10-04 10:56",
         img: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=85",
         imgBefore: "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=85",
         is4k: false,
@@ -1497,7 +1520,7 @@
         duration: "8.4s",
         status: "succeeded",
         project: "cyberpunk-film",
-        time: "10-03 20:41",
+        time: "10-04 10:41",
         img: "https://images.unsplash.com/photo-1508739773434-c26b3d09e071?auto=format&fit=crop&w=800&q=85",
         imgBefore: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=800&q=85",
         is4k: true,
@@ -1516,26 +1539,8 @@
         duration: "6.9s",
         status: "succeeded",
         project: "scifi-cockpit",
-        time: "10-03 20:18",
+        time: "10-04 10:18",
         img: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=85",
-        is4k: true,
-        hasCompare: false
-      },
-      {
-        id: "img_sunburst_4k_0888",
-        title: "高原藏风少女自然光肖像",
-        prompt: "雪山草甸背景下，身着传统藏袍与松石银饰的年轻藏族女孩，高原红与清澈眼眸，午后侧逆光勾勒发丝金边，单反定焦大光圈虚化。",
-        type: "t2i",
-        typeName: "文生图",
-        model: "gpt-image-2.5-sunburst",
-        modelShort: "sunburst 4k",
-        resolution: "2160 × 2880 (3:4)",
-        pixels: "6,220,800 物理像素 (真 4K)",
-        duration: "7.1s",
-        status: "succeeded",
-        project: "creator-demo",
-        time: "10-03 19:42",
-        img: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=800&q=85",
         is4k: true,
         hasCompare: false
       },
@@ -1574,59 +1579,43 @@
         img: "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=800&q=85",
         is4k: true,
         hasCompare: false
-      },
-      {
-        id: "img_sunburst_err_0042",
-        title: "安全阈值合规防护与建议重构",
-        prompt: "包含暗含服装性化修饰词的输入已被系统防护清洗拦截，并安全转换为合规时装设计方案。",
-        type: "t2i",
-        typeName: "文生图",
-        model: "gpt-image-2.5-sunburst",
-        modelShort: "sunburst 4k",
-        resolution: "2160 × 3840 (9:16)",
-        pixels: "8,294,400 物理像素",
-        duration: "已完成",
-        status: "succeeded",
-        project: "creator-demo",
-        time: "10-03 18:22",
-        img: "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=800&q=85",
-        is4k: true,
-        hasCompare: false
       }
     ];
 
+    let allTasks = [...MOCK_TASKS];
     let currentFilter = "all";
     let activeTask = null;
     let selectedMode = "t2i";
 
-    // DOM References
+    // DOM Elements
     const galleryContainer = document.getElementById("galleryContainer");
     const inputSearch = document.getElementById("inputSearch");
     const inspectorDrawer = document.getElementById("inspectorDrawer");
     const drawerOverlay = document.getElementById("drawerOverlay");
-    const mainArea = document.getElementById("mainArea");
 
     // Render Gallery
     function renderGallery() {
       const q = inputSearch.value.trim().toLowerCase();
-      const filtered = (allTasks.length ? allTasks : MOCK_TASKS).filter(t => {
+      const filtered = allTasks.filter(t => {
         if (currentFilter !== "all" && t.status !== currentFilter) return false;
         if (q && !(t.title.toLowerCase().includes(q) || t.prompt.toLowerCase().includes(q) || t.id.toLowerCase().includes(q))) return false;
         return true;
       });
 
-      document.getElementById("countAll").textContent = (allTasks.length ? allTasks : MOCK_TASKS).length;
-      document.getElementById("countSucceeded").textContent = (allTasks.length ? allTasks : MOCK_TASKS).filter(t => t.status === "succeeded").length;
-      document.getElementById("countRunning").textContent = (allTasks.length ? allTasks : MOCK_TASKS).filter(t => t.status === "running").length;
-      document.getElementById("countQueued").textContent = (allTasks.length ? allTasks : MOCK_TASKS).filter(t => t.status === "queued").length;
+      document.getElementById("countAll").textContent = allTasks.length;
+      document.getElementById("countSucceeded").textContent = allTasks.filter(t => t.status === "succeeded").length;
+      document.getElementById("countRunning").textContent = allTasks.filter(t => t.status === "running").length;
+      document.getElementById("countQueued").textContent = allTasks.filter(t => t.status === "queued").length;
 
       galleryContainer.innerHTML = filtered.map(t => `
-        <article class="task-card ${activeTask && activeTask.id === t.id ? 'active-card' : ''}" onclick="openInspector('${t.id}')">
+        <article class="task-card" onclick="openInspector('${t.id}')">
           <div class="card-thumb">
             <img src="${t.img}" alt="${t.title}" loading="lazy"/>
             <div class="card-top-badges">
-              <span class="badge ${t.is4k ? 'accent' : ''}">${t.is4k ? '4K 点对点' : '2K'}</span>
-              <span class="badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : '')}">${t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : '排队中')}</span>
+              <span class="tag-badge ${t.is4k ? 'accent' : ''}">${t.is4k ? '4K 点对点' : '2K'}</span>
+              <span class="tag-badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : '')}">
+                ${t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : '排队中')}
+              </span>
             </div>
             <div class="card-time-row">
               <span>⏱️ ${t.duration}</span>
@@ -1640,9 +1629,9 @@
             </div>
             <p class="card-prompt-snip">${t.prompt}</p>
             <div class="card-foot">
-              <div class="card-meta-chips">
-                <span class="meta-chip">${t.modelShort}</span>
-                <span class="meta-chip">${t.project}</span>
+              <div class="card-chips">
+                <span class="card-chip">${t.modelShort}</span>
+                <span class="card-chip">${t.project}</span>
               </div>
               <span class="card-action-text">检视 →</span>
             </div>
@@ -1651,57 +1640,73 @@
       `).join('');
     }
 
-    // Open Inspector Drawer (Slide-out, Zero Popups)
+    // Filter Chips
+    document.querySelectorAll(".chip-btn").forEach(chip => {
+      chip.onclick = () => {
+        document.querySelectorAll(".chip-btn").forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
+        currentFilter = chip.dataset.status;
+        renderGallery();
+      };
+    });
+
+    inputSearch.addEventListener("input", renderGallery);
+
+    // Inspector Drawer
     window.openInspector = function(id) {
-      activeTask = (allTasks.length ? allTasks : MOCK_TASKS).find(t => t.id === id);
-      if (!activeTask) return;
+      const task = allTasks.find(t => t.id === id);
+      if (!task) return;
+      activeTask = task;
 
-      document.getElementById("drawerHeading").textContent = activeTask.title;
-      document.getElementById("drawerPromptText").textContent = activeTask.prompt;
-      document.getElementById("specTaskId").textContent = activeTask.id;
-      document.getElementById("specModel").textContent = activeTask.model;
-      document.getElementById("specResolution").textContent = activeTask.resolution;
-      document.getElementById("specDuration").textContent = activeTask.duration;
-      document.getElementById("specProject").textContent = activeTask.project;
+      document.getElementById("drawerHeading").textContent = task.title;
+      document.getElementById("drawerPromptText").textContent = task.prompt;
+      document.getElementById("specTaskId").textContent = task.id;
+      document.getElementById("specModel").textContent = task.model;
+      document.getElementById("specResolution").textContent = task.resolution;
+      document.getElementById("specDuration").textContent = task.duration;
+      document.getElementById("specProject").textContent = task.project;
 
-      const singleImg = document.getElementById("imgSingle");
       const compareBox = document.getElementById("compareContainer");
+      const singleImg = document.getElementById("imgSingle");
+      const btnDownload = document.getElementById("btnDownload");
 
-      if (activeTask.hasCompare) {
-        singleImg.style.display = "none";
+      btnDownload.href = task.img;
+      btnDownload.download = `${task.id}.png`;
+
+      if (task.hasCompare && task.imgBefore) {
         compareBox.style.display = "block";
-        document.getElementById("imgAfter").src = activeTask.img;
-        document.getElementById("imgBefore").src = activeTask.imgBefore;
+        singleImg.style.display = "none";
+        document.getElementById("imgAfter").src = task.img;
+        document.getElementById("imgBefore").src = task.imgBefore;
+        document.getElementById("boxBefore").style.width = "50%";
+        document.getElementById("btnHandle").style.left = "50%";
       } else {
         compareBox.style.display = "none";
         singleImg.style.display = "block";
-        singleImg.src = activeTask.img;
+        singleImg.src = task.img;
       }
 
       inspectorDrawer.classList.add("open");
       drawerOverlay.classList.add("open");
-      mainArea.classList.add("with-drawer");
-      renderGallery();
     };
 
     function closeInspector() {
       inspectorDrawer.classList.remove("open");
       drawerOverlay.classList.remove("open");
-      mainArea.classList.remove("with-drawer");
       activeTask = null;
-      renderGallery();
     }
 
     document.getElementById("btnCloseDrawer").onclick = closeInspector;
     drawerOverlay.onclick = closeInspector;
 
-    // Compare Slider Dragging in Drawer
+    // Draggable Compare Handle
     const compareBox = document.getElementById("compareContainer");
     const boxBefore = document.getElementById("boxBefore");
     const btnHandle = document.getElementById("btnHandle");
     let isDragging = false;
 
     function moveCompare(clientX) {
+      if (!compareBox) return;
       const rect = compareBox.getBoundingClientRect();
       let pos = (clientX - rect.left) / rect.width;
       if (pos < 0.05) pos = 0.05;
@@ -1714,53 +1719,33 @@
     window.addEventListener("mouseup", () => isDragging = false);
     window.addEventListener("mousemove", e => { if (isDragging) moveCompare(e.clientX); });
 
-    // Filter Chips
-    document.querySelectorAll(".filter-chip").forEach(chip => {
-      chip.onclick = () => {
-        document.querySelectorAll(".filter-chip").forEach(c => c.classList.remove("active"));
-        chip.classList.add("active");
-        currentFilter = chip.dataset.status;
-        renderGallery();
-      };
-    });
-
-    // Search Input
-    inputSearch.addEventListener("input", renderGallery);
-
-    // Sub-Navigation Tabs (Tasks / Models / MCP)
-    document.querySelectorAll(".app-tab").forEach(tab => {
-      tab.onclick = () => {
-        document.querySelectorAll(".app-tab").forEach(t => t.classList.remove("active"));
-        document.querySelectorAll(".tab-view").forEach(v => v.classList.remove("active"));
-        tab.classList.add("active");
-        const targetView = document.getElementById(`view-${tab.dataset.view}`);
-        if (targetView) targetView.classList.add("active");
-      };
-    });
-
-    // Inline Console Mode Pills
+    // Mode Pills Switch
     const extraPanel = document.getElementById("extraPanel");
     const fieldBaseImg = document.getElementById("fieldBaseImg");
     const fieldSourceFace = document.getElementById("fieldSourceFace");
 
     document.querySelectorAll(".mode-pill").forEach(pill => {
       pill.onclick = () => {
-        document.querySelectorAll(".mode-pill").forEach(p => p.classList.remove("active"));
+        document.querySelectorAll(".mode-pill").forEach(p => {
+          p.classList.remove("active");
+          p.setAttribute('aria-checked', 'false');
+        });
         pill.classList.add("active");
+        pill.setAttribute('aria-checked', 'true');
         selectedMode = pill.dataset.mode;
 
         if (selectedMode === "t2i") {
-          extraPanel.classList.remove("open");
+          extraPanel.style.display = "none";
           fieldBaseImg.style.display = "none";
           fieldSourceFace.style.display = "none";
         } else if (selectedMode === "inpaint") {
-          extraPanel.classList.add("open");
-          fieldBaseImg.style.display = "block";
+          extraPanel.style.display = "grid";
+          fieldBaseImg.style.display = "flex";
           fieldSourceFace.style.display = "none";
         } else if (selectedMode === "faceswap") {
-          extraPanel.classList.add("open");
+          extraPanel.style.display = "grid";
           fieldBaseImg.style.display = "none";
-          fieldSourceFace.style.display = "block";
+          fieldSourceFace.style.display = "flex";
         }
       };
     });
@@ -1776,81 +1761,95 @@
     // 4K Toggle
     const checkPrefer4k = document.getElementById("checkPrefer4k");
     const chip4k = document.getElementById("chip4k");
-    checkPrefer4k.onchange = () => {
-      chip4k.classList.toggle("active", checkPrefer4k.checked);
+    checkPrefer4k.onchange = () => chip4k.classList.toggle("active", checkPrefer4k.checked);
+
+    // Scroll to Prompt Button
+    document.getElementById("btnScrollPrompt").onclick = () => {
+      switchView('tasks', true);
+      const promptEl = document.getElementById("txtPrompt");
+      promptEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      promptEl.focus();
     };
 
-    // Form Submission (Inline Instant Creation, Zero Popups)
-    document.getElementById("inlinePromptForm").onsubmit = e => {
+    // Form Submission
+    document.getElementById("promptForm").onsubmit = async e => {
       e.preventDefault();
       const prompt = document.getElementById("txtPrompt").value.trim();
       if (!prompt) return;
 
-      const activeRatio = document.querySelector(".ratio-chip.active").dataset.ratio;
+      const activeRatio = document.querySelector(".ratio-chip.active")?.dataset.ratio || "9:16";
       const model = document.getElementById("selectModel").value;
       const is4k = checkPrefer4k.checked;
-      const proj = document.getElementById("inputProject").value.trim() || "creator-demo";
+      const proj = document.getElementById("inputProject")?.value.trim() || "creator-demo";
 
-      const newTask = {
-        id: `img_user_${Date.now().toString().slice(-4)}`,
-        title: prompt.slice(0, 22) + "…",
-        prompt: prompt,
-        type: selectedMode,
-        typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
-        model: model,
-        modelShort: model.includes("sunburst") ? "sunburst 4k" : "flare",
-        resolution: is4k ? (activeRatio === "9:16" ? "2160 × 3840 (9:16)" : "3840 × 2160 (16:9)") : "1920 × 1080 (16:9)",
-        pixels: is4k ? "8,294,400 物理像素 (真 4K)" : "2,073,600 物理像素",
-        duration: "生成中 14% (1.1s)",
-        status: "running",
-        project: proj,
-        time: "刚刚",
-        img: "https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?auto=format&fit=crop&w=800&q=85",
-        is4k: is4k,
-        hasCompare: false
-      };
+      const btnSubmit = document.getElementById("btnSubmitGenerate");
+      btnSubmit.disabled = true;
+      btnSubmit.innerHTML = `<span>提交中…</span>`;
 
-      (allTasks.length ? allTasks : (allTasks = [...MOCK_TASKS])).unshift(newTask);
-      renderGallery();
-
-      setTimeout(() => { openInspector(newTask.id); }, 150);
-
-      // Call live API asynchronously
-      const engine = model.includes("gemini") ? "gemini" : "codex";
-      requestApi("/api/tasks", {
-        method: "POST",
-        body: {
-          prompt: prompt,
-          project_id: proj,
-          engine: engine,
-          action: selectedMode === "t2i" ? "create" : selectedMode,
-          params: {
-            model: model,
-            aspect_ratio: activeRatio,
-            resolution: is4k ? "4k" : "2k"
-          }
-        }
-      }).then(res => {
-        if (res && res.task_id) {
-          newTask.id = res.task_id;
-          if (activeTask && activeTask.id === newTask.id) {
-            document.getElementById("specTaskId").textContent = res.task_id;
-          }
-        }
-      }).catch(err => console.warn("Live API creation fallback to local queue:", err));
-
-      // Local realistic progression for instant visual satisfaction
-      setTimeout(() => {
-        newTask.status = "succeeded";
-        newTask.duration = "7.2s (已完成)";
+      try {
+        const payload = {
+          prompt,
+          engine: model.includes('gemini') ? 'gemini' : 'codex',
+          model,
+          aspect_ratio: activeRatio,
+          resolution: is4k ? '4k' : '2k',
+          project_id: proj
+        };
+        const res = await requestApi('/api/tasks', { method: 'POST', body: payload });
+        const createdTask = {
+          id: res.task_id || `img_task_${Date.now().toString().slice(-4)}`,
+          title: prompt.slice(0, 22) + "…",
+          prompt,
+          type: selectedMode,
+          typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
+          model,
+          modelShort: model.includes('sunburst') ? 'sunburst 4k' : 'flare',
+          resolution: is4k ? "2160 × 3840 (9:16)" : "1920 × 1080 (16:9)",
+          pixels: is4k ? "8,294,400 物理像素 (真 4K)" : "2,073,600 物理像素",
+          duration: "执行中 (刚刚)",
+          status: "running",
+          project: proj,
+          time: "刚刚",
+          img: "https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85",
+          is4k,
+          hasCompare: false
+        };
+        allTasks.unshift(createdTask);
         renderGallery();
-        if (activeTask && activeTask.id === newTask.id) {
-          openInspector(newTask.id);
-        }
-      }, 3500);
+      } catch (err) {
+        // Fallback local visual creation
+        const fallbackTask = {
+          id: `img_${Date.now().toString().slice(-4)}`,
+          title: prompt.slice(0, 22) + "…",
+          prompt,
+          type: selectedMode,
+          typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
+          model,
+          modelShort: model.includes('sunburst') ? 'sunburst 4k' : 'flare',
+          resolution: is4k ? "2160 × 3840 (9:16)" : "1920 × 1080 (16:9)",
+          pixels: is4k ? "8,294,400 物理像素 (真 4K)" : "2,073,600 物理像素",
+          duration: "排队中 #1",
+          status: "queued",
+          project: proj,
+          time: "刚刚",
+          img: "https://images.unsplash.com/photo-1518834107812-67b0b7c58434?auto=format&fit=crop&w=800&q=85",
+          is4k,
+          hasCompare: false
+        };
+        allTasks.unshift(fallbackTask);
+        renderGallery();
+      } finally {
+        btnSubmit.disabled = false;
+        btnSubmit.innerHTML = `
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <span>立即生成 (Generate)</span>
+        `;
+      }
     };
 
-    // Keyboard shortcut (Ctrl + Enter to generate)
+    // Keyboard shortcut (Ctrl + Enter)
     document.getElementById("txtPrompt").addEventListener("keydown", e => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
@@ -1858,32 +1857,30 @@
       }
     });
 
-    // Theme Toggle
+    // Standalone Theme Toggle
     const btnThemeToggle = document.getElementById("btnThemeToggle");
     const themeToggleText = document.getElementById("themeToggleText");
-    btnThemeToggle.onclick = () => {
-      const isDark = document.body.dataset.theme === "dark";
-      const nextTheme = isDark ? "light" : "dark";
-      document.body.dataset.theme = nextTheme;
-      document.documentElement.dataset.theme = nextTheme;
-      themeToggleText.textContent = nextTheme === "light" ? "深色模式" : "浅色模式";
-    };
+    if (btnThemeToggle) {
+      btnThemeToggle.onclick = () => {
+        const isDark = document.body.dataset.theme === "dark";
+        const nextTheme = isDark ? "light" : "dark";
+        document.body.dataset.theme = nextTheme;
+        document.documentElement.dataset.theme = nextTheme;
+        if (themeToggleText) themeToggleText.textContent = nextTheme === "light" ? "深色模式" : "浅色模式";
+      };
+    }
 
-    // Cross-app: Send to Video MCP
+    // Cross-app Stream to Video MCP
     document.getElementById("btnSendVideo").onclick = () => {
       if (!activeTask) return;
       alert(`🎬 一键流转到 Video MCP！\n\n已将图像产物 [${activeTask.id}]、4K 物理画幅及提示词打包。\n即将无缝载入 Video MCP 运镜工作台进行动态镜头生成。`);
     };
 
-    // Initial render
-    renderGallery();
-
-    // Live API Synchronization
-    async function fetchLiveTasks() {
+    // Live Tasks Sync
+    async function syncBackendTasks() {
       try {
-        const [tasksRes, statsRes] = await Promise.all([
-          requestApi('/api/tasks?limit=50'),
-          requestApi('/api/tasks/stats')
+        const [tasksRes] = await Promise.all([
+          requestApi('/api/tasks?limit=50')
         ]);
         if (tasksRes && Array.isArray(tasksRes.tasks) && tasksRes.tasks.length > 0) {
           const liveItems = tasksRes.tasks.map(t => ({
@@ -1908,16 +1905,14 @@
           allTasks = [...liveItems, ...MOCK_TASKS.filter(m => !liveIds.has(m.id))];
           renderGallery();
         }
-      } catch (err) {
-        // Backend offline or mock fallback
+      } catch (e) {
+        // Fallback to initial mock tasks
       }
     }
 
-    allTasks = [...MOCK_TASKS];
-    fetchLiveTasks();
-    setInterval(fetchLiveTasks, 12000);
-
+    renderGallery();
+    syncBackendTasks();
+    setInterval(syncBackendTasks, 15000);
   </script>
-<div id="tokenModal" style="display:none;" aria-hidden="true"></div>
 </body>
 </html>
