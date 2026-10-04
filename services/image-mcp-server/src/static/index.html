@@ -960,6 +960,8 @@
        ========================================================================== */
     html[data-embedded="true"] {
       background: transparent !important;
+      overflow-y: hidden !important;
+      height: auto !important;
     }
 
     html[data-embedded="true"] body {
@@ -968,7 +970,9 @@
       margin: 0 !important;
       padding: 0 !important;
       overflow-x: hidden !important;
-      min-height: 100vh !important;
+      overflow-y: hidden !important;
+      min-height: auto !important;
+      height: auto !important;
     }
 
     html[data-embedded="true"] .station-header {
@@ -1342,6 +1346,27 @@
           if (labelSpan) labelSpan.textContent = shortLabels[nav];
         }
       });
+
+      function notifyHostHeight() {
+        const h = Math.max(
+          document.documentElement.scrollHeight,
+          document.body.scrollHeight,
+          (document.getElementById('mainArea')?.scrollHeight || 0) + 40
+        );
+        if (h > 0) {
+          parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'resize', height: h }, hostOrigin);
+        }
+      }
+      window.notifyHostHeight = notifyHostHeight;
+      window.addEventListener('load', notifyHostHeight);
+      window.addEventListener('resize', notifyHostHeight);
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(() => notifyHostHeight());
+        ro.observe(document.body);
+      }
+      window.addEventListener('wheel', e => {
+        parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'wheel', deltaY: e.deltaY }, hostOrigin);
+      }, { passive: true });
     }
 
     // Studio PostMessage RPC Client
@@ -1457,6 +1482,9 @@
 
       if (notifyStudio && isEmbedded) {
         window.studioNavigate('/dashboard#' + nav);
+      }
+      if (isEmbedded && window.notifyHostHeight) {
+        setTimeout(window.notifyHostHeight, 60);
       }
     }
 
