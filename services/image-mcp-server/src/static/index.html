@@ -1,9 +1,19 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VerdantFlare IMAGE STATION · 图像生成与面部置换工作台</title>
+  <script>
+    (function() {
+      var p = new URLSearchParams(location.search);
+      var t = p.get('theme') || 'light';
+      document.documentElement.dataset.theme = t;
+      if (p.get('embed') === '1' && window.parent !== window) {
+        document.documentElement.dataset.embedded = 'true';
+      }
+    })();
+  </script>
   <style>
     /* ==========================================================================
        VerdantFlare Studio & Station Design Tokens (Single Source of Truth)
@@ -998,7 +1008,7 @@
     }
   </style>
 </head>
-<body data-theme="dark">
+<body>
 
   <!-- ==========================================================================
        Standalone Header (Hidden when embedded inside Studio OS)
@@ -1333,7 +1343,7 @@
     if (isEmbedded) {
       document.documentElement.dataset.embedded = 'true';
       document.body.dataset.embedded = 'true';
-      const initialTheme = new URLSearchParams(location.search).get('theme') || 'dark';
+      const initialTheme = new URLSearchParams(location.search).get('theme') || 'light';
       document.documentElement.dataset.theme = initialTheme;
       document.body.dataset.theme = initialTheme;
 
