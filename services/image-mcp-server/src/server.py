@@ -245,7 +245,7 @@ async def image_generate(
 @mcp.tool(name="image.create")
 async def image_create(
     prompt: str,
-    project_id: str = "default",
+    project_id: str,
     idempotency_key: str = "",
     engine: str = "codex",
     model: str = "",
