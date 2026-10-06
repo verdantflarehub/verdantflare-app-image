@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 env:
   SERVICE: image-mcp-server
-  VERSION: 0.1.30
+  VERSION: 0.1.31
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -48,4 +48,3 @@ jobs:
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
           cache-from: type=gha,scope=${{ env.SERVICE }}
           cache-to: type=gha,mode=max,scope=${{ env.SERVICE }}
-
