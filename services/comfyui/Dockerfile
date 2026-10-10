@@ -11,6 +11,7 @@ LABEL org.opencontainers.image.title="VerdantFlare ComfyUI" \
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/venv/bin:$PATH \
+    HOME=/data \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -36,9 +37,8 @@ RUN python -m pip install --no-cache-dir \
     && python -m pip check \
     && python -m pip freeze > /opt/comfyui/verdantflare-python-packages.txt
 
-RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin comfyui \
-    && mkdir -p /data \
-    && chown -R comfyui:comfyui /opt/comfyui /data
+RUN mkdir -p /data \
+    && chown -R 1000:1000 /opt/comfyui /data
 
 USER 1000:1000
 EXPOSE 8188
