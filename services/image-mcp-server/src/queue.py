@@ -237,7 +237,7 @@ class TaskQueueManager:
                 except Exception:
                     self.tasks.update_status(rec.task_id, "running", error="collection_unavailable", phase="collect_retry")
             else:
-                self.tasks.update_status(rec.task_id, "running", error="submission_unknown", phase="submission_unknown")
+                self.tasks.update_status(rec.task_id, "running", error=rec.error or "submission_unknown", phase="submission_unknown")
 
     async def _collect_grok(self):
         while self._running:

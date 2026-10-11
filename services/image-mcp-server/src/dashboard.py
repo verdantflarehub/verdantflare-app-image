@@ -451,6 +451,7 @@ async def api_list_tasks(request: Request) -> Response:
         values.append(value)
     return JSONResponse({
         "tasks": values,
+        "capabilities": request.app.state.queue_manager.capabilities(),
         "total": total,
         "limit": limit,
         "offset": offset,

@@ -126,7 +126,7 @@ class GrokImageProvider:
                 if r.status_code in {400, 422}:
                     raise GrokError("provider_rejected")
                 if not r.is_success:
-                    raise GrokError("submission_unknown", uncertain=True)
+                    raise GrokError(f"provider_http_{r.status_code}", uncertain=True)
                 raw = bytearray()
                 for chunk in r.iter_bytes():
                     raw.extend(chunk)

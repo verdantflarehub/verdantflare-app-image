@@ -1905,9 +1905,8 @@
       if (grok) { checkPrefer4k.checked = false; checkPrefer4k.onchange(); document.querySelector('[data-mode="t2i"]').click(); }
       document.querySelectorAll('.mode-pill:not([data-mode="t2i"])').forEach(p => p.disabled = grok);
     });
-    async function loadCapabilities() {
+    function loadCapabilities(data) {
       try {
-        const data = await requestApi('/api/capabilities');
         const grok = data.engines.find(x => x.engine === 'grok');
         if (grok?.enabled && grok?.configured && !modelSelect.querySelector('[data-engine="grok"]')) {
           const option = new Option(`Grok · ${grok.model}`, grok.model);
@@ -2013,9 +2012,9 @@
 
     // Live Tasks Sync
     async function syncBackendTasks() {
-      await loadCapabilities();
       try {
         const tasksRes = await requestApi('/api/tasks?limit=50');
+        loadCapabilities(tasksRes.capabilities);
         if (tasksRes && Array.isArray(tasksRes.tasks)) {
           allTasks = tasksRes.tasks.map(t => {
             const req = t.request_params || {};
