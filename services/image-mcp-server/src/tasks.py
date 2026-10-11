@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import uuid
@@ -18,6 +19,14 @@ class TaskConflict(Exception):
     pass
 
 
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 @dataclass
 class TaskRecord:
     task_id: str
@@ -33,6 +42,7 @@ class TaskRecord:
     request_params: dict[str, Any] = field(default_factory=dict)
     artifact_id: str | None = None
     error: str | None = None
+    phase: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -59,6 +69,7 @@ class TaskRecord:
             request_params=params,
             artifact_id=row["artifact_id"],
             error=row["error"],
+            phase=row["phase"] if "phase" in row.keys() else None,
         )
 
 
@@ -100,6 +111,7 @@ class TaskStore:
             str(self.db_path),
             timeout=30.0,
             check_same_thread=False,
+            factory=ClosingConnection,
         )
         conn.row_factory = sqlite3.Row
         return conn
@@ -112,6 +124,8 @@ class TaskStore:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
             conn.executescript(SCHEMA_SQL)
+            if "phase" not in {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}:
+                conn.execute("ALTER TABLE tasks ADD COLUMN phase TEXT")
         finally:
             conn.close()
 
@@ -127,6 +141,11 @@ class TaskStore:
         validate_project_id(project_id)
         self.ensure_ready()
         now = datetime.now(timezone.utc).isoformat()
+        if engine == "grok":
+            if not idempotency_key or len(idempotency_key) > 128:
+                raise ValueError("idempotency_key_required")
+            request_params = dict(request_params)
+            request_params["input_digest"] = hashlib.sha256(json.dumps(request_params, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         prompt = request_params.get("prompt", "")
         prompt_preview = prompt[:120].strip() if isinstance(prompt, str) else ""
 
@@ -138,6 +157,7 @@ class TaskStore:
             )
             existing = cur.fetchone()
             if existing:
+                self._check_grok_conflict(existing, engine, request_params)
                 return TaskRecord.from_row(existing)
 
             task_id = f"imgtask-{uuid.uuid4().hex[:16]}"
@@ -172,10 +192,22 @@ class TaskStore:
                 )
                 row = cur.fetchone()
                 if row:
+                    self._check_grok_conflict(row, engine, request_params)
                     return TaskRecord.from_row(row)
                 raise
 
         return self.get(task_id)
+
+    @staticmethod
+    def _check_grok_conflict(row, engine, params):
+        if engine == "grok" or row["engine"] == "grok":
+            if engine != row["engine"] or json.loads(row["request_params"]) != params:
+                raise TaskConflict("idempotency_conflict")
+
+    def claim_grok(self, task_id: str) -> bool:
+        with self._get_conn() as conn:
+            changed = conn.execute("UPDATE tasks SET status='running', phase='submitting', updated_at=? WHERE task_id=? AND status='queued' AND engine='grok'", (datetime.now(timezone.utc).isoformat(), task_id))
+            return changed.rowcount == 1
 
     def get(self, task_id: str) -> TaskRecord:
         self.ensure_ready()
@@ -193,6 +225,7 @@ class TaskStore:
         artifact_id: str | None = None,
         error: str | None = None,
         duration_seconds: float | None = None,
+        phase: str | None = None,
     ) -> TaskRecord:
         self.ensure_ready()
         now = datetime.now(timezone.utc).isoformat()
@@ -209,12 +242,13 @@ class TaskStore:
             conn.execute(
                 """
                 UPDATE tasks
-                SET status = ?, updated_at = ?, artifact_id = ?, error = ?, duration_seconds = ?
+                SET status = ?, updated_at = ?, artifact_id = ?, error = ?, duration_seconds = ?, phase = ?
                 WHERE task_id = ?
                 """,
-                (status, now, current_art, current_err, current_dur, task_id),
+                (status, now, current_art, current_err, current_dur, phase if phase is not None else row["phase"], task_id),
             )
             conn.commit()
+
 
         return self.get(task_id)
 
@@ -296,7 +330,7 @@ class TaskStore:
                 SET status = 'failed',
                     error = '服务重启，未完成任务已自动中断',
                     updated_at = ?
-                WHERE status = 'running'
+                WHERE status = 'running' AND engine != 'grok'
                 """,
                 (now,),
             )

@@ -74,14 +74,32 @@ class ArtifactStore:
         data: bytes,
         media_type: str = "image/png",
         metadata: dict[str, Any] | None = None,
+        artifact_id: str | None = None,
     ) -> ArtifactRecord:
         self.ensure_ready()
-        artifact_id = f"art-{uuid.uuid4().hex[:16]}"
+        artifact_id = artifact_id or f"art-{uuid.uuid4().hex[:16]}"
+        import re
+        if not re.fullmatch(r"art-[0-9a-f]{16}", artifact_id):
+            raise ArtifactError("invalid artifact identity")
         sha = hashlib.sha256(data).hexdigest()
+        if self._meta_path(project_id, artifact_id).exists():
+            existing = self.get(artifact_id, project_id)
+            if existing.sha256 != sha or existing.filename != filename:
+                raise ArtifactError("artifact_identity_conflict")
+            if hashlib.sha256(self.content_path(existing).read_bytes()).hexdigest() != sha:
+                raise ArtifactError("artifact_integrity_failed")
+            return existing
         now = datetime.now(timezone.utc).isoformat()
 
         content_file = self._project_dir(project_id) / f"{artifact_id}-{filename}"
-        content_file.write_bytes(data)
+        if content_file.exists() and hashlib.sha256(content_file.read_bytes()).hexdigest() != sha:
+            raise ArtifactError("artifact_identity_conflict")
+        temporary = content_file.with_name(content_file.name + ".part")
+        with temporary.open("wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, content_file)
 
         rec = ArtifactRecord(
             artifact_id=artifact_id,
@@ -95,7 +113,12 @@ class ArtifactStore:
         )
 
         meta_file = self._meta_path(project_id, artifact_id)
-        meta_file.write_text(json.dumps(rec.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary = meta_file.with_suffix(".tmp")
+        with temporary.open("w", encoding="utf-8") as stream:
+            json.dump(rec.to_dict(), stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, meta_file)
         return rec
 
     def import_from_url(

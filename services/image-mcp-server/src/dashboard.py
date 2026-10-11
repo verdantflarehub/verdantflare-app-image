@@ -439,8 +439,18 @@ async def api_list_tasks(request: Request) -> Response:
         limit=limit,
         offset=offset,
     )
+    values = []
+    for record in records:
+        value = record.to_dict()
+        if record.artifact_id:
+            try:
+                metadata = request.app.state.artifacts.get(record.artifact_id, record.project_id).metadata
+                value["media"] = {k: metadata[k] for k in ("width", "height") if k in metadata}
+            except (OSError, ValueError, KeyError):
+                pass
+        values.append(value)
     return JSONResponse({
-        "tasks": [r.to_dict() for r in records],
+        "tasks": values,
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -471,8 +481,8 @@ async def api_create_task(request: Request) -> Response:
         return JSONResponse({"error": "prompt_is_required"}, status_code=400)
 
     engine = str(body.get("engine", "codex")).strip().lower()
-    if engine not in ("codex", "gemini"):
-        engine = "codex"
+    if engine not in ("codex", "gemini", "grok"):
+        return JSONResponse({"error": "unsupported_engine"}, status_code=400)
 
     aspect_ratio = str(body.get("aspect_ratio", "16:9")).strip()
     resolution = str(body.get("resolution", "2k")).strip()
@@ -484,6 +494,10 @@ async def api_create_task(request: Request) -> Response:
     resolved_model = model or (
         "gpt-image-2.5-sunburst" if engine == "codex" else "gemini-3.1-flash-image"
     )
+
+    if engine == "grok":
+        resolved_model = model or request.app.state.queue_manager.grok_provider.model
+        quality = body.get("quality")
 
     source_artifact_id = str(body.get("source_artifact_id", "")).strip()
     ref_ids = body.get("reference_artifact_ids") or []
@@ -508,18 +522,23 @@ async def api_create_task(request: Request) -> Response:
         params["instructions"] = str(instructions).strip()
 
     import uuid
+    if engine == "grok" and not body.get("idempotency_key"):
+        return JSONResponse({"error": "idempotency_key_required"}, status_code=400)
     idempotency_key = str(body.get("idempotency_key", "")).strip() or f"ui-{uuid.uuid4().hex[:12]}"
 
     tasks_store = request.app.state.tasks
     queue_mgr = getattr(request.app.state, "queue_manager", None)
 
-    task = tasks_store.create(
-        project_id=project_id,
-        idempotency_key=idempotency_key,
-        engine=engine,
-        model=resolved_model,
-        request_params=params,
-    )
+    try:
+        params = queue_mgr.prepare(engine, project_id, params)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    from .tasks import TaskConflict
+    try:
+        task = tasks_store.create(project_id=project_id, idempotency_key=idempotency_key,
+                                 engine=engine, model=resolved_model, request_params=params)
+    except TaskConflict:
+        return JSONResponse({"error": "idempotency_conflict"}, status_code=409)
 
     if task.status == "queued" and queue_mgr:
         await queue_mgr.enqueue(

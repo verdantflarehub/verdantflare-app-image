@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import hashlib
+import json
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
@@ -10,6 +13,7 @@ from .artifacts import ArtifactStore
 from .providers.codex import CodexProvider, DEFAULT_IMAGE_MODEL
 from .providers.gemini import GeminiProvider, DEFAULT_GEMINI_MODEL
 from .tasks import TaskRecord, TaskStore
+from .providers.grok import GrokImageProvider, GrokError
 
 
 @dataclass
@@ -46,6 +50,9 @@ class TaskQueueManager:
         self.artifacts = artifacts
         self.codex_provider = codex_provider
         self.gemini_provider = gemini_provider
+        self.grok_provider = GrokImageProvider()
+        self.grok_sem = asyncio.Semaphore(max(1, int(os.getenv("XAI_IMAGE_MAX_CONCURRENCY", "1"))))
+        self.grok_lock = threading.Lock()
 
         codex_limit = int(os.environ.get("CODEX_MAX_CONCURRENCY", "2"))
         gemini_limit = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "5"))
@@ -66,6 +73,7 @@ class TaskQueueManager:
 
         # 1. 恢复异常退出的运行中任务
         recovered = self.tasks.recover_hanging_tasks()
+        self.recover_grok()
         if recovered > 0:
             print(f"⚠️ [TaskQueue] 已自动恢复并标记 {recovered} 个中断的任务为 failed")
 
@@ -73,6 +81,7 @@ class TaskQueueManager:
         for i in range(self.worker_count):
             task = asyncio.create_task(self._worker_loop(i))
             self._worker_tasks.append(task)
+        self._worker_tasks.append(asyncio.create_task(self._collect_grok()))
 
         # 3. 恢复历史未消费的 queued 任务
         pending = self.tasks.get_queued_tasks()
@@ -108,7 +117,26 @@ class TaskQueueManager:
         )
         await self._queue.put(job)
 
+    def prepare(self, engine, project_id, params):
+        if engine not in {"codex", "gemini", "grok"}:
+            raise ValueError("unsupported_engine")
+        if engine == "grok":
+            return self.grok_provider.normalize(params, project_id, self.artifacts)
+        params = dict(params)
+        params["quality"] = params.get("quality") or ("high" if params["action"] == "generate" else "auto")
+        return params
+
+    def capabilities(self):
+        return {"default_engine": "codex", "engines": [
+            {"engine": "codex", "model": DEFAULT_IMAGE_MODEL, "enabled": True},
+            {"engine": "gemini", "model": DEFAULT_GEMINI_MODEL, "enabled": True},
+            self.grok_provider.capability()]}
+
     def _get_semaphore(self, engine: str) -> asyncio.Semaphore:
+        if engine.lower() == "grok":
+            return self.grok_sem
+        if engine.lower() not in {"codex", "gemini"}:
+            raise ValueError("unsupported_engine")
         return self.gemini_sem if engine.lower() == "gemini" else self.codex_sem
 
     async def _worker_loop(self, worker_id: int) -> None:
@@ -122,11 +150,18 @@ class TaskQueueManager:
             # 等待对应 AI 通道的并发槽位
             async with sem:
                 start_time = time.time()
-                self.tasks.update_status(job.task_id, "running")
+                if job.engine == "grok":
+                    if not self.tasks.claim_grok(job.task_id):
+                        self._queue.task_done()
+                        continue
+                else:
+                    self.tasks.update_status(job.task_id, "running")
                 loop = asyncio.get_running_loop()
 
                 try:
-                    if job.action == "generate":
+                    if job.engine == "grok":
+                        await loop.run_in_executor(None, self._execute_grok, job)
+                    elif job.action == "generate":
                         await loop.run_in_executor(None, self._execute_generate, job)
                     elif job.action in ("edit", "inpaint"):
                         await loop.run_in_executor(None, self._execute_edit, job)
@@ -142,6 +177,14 @@ class TaskQueueManager:
                     print(f"✅ [TaskQueue] 任务成功: {job.task_id} (action: {job.action}, engine: {job.engine}) 耗时: {duration}s", flush=True)
                 except Exception as exc:
                     duration = round(time.time() - start_time, 2)
+                    if job.engine == "grok":
+                        code = exc.code if isinstance(exc, GrokError) else "collection_unavailable"
+                        uncertain = not isinstance(exc, GrokError) or exc.uncertain
+                        journal = self._grok_journal(job.task_id)
+                        phase = "collect_retry" if journal.with_suffix(".json").exists() else "submission_unknown"
+                        self.tasks.update_status(job.task_id, "running" if uncertain else "failed",
+                                                 error=code, phase=phase if uncertain else "failed")
+                        continue
                     err_msg = str(exc)
                     print(f"❌ [TaskQueue] 任务失败: {job.task_id} (action: {job.action}, engine: {job.engine}, model: {job.params.get('model')}) 耗时: {duration}s, 错误详情: {err_msg}", flush=True)
                     self.tasks.update_status(
@@ -152,6 +195,62 @@ class TaskQueueManager:
                     )
                 finally:
                     self._queue.task_done()
+
+    def _grok_journal(self, task_id):
+        root = self.tasks.db_path.parent / ".grok-results"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / task_id
+
+    def _execute_grok(self, job):
+        with self.grok_lock:
+            journal = self._grok_journal(job.task_id)
+            manifest = journal.with_suffix(".json")
+            if manifest.exists():
+                info = json.loads(manifest.read_text(encoding="utf-8"))
+                data = journal.read_bytes()
+                if hashlib.sha256(data).hexdigest() != info["sha256"]:
+                    raise GrokError("result_integrity_failed")
+            else:
+                data, info = self.grok_provider.generate(job.params, job.project_id, self.artifacts)
+                info.update(sha256=hashlib.sha256(data).hexdigest(), task_id=job.task_id)
+                temporary = journal.with_suffix(".part")
+                temporary.write_bytes(data)
+                os.replace(temporary, journal)
+                temporary = manifest.with_suffix(".tmp")
+                temporary.write_text(json.dumps(info), encoding="utf-8")
+                os.replace(temporary, manifest)
+            self.tasks.update_status(job.task_id, "running", phase="collecting")
+            rec = self.artifacts.create_from_bytes(project_id=job.project_id,
+                artifact_id="art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16],
+                filename="grok." + info["extension"], data=data,
+                media_type=info["media_type"], metadata=info)
+            self.tasks.update_status(job.task_id, "completed", artifact_id=rec.artifact_id,
+                                     error="", phase="completed")
+
+    def recover_grok(self):
+        records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000)
+        for rec in records:
+            if self._grok_journal(rec.task_id).with_suffix(".json").exists():
+                try:
+                    self._execute_grok(TaskJob(rec.task_id, rec.project_id, rec.engine,
+                                              rec.request_params["action"], rec.request_params))
+                except Exception:
+                    self.tasks.update_status(rec.task_id, "running", error="collection_unavailable", phase="collect_retry")
+            else:
+                self.tasks.update_status(rec.task_id, "running", error="submission_unknown", phase="submission_unknown")
+
+    async def _collect_grok(self):
+        while self._running:
+            await asyncio.sleep(15)
+            # Only persisted results are retried; never repeat a POST.
+            records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000)
+            for rec in records:
+                if rec.phase == "collect_retry" and self._grok_journal(rec.task_id).with_suffix(".json").exists():
+                    try:
+                        await asyncio.to_thread(self._execute_grok, TaskJob(rec.task_id, rec.project_id,
+                            rec.engine, rec.request_params["action"], rec.request_params))
+                    except Exception:
+                        pass
 
     def _execute_generate(self, job: TaskJob) -> None:
         p = job.params

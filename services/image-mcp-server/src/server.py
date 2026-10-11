@@ -53,11 +53,11 @@ IMAGE_TOOLS_SCHEMA = [
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Image description prompt"},
-                "engine": {"type": "string", "enum": ["codex", "gemini"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok"], "default": "codex"},
                 "model": {"type": "string", "description": "Model identifier, e.g. gpt-image-2.5-sunburst"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4"], "default": "16:9"},
-                "resolution": {"type": "string", "enum": ["2k", "4k"], "default": "2k"},
-                "quality": {"type": "string", "default": "high"},
+                "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
+                "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
                 "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter"},
                 "project_id": {"type": "string", "description": "Project ID"},
@@ -76,9 +76,10 @@ IMAGE_TOOLS_SCHEMA = [
                 "prompt": {"type": "string", "description": "Editing instructions"},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
                 "mask_artifact_id": {"type": "string"},
+                "resolution": {"type": "string", "description": "Grok editing: 1k or 2k"},
                 "engine": {"type": "string", "default": "codex"},
                 "model": {"type": "string"},
-                "quality": {"type": "string", "default": "auto"},
+                "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "default": "auto"},
                 "project_id": {"type": "string"},
                 "idempotency_key": {"type": "string"},
@@ -146,6 +147,8 @@ IMAGE_TOOLS_SCHEMA = [
     },
 ]
 
+IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
+                           "inputSchema": {"type": "object", "properties": {}}})
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA)
 
 
@@ -176,6 +179,18 @@ def artifact_import(
     )
 
 
+@mcp.tool(name="image.capabilities")
+def image_capabilities() -> types.CallToolResult:
+    return _result(queue_manager.capabilities())
+
+
+async def api_capabilities(request: Request) -> JSONResponse:
+    from .dashboard import check_auth
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return JSONResponse(queue_manager.capabilities())
+
+
 @mcp.tool(name="image.generate")
 async def image_generate(
     project_id: str,
@@ -185,7 +200,7 @@ async def image_generate(
     model: str = "",
     aspect_ratio: str = "16:9",
     resolution: str = "2k",
-    quality: str = "high",
+    quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
 ) -> types.CallToolResult:
@@ -203,7 +218,8 @@ async def image_generate(
     - instructions: 传递给上游主控中介模型的系统指令 (默认注入逐字直传规范)
     """
     resolved_model = model or (
-        DEFAULT_IMAGE_MODEL if engine.lower() == "codex" else DEFAULT_GEMINI_MODEL
+        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+         "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
     )
     params = {
         "action": "generate",
@@ -216,6 +232,7 @@ async def image_generate(
     }
     if instructions:
         params["instructions"] = str(instructions).strip()
+    params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -251,12 +268,14 @@ async def image_create(
     model: str = "",
     aspect_ratio: str = "16:9",
     resolution: str = "2k",
-    quality: str = "high",
+    quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
     import uuid
+    if engine == "grok" and not idempotency_key:
+        raise ValueError("idempotency_key_required")
     actual_idem = idempotency_key or f"idem_{uuid.uuid4().hex[:12]}"
     return await image_generate(
         project_id=project_id,
@@ -283,7 +302,8 @@ async def image_edit(
     engine: str = "codex",
     model: str = "",
     size: str = "",
-    quality: str = "auto",
+    resolution: str | None = None,
+    quality: str | None = None,
     background: str = "auto",
 ) -> types.CallToolResult:
     """基于既有参考底图执行多模态指令编辑、骨相锁定换装或多图融合合成。
@@ -298,7 +318,8 @@ async def image_edit(
     - quality: "auto", "low", "medium", "high", "xhigh", "max"
     """
     resolved_model = model or (
-        DEFAULT_IMAGE_MODEL if engine.lower() == "codex" else DEFAULT_GEMINI_MODEL
+        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+         "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
     )
     params = {
         "action": "edit",
@@ -308,9 +329,11 @@ async def image_edit(
         "prompt": prompt,
         "model": resolved_model,
         "size": size,
+        "resolution": resolution,
         "quality": quality,
         "background": background,
     }
+    params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -351,7 +374,8 @@ async def image_inpaint(
 ) -> types.CallToolResult:
     """基于遮罩（Mask）的精准局部重绘与无痕物体抹除，支持可选服装/主体参考图融合。"""
     resolved_model = model or (
-        DEFAULT_IMAGE_MODEL if engine.lower() == "codex" else DEFAULT_GEMINI_MODEL
+        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+         "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
     )
     params = {
         "action": "inpaint",
@@ -362,6 +386,7 @@ async def image_inpaint(
         "model": resolved_model,
         "background": background,
     }
+    params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -434,6 +459,8 @@ def image_status(task_id: str) -> types.CallToolResult:
             "duration_seconds": task.duration_seconds,
             "artifact_id": task.artifact_id,
             "error": task.error,
+            "phase": task.phase,
+            "needs_attention": task.phase in {"submission_unknown", "collect_retry"},
         }
     )
 
@@ -510,7 +537,7 @@ def transport_security_from_environment() -> TransportSecuritySettings:
 async def health(request: Request) -> JSONResponse:
     artifacts.ensure_ready()
     tasks.ensure_ready()
-    return JSONResponse({"status": "ok", "service": "image-mcp-server", "version": "v0.2.0"})
+    return JSONResponse({"status": "ok", "service": "image-mcp-server", "version": "v0.2.1"})
 
 
 async def artifact_content(request: Request) -> Response:
@@ -589,6 +616,7 @@ app = Starlette(
         Route("/dashboard/", dashboard_page, methods=["GET"]),
         Route("/image/dashboard", dashboard_page, methods=["GET"]),
         Route("/image/dashboard/", dashboard_page, methods=["GET"]),
+        Route("/api/capabilities", api_capabilities, methods=["GET"]),
         Route("/api/tasks", api_list_tasks, methods=["GET"]),
         Route("/image/api/tasks", api_list_tasks, methods=["GET"]),
         Route("/api/tasks", api_create_task, methods=["POST"]),

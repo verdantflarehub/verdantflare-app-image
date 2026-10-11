@@ -1890,6 +1890,31 @@
       promptEl.focus();
     };
 
+    let pendingGrokAttempt = null;
+    const modelSelect = document.getElementById("selectModel");
+    const grokSource = document.createElement("input");
+    grokSource.placeholder = "单图编辑：填写同一项目源 Artifact ID；留空则文生图";
+    grokSource.setAttribute("aria-label", "Grok 源图片 Artifact ID");
+    grokSource.className = "select-dropdown";
+    grokSource.hidden = true;
+    modelSelect.parentElement.appendChild(grokSource);
+    modelSelect.addEventListener("change", () => {
+      const grok = modelSelect.selectedOptions[0]?.dataset.engine === "grok";
+      grokSource.hidden = !grok;
+      checkPrefer4k.disabled = grok;
+      if (grok) { checkPrefer4k.checked = false; checkPrefer4k.onchange(); document.querySelector('[data-mode="t2i"]').click(); }
+      document.querySelectorAll('.mode-pill:not([data-mode="t2i"])').forEach(p => p.disabled = grok);
+    });
+    async function loadCapabilities() {
+      try {
+        const data = await requestApi('/api/capabilities');
+        const grok = data.engines.find(x => x.engine === 'grok');
+        if (grok?.enabled && grok?.configured && !modelSelect.querySelector('[data-engine="grok"]')) {
+          const option = new Option(`Grok · ${grok.model}`, grok.model);
+          option.dataset.engine = 'grok'; modelSelect.add(option);
+        }
+      } catch { /* Discovery retries with task refresh. */ }
+    }
     // Form Submission
     document.getElementById("promptForm").onsubmit = async e => {
       e.preventDefault();
@@ -1908,13 +1933,21 @@
       try {
         const payload = {
           prompt,
-          engine: model.includes('gemini') ? 'gemini' : 'codex',
+          engine: modelSelect.selectedOptions[0]?.dataset.engine || (model.includes('gemini') ? 'gemini' : 'codex'),
           model,
           aspect_ratio: activeRatio,
           resolution: is4k ? '4k' : '2k',
           project_id: proj
         };
-        const res = await requestApi('/api/tasks', { method: 'POST', body: payload });
+        if (payload.engine === 'grok') {
+          if (grokSource.value.trim()) payload.source_artifact_id = grokSource.value.trim();
+          const digest = JSON.stringify(payload);
+          if (pendingGrokAttempt && pendingGrokAttempt.digest !== digest) throw new Error('前次提交结果尚未确认，请先在任务列表核对后刷新页面。');
+          pendingGrokAttempt ||= {digest, key: `grok-ui-${crypto.randomUUID()}`};
+          payload.idempotency_key = pendingGrokAttempt.key;
+        }
+        const res = await requestApi('/api/tasks' , { method: 'POST', body: payload });
+        pendingGrokAttempt = null;
         const createdTask = {
           id: res.task_id || `img_task_${Date.now().toString().slice(-4)}`,
           title: prompt.slice(0, 22) + "…",
@@ -1922,9 +1955,9 @@
           type: selectedMode,
           typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
           model,
-          modelShort: model.includes('sunburst') ? 'sunburst 4k' : (model.includes('gemini') ? 'gemini-3.1-f' : 'flare'),
-          resolution: is4k ? "2160 × 3840 (9:16)" : "1920 × 1080 (16:9)",
-          pixels: is4k ? "8,294,400 物理像素 (真 4K)" : "2,073,600 物理像素",
+          modelShort: model.startsWith('grok') ? model : model.includes('sunburst') ? 'sunburst 4k' : (model.includes('gemini') ? 'gemini-3.1-f' : 'flare'),
+          resolution: "等待产物实测",
+          pixels: "—",
           duration: "排队调度中",
           status: res.status || "queued",
           project: proj,
@@ -1980,6 +2013,7 @@
 
     // Live Tasks Sync
     async function syncBackendTasks() {
+      await loadCapabilities();
       try {
         const tasksRes = await requestApi('/api/tasks?limit=50');
         if (tasksRes && Array.isArray(tasksRes.tasks)) {
@@ -1989,7 +2023,7 @@
             const action = req.action || 't2i';
             const typeName = action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
             const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
-            const modelShort = modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
+            const modelShort = modelName.startsWith('grok') ? modelName : modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
             const sourceArtifactId = req.source_artifact_id || '';
@@ -2004,9 +2038,9 @@
               typeName,
               model: modelName,
               modelShort,
-              resolution: is4k ? '3840 × 2160 (16:9)' : '1920 × 1080 (16:9)',
-              pixels: is4k ? '8,294,400 物理像素 (真 4K)' : '2,073,600 物理像素',
-              duration: dur,
+              resolution: t.media?.width ? `${t.media.width} × ${t.media.height}` : '等待产物实测',
+              pixels: t.media?.width ? `${t.media.width * t.media.height} 物理像素` : '—',
+              duration: t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物' : dur,
               status: t.status === 'completed' ? 'succeeded' : t.status,
               project: t.project_id || 'default',
               time: t.created_at ? new Date(t.created_at).toLocaleTimeString() : '刚刚',
