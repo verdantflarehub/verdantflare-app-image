@@ -1218,6 +1218,12 @@
          ======================================================================= -->
     <section class="tab-view" id="view-models" role="tabpanel">
       <div class="deck-grid">
+        <div class="deck-card" id="grokModelCard" hidden>
+          <div class="deck-head"><span class="tag-badge">Grok 远端渠道</span><span id="grokModelStatus"></span></div>
+          <h3 id="grokModelName">Grok</h3>
+          <p>支持文生图和单图编辑；1K / 2K 为请求档位，产物以实际宽高为准。生成结果保存在当前项目。</p>
+          <div class="card-chips"><span class="card-chip">文生图</span><span class="card-chip">单图编辑</span></div>
+        </div>
         <div class="deck-card">
           <div class="deck-head">
             <span class="tag-badge accent">生产核心主力</span>
@@ -1689,13 +1695,13 @@
                     <span style="font-size: 22px;">⏳</span>
                   `)}
                 </div>
-                <span class="thumb-status-text">${t.status === 'running' ? '5090 算力渲染中…' : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…'))}</span>
+                <span class="thumb-status-text">${t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物…' : t.status === 'running' ? (t.engine === 'grok' ? 'Grok 远端生成中…' : '图像生成中…') : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…'))}</span>
               </div>
             `}
             <div class="card-top-badges">
-              <span class="tag-badge ${t.is4k ? 'accent' : ''}">${t.is4k ? '4K 点对点' : '2K'}</span>
+              <span class="tag-badge ${t.is4k ? 'accent' : ''}">${t.requestedResolution === '1k' ? '1K' : t.is4k ? '4K 点对点' : '2K'}</span>
               <span class="tag-badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : '')}">
-                ${t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
+                ${t.phase === 'submission_unknown' ? '待核对' : t.phase === 'collect_retry' ? '回收中' : t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
               </span>
             </div>
             <div class="card-time-row">
@@ -1908,6 +1914,11 @@
     function loadCapabilities(data) {
       try {
         const grok = data.engines.find(x => x.engine === 'grok');
+        if (grok) {
+          document.getElementById('grokModelCard').hidden = false;
+          document.getElementById('grokModelName').textContent = grok.model;
+          document.getElementById('grokModelStatus').textContent = !grok.configured ? '未配置' : !grok.enabled ? '未启用' : grok.verification_status === 'verified' ? '已验证' : '已配置 · 生成待验证';
+        }
         if (grok?.enabled && grok?.configured && !modelSelect.querySelector('[data-engine="grok"]')) {
           const option = new Option(`Grok · ${grok.model}`, grok.model);
           option.dataset.engine = 'grok'; modelSelect.add(option);
@@ -1952,8 +1963,11 @@
           title: prompt.slice(0, 22) + "…",
           prompt,
           type: selectedMode,
-          typeName: selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
+          typeName: payload.engine === 'grok' && payload.source_artifact_id ? '单图编辑' : selectedMode === "t2i" ? "文生图" : (selectedMode === "inpaint" ? "局部重绘" : "骨相换脸"),
           model,
+          engine: payload.engine,
+          phase: res.phase || 'queued',
+          requestedResolution: payload.resolution,
           modelShort: model.startsWith('grok') ? model : model.includes('sunburst') ? 'sunburst 4k' : (model.includes('gemini') ? 'gemini-3.1-f' : 'flare'),
           resolution: "等待产物实测",
           pixels: "—",
@@ -2020,7 +2034,7 @@
             const req = t.request_params || {};
             const is4k = req.resolution === '4k';
             const action = req.action || 't2i';
-            const typeName = action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
+            const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
             const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
             const modelShort = modelName.startsWith('grok') ? modelName : modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
@@ -2037,6 +2051,9 @@
               typeName,
               model: modelName,
               modelShort,
+              engine: t.engine || req.engine,
+              phase: t.phase,
+              requestedResolution: req.resolution,
               resolution: t.media?.width ? `${t.media.width} × ${t.media.height}` : '等待产物实测',
               pixels: t.media?.width ? `${t.media.width * t.media.height} 物理像素` : '—',
               duration: t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物' : dur,

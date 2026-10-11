@@ -537,7 +537,7 @@ def transport_security_from_environment() -> TransportSecuritySettings:
 async def health(request: Request) -> JSONResponse:
     artifacts.ensure_ready()
     tasks.ensure_ready()
-    return JSONResponse({"status": "ok", "service": "image-mcp-server", "version": "v0.2.2"})
+    return JSONResponse({"status": "ok", "service": "image-mcp-server", "version": "v0.2.3"})
 
 
 async def artifact_content(request: Request) -> Response:
