@@ -149,7 +149,8 @@ IMAGE_TOOLS_SCHEMA = [
 
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA)
+SERVICE_VERSION = "v0.2.4"
+registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
 def _result(value: dict[str, Any]) -> types.CallToolResult:
@@ -181,14 +182,14 @@ def artifact_import(
 
 @mcp.tool(name="image.capabilities")
 def image_capabilities() -> types.CallToolResult:
-    return _result(queue_manager.capabilities())
+    return _result({**queue_manager.capabilities(), "service_version": SERVICE_VERSION})
 
 
 async def api_capabilities(request: Request) -> JSONResponse:
     from .dashboard import check_auth
     if not check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return JSONResponse(queue_manager.capabilities())
+    return JSONResponse({**queue_manager.capabilities(), "service_version": SERVICE_VERSION})
 
 
 @mcp.tool(name="image.generate")
@@ -537,7 +538,7 @@ def transport_security_from_environment() -> TransportSecuritySettings:
 async def health(request: Request) -> JSONResponse:
     artifacts.ensure_ready()
     tasks.ensure_ready()
-    return JSONResponse({"status": "ok", "service": "image-mcp-server", "version": "v0.2.3"})
+    return JSONResponse({"status": "ok", "service": "image-mcp-server", "version": SERVICE_VERSION})
 
 
 async def artifact_content(request: Request) -> Response:

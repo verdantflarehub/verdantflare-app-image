@@ -157,7 +157,7 @@ class TaskStore:
             )
             existing = cur.fetchone()
             if existing:
-                self._check_grok_conflict(existing, engine, request_params)
+                self._check_request_conflict(existing, engine, request_params, model)
                 return TaskRecord.from_row(existing)
 
             task_id = f"imgtask-{uuid.uuid4().hex[:16]}"
@@ -192,17 +192,28 @@ class TaskStore:
                 )
                 row = cur.fetchone()
                 if row:
-                    self._check_grok_conflict(row, engine, request_params)
+                    self._check_request_conflict(row, engine, request_params, model)
                     return TaskRecord.from_row(row)
                 raise
 
         return self.get(task_id)
 
     @staticmethod
-    def _check_grok_conflict(row, engine, params):
-        if engine == "grok" or row["engine"] == "grok":
-            if engine != row["engine"] or json.loads(row["request_params"]) != params:
-                raise TaskConflict("idempotency_conflict")
+    def _check_request_conflict(row, engine, params, model):
+        if (engine != row["engine"] or json.loads(row["request_params"]) != params
+                or row["model"] != (model or params.get("model"))):
+            raise TaskConflict("idempotency_conflict")
+
+    def claim_task(self, task_id: str) -> bool:
+        """Only one worker may execute a queued task, across every engine."""
+        with self._get_conn() as conn:
+            changed = conn.execute(
+                "UPDATE tasks SET status='running', phase=CASE WHEN engine='grok' "
+                "THEN 'submitting' ELSE phase END, updated_at=? "
+                "WHERE task_id=? AND status='queued'",
+                (datetime.now(timezone.utc).isoformat(), task_id),
+            )
+            return changed.rowcount == 1
 
     def claim_grok(self, task_id: str) -> bool:
         with self._get_conn() as conn:

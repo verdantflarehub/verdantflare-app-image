@@ -150,12 +150,9 @@ class TaskQueueManager:
             # 等待对应 AI 通道的并发槽位
             async with sem:
                 start_time = time.time()
-                if job.engine == "grok":
-                    if not self.tasks.claim_grok(job.task_id):
-                        self._queue.task_done()
-                        continue
-                else:
-                    self.tasks.update_status(job.task_id, "running")
+                if not self.tasks.claim_task(job.task_id):
+                    self._queue.task_done()
+                    continue
                 loop = asyncio.get_running_loop()
 
                 try:
