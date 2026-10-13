@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VerdantFlare IMAGE STATION · 图像生成与面部置换工作台</title>
+  <title>Image MCP · VerdantFlare Image Station</title>
   <script>
     (function() {
       var p = new URLSearchParams(location.search);
@@ -85,6 +85,7 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    [hidden] { display: none !important; }
 
     body {
       font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -98,6 +99,10 @@
     button, input, select, textarea { font: inherit; color: inherit; }
     button { cursor: pointer; border: 0; background: none; }
     a { color: inherit; text-decoration: none; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 3px;
+    }
+    button:disabled { cursor: not-allowed; opacity: .5; }
 
     /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 7px; height: 7px; }
@@ -107,8 +112,7 @@
 
     /* Standalone Header (VerdantFlare IMAGE STATION) */
     .station-header {
-      position: sticky;
-      top: 0;
+      position: relative;
       z-index: 40;
       height: 64px;
       border-bottom: 1px solid var(--line);
@@ -226,9 +230,9 @@
     .main {
       flex: 1;
       width: 100%;
-      max-width: 1480px;
+      min-width: 0;
       margin: 0 auto;
-      padding: 24px 28px 48px;
+      padding: 24px 36px 48px;
       box-sizing: border-box;
     }
 
@@ -239,7 +243,8 @@
       justify-content: space-between;
       gap: 24px;
       border-bottom: 1px solid var(--line);
-      margin-bottom: 22px;
+      min-height: 40px;
+      margin-bottom: 12px;
       padding-bottom: 0;
     }
 
@@ -253,7 +258,9 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 8px 4px 14px;
+      height: 40px;
+      padding: 0 0 8px;
+      margin-bottom: -1px;
       font-size: 14px;
       font-weight: 500;
       color: var(--muted);
@@ -303,7 +310,7 @@
       border: 1px solid var(--line);
       border-radius: var(--radius-lg);
       padding: 18px 22px 20px;
-      margin-bottom: 24px;
+      margin-bottom: 16px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
       transition: border-color 0.2s;
     }
@@ -460,7 +467,7 @@
     }
 
     .select-dropdown {
-      height: 32px;
+      height: 34px;
       padding: 0 10px;
       border-radius: var(--radius-sm);
       background: var(--subtle);
@@ -502,9 +509,10 @@
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 14px;
-      margin-bottom: 20px;
-      padding-bottom: 14px;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 10px 0 14px;
+      border-top: 1px solid var(--line);
       border-bottom: 1px solid var(--line);
     }
 
@@ -513,12 +521,13 @@
       align-items: center;
       gap: 6px;
       flex-wrap: wrap;
+      margin-bottom: 16px;
     }
 
     .chip-btn {
       height: 30px;
-      padding: 0 12px;
-      border-radius: var(--radius-pill);
+      padding: 4px 12px;
+      border-radius: 16px;
       font-size: 12px;
       font-weight: 500;
       background: var(--subtle);
@@ -536,7 +545,7 @@
     }
 
     .chip-btn.active {
-      background: var(--panel);
+      background: var(--accent-glow);
       color: var(--accent);
       border-color: var(--accent);
       font-weight: 600;
@@ -570,8 +579,9 @@
       border: 1px solid var(--line);
       border-radius: var(--radius-sm);
       padding: 0 10px;
-      height: 32px;
-      min-width: 220px;
+      height: 34px;
+      width: 260px;
+      max-width: 100%;
     }
 
     .search-box input {
@@ -586,7 +596,7 @@
     /* Gallery Grid */
     .gallery-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
       gap: 20px;
     }
 
@@ -633,12 +643,12 @@
       align-items: center;
       justify-content: center;
       gap: 10px;
-      background: var(--bg-surface);
-      color: var(--text-muted);
+      background: var(--subtle);
+      color: var(--muted);
     }
 
     .card-thumb-placeholder.pulse {
-      background: linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-card) 50%, var(--bg-surface) 100%);
+      background: linear-gradient(135deg, var(--subtle) 0%, var(--panel) 50%, var(--subtle) 100%);
       background-size: 200% 200%;
       animation: vf-thumb-shimmer 2.2s ease infinite;
     }
@@ -663,7 +673,7 @@
     .thumb-status-text {
       font-size: 11px;
       font-weight: 500;
-      color: var(--text-muted);
+      color: var(--muted);
       letter-spacing: 0.2px;
     }
 
@@ -781,6 +791,8 @@
     }
 
     .card-chip {
+      max-width: 100%;
+      overflow-wrap: anywhere;
       font-size: 10px;
       padding: 2px 6px;
       border-radius: 4px;
@@ -799,7 +811,7 @@
        ========================================================================== */
     .deck-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
       gap: 20px;
     }
 
@@ -831,7 +843,11 @@
       font-size: 15px;
       font-weight: 700;
       color: var(--ink);
+      overflow-wrap: anywhere;
     }
+    .deck-head code { font-size: 13px; font-weight: 700; color: var(--accent); }
+    .pill-badge[data-state="error"] .status-dot { background: var(--danger); box-shadow: none; }
+    .pill-badge[data-state="loading"] .status-dot { background: var(--muted); box-shadow: none; }
 
     .deck-card p {
       font-size: 13px;
@@ -847,7 +863,8 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 11px;
       color: var(--ink);
-      overflow-x: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
       line-height: 1.5;
     }
 
@@ -1004,6 +1021,8 @@
     .spec-table dd {
       color: var(--ink);
       font-weight: 500;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
 
     /* ==========================================================================
@@ -1020,7 +1039,7 @@
       background: transparent !important;
       display: block !important;
       margin: 0 !important;
-      padding: 0 !important;
+      padding: 0 0 36px !important;
       overflow-x: hidden !important;
       overflow-y: hidden !important;
       min-height: auto !important;
@@ -1035,18 +1054,71 @@
       margin: 0 !important;
       width: 100% !important;
       max-width: 100% !important;
-      padding: 20px 24px 40px !important;
+      padding: 0 !important;
       box-sizing: border-box !important;
     }
 
     html[data-embedded="true"] .workspace-tabs {
       border-bottom: 1px solid var(--line) !important;
-      margin-bottom: 18px !important;
+      margin: 0 0 12px !important;
     }
 
     html[data-embedded="true"] .tab-item {
       font-size: 14px !important;
-      padding: 6px 4px 12px !important;
+      padding: 0 0 8px !important;
+    }
+
+    .toolbar-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; min-width: 0; }
+    .toolbar-filter { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+    .toolbar-filter select { height: 34px; min-width: 120px; max-width: 220px; background: var(--panel); }
+    .view-switch { display: inline-flex; height: 32px; padding: 2px; border: 1px solid var(--line); border-radius: 16px; background: var(--subtle); }
+    .view-switch button { padding: 0 12px; border-radius: 14px; font-size: 12px; color: var(--muted); }
+    .view-switch button[aria-pressed="true"] { background: var(--panel); color: var(--accent); box-shadow: 0 1px 4px var(--line); }
+    .task-summary, .service-note { font-size: 12px; color: var(--muted); }
+    .task-summary { margin-left: auto; }
+    .state-panel { padding: 32px 20px; border: 1px dashed var(--line); border-radius: var(--radius-md); background: var(--panel); text-align: center; color: var(--muted); }
+    .state-panel h3 { font-size: 15px; color: var(--ink); margin-bottom: 8px; }
+    .state-panel .btn { margin-top: 12px; }
+    .state-panel[data-state="error"] { border-color: var(--danger); }
+    .service-note { margin-bottom: 16px; }
+    .task-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; background: var(--panel); }
+    .task-table th, .task-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+    .task-table th { color: var(--muted); font-weight: 500; background: var(--subtle); }
+    .task-table th:first-child { width: 36%; }
+    .task-table td button { color: var(--accent); text-align: left; }
+    .task-table small { display: block; color: var(--muted); }
+    .standalone-heading { margin-bottom: 16px; }
+    .standalone-heading h1 { font-size: 26px; font-weight: 650; }
+    .standalone-heading p { font-size: 13px; color: var(--muted); }
+    html[data-embedded="true"] .standalone-heading { display: none; }
+    html[data-embedded="true"] .inspector-drawer { position: static; width: 100%; transform: none; display: none; box-shadow: none; border: 1px solid var(--line); border-radius: var(--radius-md); }
+    html[data-embedded="true"] .inspector-drawer.open { display: flex; }
+    html[data-embedded="true"] .drawer-body { overflow: visible; }
+    html[data-embedded="true"] .drawer-overlay { display: none; }
+    html[data-embedded="true"] body.inspecting .tab-view { display: none; }
+    @media (max-width: 760px) {
+      .main { padding: 20px 16px 36px; }
+      .station-header { height: auto; min-height: 64px; padding: 12px 16px; flex-wrap: wrap; gap: 12px; }
+      .workspace-tabs { gap: 12px; flex-wrap: wrap; }
+      .tabs-group { gap: 24px; }
+      .tab-tools { gap: 8px; }
+      .tab-tools .pill-badge { display: none; }
+      .market-toolbar, .toolbar-right, .console-header { align-items: flex-start; flex-wrap: wrap; }
+      .toolbar-filters { width: 100%; }
+      .search-box { width: 100%; }
+      .toolbar-filter { flex: 1; }
+      .toolbar-filter select { width: 100%; max-width: 100%; min-width: 0; }
+      .task-summary { width: 100%; margin: 0; }
+      .console-card, .deck-card, .drawer-body { padding: 16px; }
+      .mode-pills, .ratio-group { flex-wrap: wrap; }
+      .dynamic-fields-row { grid-template-columns: minmax(0, 1fr); }
+      .select-dropdown { max-width: 100%; }
+      .task-table th, .task-table td { padding: 10px 6px; }
+      .task-table .task-table-secondary { display: none; }
+      .drawer-actions-row { flex-wrap: wrap; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
   </style>
 </head>
@@ -1067,16 +1139,11 @@
     </div>
 
     <div class="header-actions">
-      <a class="btn" href="/dashboard" id="btnReturnStudio">← 返回 Studio 全景</a>
-      <div class="pill-badge">
-        <span class="status-dot"></span>
-        <span>双核生图就绪 · 5090 集群</span>
-      </div>
       <button class="btn" id="btnThemeToggle">
         <span id="themeToggleText">浅色模式</span>
       </button>
       <button class="btn" id="btnTokenConfig">
-        <span>Token：已就绪</span>
+        <span>配置访问 Token</span>
       </button>
     </div>
   </header>
@@ -1085,32 +1152,33 @@
        Main Viewport (Studio Dynamic Viewport / Standalone Workspace)
        ========================================================================== -->
   <main class="main" id="mainArea">
+    <header class="standalone-heading"><h1>Image MCP</h1><p>图像任务、模型与 MCP 能力</p></header>
 
     <!-- Sub-Navigation Horizontal Tabs (Tasks / Models / MCP) -->
     <nav class="workspace-tabs" aria-label="创作工作区导航">
       <div class="tabs-group" role="tablist">
         <button class="tab-item active" data-nav="tasks" role="tab" aria-selected="true">
-          <span class="tab-label">01 / 任务工单 (Tasks)</span>
+          <span class="tab-label">任务</span>
         </button>
         <button class="tab-item" data-nav="models" role="tab" aria-selected="false">
-          <span class="tab-label">02 / 模型底座与网关 (Models)</span>
+          <span class="tab-label">模型</span>
         </button>
         <button class="tab-item" data-nav="mcp" role="tab" aria-selected="false">
-          <span class="tab-label">03 / MCP 服务契约 (MCP)</span>
+          <span class="tab-label">MCP</span>
         </button>
       </div>
 
       <div class="tab-tools">
-        <div class="pill-badge" id="embedStatusPill">
+        <div class="pill-badge" id="embedStatusPill" data-state="loading">
           <span class="status-dot"></span>
-          <span>双核生图就绪</span>
+          <span>正在连接</span>
         </div>
-        <button class="btn primary" id="btnScrollPrompt">
+        <button class="btn primary" id="btnScrollPrompt" aria-expanded="false" aria-controls="creationConsole">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
-          <span>立即生图</span>
+          <span>新建图像任务</span>
         </button>
       </div>
     </nav>
@@ -1121,7 +1189,7 @@
     <section class="tab-view active" id="view-tasks" role="tabpanel">
 
       <!-- Inline Instant Creation Console -->
-      <div class="console-card">
+      <div class="console-card" id="creationConsole" hidden>
         <div class="console-header">
           <div class="mode-pills" role="radiogroup">
             <button class="mode-pill active" data-mode="t2i" role="radio" aria-checked="true">文生图 (Text-to-Image)</button>
@@ -1129,7 +1197,7 @@
             <button class="mode-pill" data-mode="faceswap" role="radio" aria-checked="false">真人骨相换脸 (Face Fusion)</button>
           </div>
           <div class="console-notice">
-            <span>🛡️ 负向词防御清洗已开启 · 100% 逐字直传</span>
+            <span>填写提示词、模型与所属项目</span>
           </div>
         </div>
 
@@ -1187,26 +1255,34 @@
         </form>
       </div>
 
-      <!-- Toolbar & Status Filter -->
+      <!-- Secondary toolbar, followed by status chips. -->
       <div class="market-toolbar">
-        <div class="filter-chips">
-          <button class="chip-btn active" data-status="all">全部 <span class="chip-count" id="countAll">0</span></button>
-          <button class="chip-btn" data-status="succeeded">已完成 <span class="chip-count" id="countSucceeded">0</span></button>
-          <button class="chip-btn" data-status="running">生成中 <span class="chip-count" id="countRunning">0</span></button>
-          <button class="chip-btn" data-status="queued">排队中 <span class="chip-count" id="countQueued">0</span></button>
-        </div>
-
-        <div class="toolbar-right">
+        <div class="toolbar-filters">
           <div class="search-box">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <input type="search" id="inputSearch" placeholder="搜索提示词、任务ID或项目…" aria-label="搜索任务"/>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="search" id="inputSearch" placeholder="搜索提示词、任务或项目…" aria-label="搜索任务"/>
           </div>
-          <span style="font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;">平均生成耗时：<strong style="color:var(--accent);">7.8s</strong></span>
+          <label class="toolbar-filter">模型<select class="select-dropdown" id="filterModel"><option value="">全部模型</option></select></label>
+          <label class="toolbar-filter">渠道<select class="select-dropdown" id="filterEngine"><option value="">全部渠道</option></select></label>
+        </div>
+        <div class="toolbar-right">
+          <div class="view-switch" role="group" aria-label="任务视图">
+            <button type="button" data-view="gallery" aria-pressed="true">画廊</button>
+            <button type="button" data-view="table" aria-pressed="false">表格</button>
+          </div>
+          <button class="btn" id="btnRefreshTasks">刷新</button>
         </div>
       </div>
+      <div class="filter-chips" role="group" aria-label="任务状态">
+        <button class="chip-btn active" data-status="all" aria-pressed="true">全部 <span class="chip-count" id="countAll">0</span></button>
+        <button class="chip-btn" data-status="succeeded" aria-pressed="false">已完成 <span class="chip-count" id="countSucceeded">0</span></button>
+        <button class="chip-btn" data-status="running" aria-pressed="false">生成中 <span class="chip-count" id="countRunning">0</span></button>
+        <button class="chip-btn" data-status="queued" aria-pressed="false">排队中 <span class="chip-count" id="countQueued">0</span></button>
+        <button class="chip-btn" data-status="failed" aria-pressed="false">已失败 <span class="chip-count" id="countFailed">0</span></button>
+        <span class="task-summary" id="taskSummary">正在读取任务…</span>
+      </div>
+      <div class="state-panel" id="taskState" role="status" aria-live="polite" data-state="loading"><h3>正在加载图像任务…</h3></div>
+      <div id="taskTableContainer" hidden></div>
 
       <!-- Task Gallery Grid -->
       <div class="gallery-grid" id="galleryContainer"></div>
@@ -1217,72 +1293,15 @@
          VIEW 2: MODELS & GATEWAY
          ======================================================================= -->
     <section class="tab-view" id="view-models" role="tabpanel">
-      <div class="deck-grid">
-        <div class="deck-card" id="grokModelCard" hidden>
-          <div class="deck-head"><span class="tag-badge">Grok 远端渠道</span><span id="grokModelStatus"></span></div>
-          <h3 id="grokModelName">Grok</h3>
-          <p>支持文生图和单图编辑；1K / 2K 为请求档位，产物以实际宽高为准。生成结果保存在当前项目。</p>
-          <div class="card-chips"><span class="card-chip">文生图</span><span class="card-chip">单图编辑</span></div>
-        </div>
-        <div class="deck-card">
-          <div class="deck-head">
-            <span class="tag-badge accent">生产核心主力</span>
-            <span style="font-size:11px; color:var(--muted);">v0.1.23</span>
-          </div>
-          <h3>gpt-image-2.5-sunburst</h3>
-          <p>4K 商业级单反写真生图底座。点对点原生输出 2160×3840 (830万物理像素)，睫毛、毛孔与发丝丝丝分明，从根本上解决全身中远景发虚涂抹与数码插值拉伸。</p>
-          <div class="card-chips" style="margin-top:auto;">
-            <span class="card-chip">真 4K</span>
-            <span class="card-chip">8.3MP</span>
-            <span class="card-chip">单反质感</span>
-          </div>
-        </div>
-
-        <div class="deck-card">
-          <div class="deck-head">
-            <span class="tag-badge">快速概念草图</span>
-            <span style="font-size:11px; color:var(--muted);">v0.1.23</span>
-          </div>
-          <h3>gpt-image-2.5-flare</h3>
-          <p>故事板与影视分镜快速概念模型。3~5 秒极速出图，标准 2K 输出，适合高频创意打光推演与剧本视觉化测试。</p>
-          <div class="card-chips" style="margin-top:auto;">
-            <span class="card-chip">极速推理</span>
-            <span class="card-chip">分镜探索</span>
-          </div>
-        </div>
-
-        <div class="deck-card">
-          <div class="deck-head">
-            <span class="tag-badge amber">sub2api 网关托管</span>
-            <span style="font-size:11px; color:var(--muted);">SUB2API_IMAGES_MAIN_MODEL</span>
-          </div>
-          <h3>gpt-5.6-luna (轻量工具调度)</h3>
-          <p>网关内部轻量主控，专司 Function Calling。彻底替换客户端原有的强思维链模型，根除因推理上下文视角冲突引发的落地镜双重曝光与幽灵手臂。</p>
-          <div class="card-chips" style="margin-top:auto;">
-            <span class="card-chip">逐字直传</span>
-            <span class="card-chip">防重影</span>
-          </div>
-        </div>
-
-        <div class="deck-card">
-          <div class="deck-head">
-            <span class="tag-badge accent">成都 5090 集群专属</span>
-            <span style="font-size:11px; color:var(--muted);">image-face-fusion-api</span>
-          </div>
-          <h3>InsightFace (Inswapper) + CodeFormer</h3>
-          <p>专司真人 IP 面部特征锁定的独立微服务。攻克上游生图底座 AI 随机脸与审查拒止痛点，对齐小月等固定真人 IP 奢华时尚大片的工业化生产。</p>
-          <div class="card-chips" style="margin-top:auto;">
-            <span class="card-chip">骨相置换</span>
-            <span class="card-chip">CodeFormer 修复</span>
-          </div>
-        </div>
-      </div>
+      <p class="service-note">模型与渠道来自当前服务能力声明；配置状态不等同于生成质量或运行健康。</p>
+      <div class="deck-grid" id="modelDeck"><div class="state-panel" data-state="loading">正在读取模型能力…</div></div>
     </section>
 
     <!-- =======================================================================
          VIEW 3: MCP CONTRACTS
          ======================================================================= -->
     <section class="tab-view" id="view-mcp" role="tabpanel">
+      <p class="service-note">Image MCP 提供图像生成、编辑、状态查询与产物读取。以下为接口能力说明；实际访问由 Studio 授权。</p>
       <div class="deck-grid">
         <div class="deck-card">
           <div class="deck-head">
@@ -1313,11 +1332,26 @@
 
         <div class="deck-card">
           <div class="deck-head">
-            <code style="font-size:13px; font-weight:700; color:var(--accent);">image_face_swap</code>
+            <code style="font-size:13px; font-weight:700; color:var(--accent);">image.faceswap</code>
             <span class="tag-badge">Tool</span>
           </div>
-          <p>真人面部骨相置换微服务调用。基于 source_face 替换 target_image 面孔并进行眼部微观重建。</p>
-          <pre class="code-schema-block">{ "target_image": "string", "source_face": "string", "fidelity_weight": 0.85 }</pre>
+          <p>真人面部骨相置换微服务调用。基于来源身份图像与目标图像，提交面部置换与可选修复。</p>
+          <pre class="code-schema-block">{ "target_artifact_id": "string", "source_identity_artifact_id": "string", "restoration_fidelity": 0.85 }</pre>
+        </div>
+        <div class="deck-card">
+          <div class="deck-head"><code>image.status</code><span class="tag-badge">Tool</span></div>
+          <p>按任务编号读取状态与元数据，继续跟踪已有任务。</p>
+          <pre class="code-schema-block">{ "task_id": "string" }</pre>
+        </div>
+        <div class="deck-card">
+          <div class="deck-head"><code>image.result</code><span class="tag-badge">Tool</span></div>
+          <p>读取已完成任务的图像产物与受控下载信息。</p>
+          <pre class="code-schema-block">{ "task_id": "string" }</pre>
+        </div>
+        <div class="deck-card">
+          <div class="deck-head"><code>image.capabilities</code><span class="tag-badge">Tool</span></div>
+          <p>读取已声明渠道、模型与适配限制，不提交生成任务。</p>
+          <pre class="code-schema-block">{}</pre>
         </div>
       </div>
     </section>
@@ -1328,7 +1362,7 @@
        Right Slide-out Inspector Drawer
        ========================================================================== -->
   <div class="drawer-overlay" id="drawerOverlay"></div>
-  <aside class="inspector-drawer" id="inspectorDrawer" aria-label="任务详情检视">
+  <aside class="inspector-drawer" id="inspectorDrawer" aria-label="任务详情检视" inert>
     <div class="drawer-head">
       <strong id="drawerHeading">任务详情检视</strong>
       <button class="btn" id="btnCloseDrawer" style="padding:4px 8px; font-size:11px;">关闭 ✕</button>
@@ -1346,15 +1380,13 @@
         </div>
 
         <div class="drawer-actions-row" style="margin-top:12px;">
-          <a class="btn primary" id="btnDownload" style="flex:1;" target="_blank">下载 4K 原图 (PNG)</a>
-          <button class="btn" id="btnSendVideo" style="flex:1;">🎬 发送至 Video MCP 运镜</button>
+          <a class="btn primary" id="btnDownload" style="flex:1;" target="_blank">下载原图</a>
         </div>
       </div>
 
       <div class="prompt-audit-card">
         <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-          <span style="font-size:11px; font-weight:700; color:var(--accent);">逐字直传 (Verbatim)</span>
-          <span style="font-size:11px; color:var(--muted);">负向词已清洗</span>
+          <span style="font-size:11px; font-weight:700; color:var(--accent);">任务提示词</span>
         </div>
         <p id="drawerPromptText" style="font-size:12px; color:var(--ink); line-height:1.6;"></p>
       </div>
@@ -1364,7 +1396,7 @@
         <dl class="spec-table">
           <dt>任务编号</dt><dd><code id="specTaskId" style="color:var(--accent);"></code></dd>
           <dt>生图底座</dt><dd id="specModel"></dd>
-          <dt>网关主控</dt><dd>gpt-5.6-luna (sub2api 内部轻量托管)</dd>
+          <dt>渠道</dt><dd id="specEngine"></dd>
           <dt>物理分辨率</dt><dd><strong id="specResolution"></strong></dd>
           <dt>总生成耗时</dt><dd id="specDuration"></dd>
           <dt>所属项目</dt><dd id="specProject"></dd>
@@ -1387,6 +1419,9 @@
     window.studioEmbedded = isEmbedded;
     const viewEpoch = new URLSearchParams(location.search).get('view');
     const hostOrigin = isEmbedded ? new URL(location.href).origin : '';
+    let hostResizeObserver = null;
+    let nextViewportId = 0;
+    const viewportRequests = new Map();
 
     if (isEmbedded) {
       document.documentElement.dataset.embedded = 'true';
@@ -1406,11 +1441,8 @@
       });
 
       function notifyHostHeight() {
-        const h = Math.max(
-          document.documentElement.scrollHeight,
-          document.body.scrollHeight,
-          (document.getElementById('mainArea')?.scrollHeight || 0) + 40
-        );
+        // Measure content, never the iframe viewport: it must shrink after tab changes.
+        const h = Math.ceil(document.body.getBoundingClientRect().height);
         if (h > 0) {
           parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'resize', height: h }, hostOrigin);
         }
@@ -1419,10 +1451,11 @@
       window.addEventListener('load', notifyHostHeight);
       window.addEventListener('resize', notifyHostHeight);
       if (window.ResizeObserver) {
-        const ro = new ResizeObserver(() => notifyHostHeight());
-        ro.observe(document.body);
+        hostResizeObserver = new ResizeObserver(() => notifyHostHeight());
+        hostResizeObserver.observe(document.body);
       }
       window.addEventListener('wheel', e => {
+        if (e.target.closest('textarea, select, input')) return;
         parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'wheel', deltaY: e.deltaY }, hostOrigin);
       }, { passive: true });
     }
@@ -1463,6 +1496,12 @@
     window.addEventListener('message', e => {
       if (!isEmbedded || e.source !== parent || e.origin !== hostOrigin || e.data?.channel !== 'vf-studio') return;
       const d = e.data;
+
+      if (d.type === 'restore' && Number.isFinite(d.viewport?.scrollY) && d.viewport.scrollY >= 0) {
+        const request = viewportRequests.get(d.viewport.captureId);
+        if (request) { clearTimeout(request.timer); viewportRequests.delete(d.viewport.captureId); request.resolve(d.viewport.scrollY); }
+        return;
+      }
 
       // Theme Synchronization
       if (d.type === 'theme') {
@@ -1540,9 +1579,10 @@
         view.classList.toggle('active', view.id === `view-${nav}`);
       });
 
-      if (location.hash !== '#' + nav) {
+      if (location.hash !== '#' + nav && !isEmbedded) {
         history.replaceState(null, '', '#' + nav);
       }
+      if (document.body.classList.contains('inspecting')) closeInspector(false);
 
       if (notifyStudio && isEmbedded) {
         window.studioNavigate('/dashboard#' + nav);
@@ -1565,6 +1605,23 @@
     let currentFilter = "all";
     let activeTask = null;
     let selectedMode = "t2i";
+    let taskLoadState = 'loading', taskLoadError = '', taskTotal = 0, taskView = 'gallery';
+    let syncingTasks = false, disposed = false, lastGalleryMarkup = '', lastTableMarkup = '';
+    let detailReturnFocus = null, detailReturnScroll = 0, detailEpoch = 0;
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+    const taskState = document.getElementById('taskState');
+    const taskTableContainer = document.getElementById('taskTableContainer');
+    const filterModel = document.getElementById('filterModel'), filterEngine = document.getElementById('filterEngine');
+
+    function updateTaskFilters() {
+      for (const [select, values, label] of [[filterModel, allTasks.map(t => t.model), '全部模型'], [filterEngine, allTasks.map(t => t.engine), '全部渠道']]) {
+        const previous = select.value;
+        const options = [...new Set(values.filter(Boolean))].sort();
+        if (previous && !options.includes(previous)) options.push(previous);
+        select.replaceChildren(new Option(label, ''), ...options.map(v => new Option(v, v)));
+        select.value = previous;
+      }
+    }
 
     // Artifact Blob URL Cache & Queue Loader (Opaque iframe safe)
     const artifactBlobMap = new Map();
@@ -1582,6 +1639,7 @@
       const p = (async () => {
         try {
           const blob = await requestApi(`/artifacts/${artifactId}/content`, { blob: true });
+          if (disposed) return '';
           const url = URL.createObjectURL(blob);
           artifactBlobMap.set(artifactId, url);
           return url;
@@ -1655,7 +1713,9 @@
       const q = inputSearch.value.trim().toLowerCase();
       const filtered = allTasks.filter(t => {
         if (currentFilter !== "all" && t.status !== currentFilter) return false;
-        if (q && !(t.title.toLowerCase().includes(q) || t.prompt.toLowerCase().includes(q) || t.id.toLowerCase().includes(q))) return false;
+        if (filterModel.value && t.model !== filterModel.value) return false;
+        if (filterEngine.value && t.engine !== filterEngine.value) return false;
+        if (q && ![t.title, t.prompt, t.id, t.project].some(v => String(v || '').toLowerCase().includes(q))) return false;
         return true;
       });
 
@@ -1664,21 +1724,23 @@
       document.getElementById("countRunning").textContent = allTasks.filter(t => t.status === "running").length;
       document.getElementById("countQueued").textContent = allTasks.filter(t => t.status === "queued").length;
 
-      if (filtered.length === 0) {
-        galleryContainer.innerHTML = `
-          <div class="empty-state-box" style="grid-column: 1 / -1; padding: 64px 24px; text-align: center; border: 1px dashed var(--line); border-radius: 14px; background: var(--panel); margin-top: 4px;">
-            <div style="font-size: 32px; margin-bottom: 12px;">🎨</div>
-            <h3 style="font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 8px;">${allTasks.length === 0 ? '暂无图像生成任务记录' : '无匹配筛选的任务'}</h3>
-            <p style="font-size: 13px; color: var(--muted); margin: 0 auto; max-width: 420px; line-height: 1.6;">
-              ${allTasks.length === 0 ? '当前工作区暂无历史任务。请在上方输入画面描述与提示词，选择模型与画幅后点击“立即生成”，任务将提交至 5090 集群进行处理。' : '没有找到符合当前筛选条件的任务记录，可尝试切换筛选标签或清空搜索关键字。'}
-            </p>
-          </div>
-        `;
-        return;
-      }
-
-      galleryContainer.innerHTML = filtered.map(t => `
-        <article class="task-card" data-task-id="${t.id}" onclick="openInspector('${t.id}')">
+      document.getElementById('countFailed').textContent = allTasks.filter(t => t.status === 'failed').length;
+      document.getElementById('taskSummary').textContent = `显示 ${filtered.length} / 已加载 ${allTasks.length} 项 · 共 ${taskTotal} 项`;
+      const empty = filtered.length === 0;
+      const state = taskLoadState === 'loading' ? 'loading' : taskLoadState === 'error' ? 'error' : empty ? 'empty' : 'ready';
+      taskState.dataset.state = state;
+      taskState.hidden = state === 'ready';
+      galleryContainer.setAttribute('aria-busy', taskLoadState === 'loading' ? 'true' : 'false');
+      if (state === 'loading') taskState.innerHTML = '<h3>正在加载图像任务…</h3><p>正在读取当前工作区的任务与模型能力。</p>';
+      if (state === 'error') taskState.innerHTML = `<h3>任务暂时无法刷新</h3><p>${escapeHtml(taskLoadError)}${allTasks.length ? ' · 下方保留上次读取的任务。' : ''}</p><button class="btn" onclick="syncBackendTasks()">重试</button>`;
+      if (state === 'empty') taskState.innerHTML = `<h3>${allTasks.length ? '没有匹配的任务' : '暂无图像任务'}</h3><p>${allTasks.length ? '请调整状态、模型、渠道或搜索条件。' : '点击“新建图像任务”开始创建。'}</p>`;
+      galleryContainer.hidden = empty || taskView !== 'gallery';
+      taskTableContainer.hidden = empty || taskView !== 'table';
+      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>状态</th><th>模型 / 渠道</th><th class="task-table-secondary">项目</th><th class="task-table-secondary">耗时</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}</td><td>${escapeHtml(t.model)}<small>${escapeHtml(t.engine || '未提供渠道')}</small></td><td class="task-table-secondary">${escapeHtml(t.project)}</td><td class="task-table-secondary">${escapeHtml(t.duration)}</td></tr>`).join('')}</tbody></table>`;
+      if (tableMarkup !== lastTableMarkup) { taskTableContainer.innerHTML = tableMarkup; lastTableMarkup = tableMarkup; }
+      if (empty) { galleryContainer.replaceChildren(); lastGalleryMarkup = ''; return; }
+      const markup = filtered.map(task => { const t = Object.fromEntries(Object.entries(task).map(([k,v]) => [k, typeof v === 'string' ? escapeHtml(v) : v])); return `
+        <article class="task-card" data-task-id="${t.id}" data-open-task="${t.id}" role="button" tabindex="0" aria-label="查看任务：${t.title}">
           <div class="card-thumb">
             ${t.img ? `
               <img src="${t.img}" alt="${t.title}" loading="lazy"/>
@@ -1699,9 +1761,9 @@
               </div>
             `}
             <div class="card-top-badges">
-              <span class="tag-badge ${t.is4k ? 'accent' : ''}">${t.requestedResolution === '1k' ? '1K' : t.is4k ? '4K 点对点' : '2K'}</span>
+              <span class="tag-badge ${t.is4k ? 'accent' : ''}">${t.requestedResolution ? '请求 ' + t.requestedResolution.toUpperCase() : '尺寸未提供'}</span>
               <span class="tag-badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : '')}">
-                ${t.phase === 'submission_unknown' ? '待核对' : t.phase === 'collect_retry' ? '回收中' : t.status === 'succeeded' ? '已就绪' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
+                ${t.phase === 'submission_unknown' ? '待核对' : t.phase === 'collect_retry' ? '回收中' : t.status === 'succeeded' ? '已完成' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
               </span>
             </div>
             <div class="card-time-row">
@@ -1724,14 +1786,28 @@
             </div>
           </div>
         </article>
-      `).join('');
+      `; }).join('');
+      if (markup !== lastGalleryMarkup) { galleryContainer.innerHTML = markup; lastGalleryMarkup = markup; }
     }
+
+    for (const container of [galleryContainer, taskTableContainer]) {
+      container.addEventListener('click', e => { const card = e.target.closest('[data-open-task]'); if (card) openInspector(card.dataset.openTask); });
+      container.addEventListener('keydown', e => { if (e.target.matches('article[data-open-task]') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); openInspector(e.target.dataset.openTask); } });
+    }
+    for (const select of [filterModel, filterEngine]) select.addEventListener('change', renderGallery);
+    document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
+      taskView = button.dataset.view;
+      document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+      renderGallery();
+    }));
+    document.getElementById('btnRefreshTasks').onclick = () => syncBackendTasks();
 
     // Filter Chips
     document.querySelectorAll(".chip-btn").forEach(chip => {
       chip.onclick = () => {
-        document.querySelectorAll(".chip-btn").forEach(c => c.classList.remove("active"));
+        document.querySelectorAll(".chip-btn").forEach(c => { c.classList.remove("active"); c.setAttribute("aria-pressed", "false"); });
         chip.classList.add("active");
+        chip.setAttribute("aria-pressed", "true");
         currentFilter = chip.dataset.status;
         renderGallery();
       };
@@ -1768,16 +1844,44 @@
           singleImg.src = task.img;
         } else {
           singleImg.src = "";
-          singleImg.alt = task.status === 'running' ? "5090 算力渲染中…" : (task.status === 'succeeded' && task.artifactId ? "加载画作中…" : (task.status === 'failed' ? "生成失败" : "排队调度中…"));
+          singleImg.alt = task.status === 'running' ? "图像生成中…" : (task.status === 'succeeded' ? (task.artifactId ? "加载画作中…" : "任务未提供图像产物") : (task.status === 'failed' ? "生成失败" : "排队调度中…"));
         }
       }
     }
 
     // Inspector Drawer
-    window.openInspector = function(id) {
+    function visibleContentTop() {
+      if (!isEmbedded || !window.IntersectionObserver) return Promise.resolve(window.scrollY);
+      // An implicit-root intersection gives the clipped content offset without
+      // reading the opaque iframe's parent DOM or introducing another protocol.
+      return new Promise(resolve => {
+        const observer = new IntersectionObserver(([entry]) => {
+          clearTimeout(timeout); observer.disconnect(); resolve(entry.intersectionRect.top);
+        });
+        const timeout = setTimeout(() => { observer.disconnect(); resolve(0); }, 250);
+        observer.observe(document.body);
+      });
+    }
+    function captureViewport() {
+      if (!isEmbedded) return Promise.resolve(window.scrollY);
+      return new Promise(resolve => {
+        const captureId = ++nextViewportId;
+        const timer = setTimeout(async () => { viewportRequests.delete(captureId); resolve(await visibleContentTop()); }, 500);
+        viewportRequests.set(captureId, { resolve, timer });
+        parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'wheel', deltaY: 0, captureId }, hostOrigin);
+      });
+    }
+    window.openInspector = async function(id) {
       const task = allTasks.find(t => t.id === id);
       if (!task) return;
+      const epoch = ++detailEpoch;
+      const scroll = await captureViewport();
+      if (epoch !== detailEpoch || disposed) return;
       activeTask = task;
+      detailReturnFocus = document.querySelector(`[data-open-task="${CSS.escape(id)}"]`);
+      detailReturnScroll = scroll;
+      document.body.classList.add('inspecting');
+      document.getElementById('specEngine').textContent = task.engine || '未提供';
 
       document.getElementById("drawerHeading").textContent = task.title;
       document.getElementById("drawerPromptText").textContent = task.prompt;
@@ -1812,14 +1916,39 @@
       }
 
       inspectorDrawer.classList.add("open");
+      inspectorDrawer.inert = false;
       drawerOverlay.classList.add("open");
+      document.getElementById('btnCloseDrawer').focus({ preventScroll: true });
+      window.notifyHostHeight?.();
     };
 
-    function closeInspector() {
+    async function closeInspector(restorePosition = true) {
+      const epoch = ++detailEpoch;
+      const taskId = activeTask?.id;
       inspectorDrawer.classList.remove("open");
+      inspectorDrawer.inert = true;
       drawerOverlay.classList.remove("open");
       activeTask = null;
+      document.body.classList.remove('inspecting');
+      const focus = detailReturnFocus?.isConnected ? detailReturnFocus : taskId && document.querySelector(`[data-open-task="${CSS.escape(taskId)}"]`);
+      focus?.focus({ preventScroll: true });
+      window.notifyHostHeight?.();
+      if (!restorePosition) return;
+      if (!isEmbedded) { window.scrollTo(0, detailReturnScroll); return; }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const current = await captureViewport();
+      if (epoch !== detailEpoch || disposed) return;
+      let delta = detailReturnScroll - current;
+      while (Math.abs(delta) > 1) {
+        const step = Math.max(-1000, Math.min(1000, delta));
+        parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'wheel', deltaY: step }, hostOrigin);
+        delta -= step;
+      }
     }
+
+    // Embedded details stay in the document flow and share the host scrollbar.
+    if (isEmbedded) document.getElementById('mainArea').append(inspectorDrawer);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && activeTask) closeInspector(); });
 
     document.getElementById("btnCloseDrawer").onclick = closeInspector;
     drawerOverlay.onclick = closeInspector;
@@ -1891,6 +2020,10 @@
     // Scroll to Prompt Button
     document.getElementById("btnScrollPrompt").onclick = () => {
       switchView('tasks', true);
+      const console = document.getElementById('creationConsole');
+      console.hidden = !console.hidden;
+      document.getElementById('btnScrollPrompt').setAttribute('aria-expanded', String(!console.hidden));
+      if (console.hidden) return;
       const promptEl = document.getElementById("txtPrompt");
       promptEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       promptEl.focus();
@@ -1912,18 +2045,17 @@
       document.querySelectorAll('.mode-pill:not([data-mode="t2i"])').forEach(p => p.disabled = grok);
     });
     function loadCapabilities(data) {
-      try {
-        const grok = data.engines.find(x => x.engine === 'grok');
-        if (grok) {
-          document.getElementById('grokModelCard').hidden = false;
-          document.getElementById('grokModelName').textContent = grok.model;
-          document.getElementById('grokModelStatus').textContent = !grok.configured ? '未配置' : !grok.enabled ? '未启用' : grok.verification_status === 'verified' ? '已验证' : '已配置 · 生成待验证';
-        }
-        if (grok?.enabled && grok?.configured && !modelSelect.querySelector('[data-engine="grok"]')) {
-          const option = new Option(`Grok · ${grok.model}`, grok.model);
-          option.dataset.engine = 'grok'; modelSelect.add(option);
-        }
-      } catch { /* Discovery retries with task refresh. */ }
+      const engines = Array.isArray(data?.engines) ? data.engines : [];
+      const deck = document.getElementById('modelDeck');
+      deck.innerHTML = engines.length ? engines.map(engine => {
+        const status = engine.configured === false ? '未配置' : engine.enabled === false ? '未启用' : engine.verification_status === 'verified' ? '已验证' : engine.configured === true ? '已配置 · 生成待验证' : '已声明 · 健康状态未知';
+        return `<article class="deck-card"><div class="deck-head"><span class="tag-badge">${escapeHtml(engine.engine)}</span><span class="service-note">${status}</span></div><h3>${escapeHtml(engine.model || '未提供模型')}</h3><p>使用当前渠道进行图像生成。产物尺寸与任务耗时以实际结果为准。</p></article>`;
+      }).join('') : '<div class="state-panel">当前服务未提供模型能力声明。</div>';
+      const grok = engines.find(x => x.engine === 'grok');
+      if (grok?.enabled && grok?.configured && !modelSelect.querySelector('[data-engine="grok"]')) {
+        const option = new Option(`Grok · ${grok.model}`, grok.model);
+        option.dataset.engine = 'grok'; modelSelect.add(option);
+      }
     }
     // Form Submission
     document.getElementById("promptForm").onsubmit = async e => {
@@ -1968,7 +2100,7 @@
           engine: payload.engine,
           phase: res.phase || 'queued',
           requestedResolution: payload.resolution,
-          modelShort: model.startsWith('grok') ? model : model.includes('sunburst') ? 'sunburst 4k' : (model.includes('gemini') ? 'gemini-3.1-f' : 'flare'),
+          modelShort: model,
           resolution: "等待产物实测",
           pixels: "—",
           duration: "排队调度中",
@@ -2018,25 +2150,25 @@
       };
     }
 
-    // Cross-app Stream to Video MCP
-    document.getElementById("btnSendVideo").onclick = () => {
-      if (!activeTask) return;
-      alert(`🎬 一键流转到 Video MCP！\n\n已将图像产物 [${activeTask.id}]、4K 物理画幅及提示词打包。\n即将无缝载入 Video MCP 运镜工作台进行动态镜头生成。`);
-    };
-
     // Live Tasks Sync
     async function syncBackendTasks() {
+      if (syncingTasks || disposed || document.hidden) return;
+      syncingTasks = true;
+      document.getElementById('btnRefreshTasks').disabled = true;
       try {
         const tasksRes = await requestApi('/api/tasks?limit=50');
+        if (disposed) return;
+        if (!Array.isArray(tasksRes?.tasks)) throw new Error('任务响应格式无效');
         loadCapabilities(tasksRes.capabilities);
         if (tasksRes && Array.isArray(tasksRes.tasks)) {
+          taskLoadState = 'ready'; taskLoadError = ''; taskTotal = tasksRes.total ?? tasksRes.tasks.length;
           allTasks = tasksRes.tasks.map(t => {
             const req = t.request_params || {};
             const is4k = req.resolution === '4k';
             const action = req.action || 't2i';
             const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' || action === 'edit' ? '局部重绘' : '文生图');
             const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
-            const modelShort = modelName.startsWith('grok') ? modelName : modelName.includes('sunburst') ? 'sunburst 4k' : (modelName.includes('gemini') ? 'gemini-3.1-f' : 'flare');
+            const modelShort = modelName;
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
             const sourceArtifactId = req.source_artifact_id || '';
@@ -2068,17 +2200,38 @@
               hasCompare: Boolean(sourceArtifactId && (action === 'faceswap' || action === 'inpaint' || action === 'edit'))
             };
           });
+          updateTaskFilters();
           renderGallery();
+          document.querySelector('#embedStatusPill span:last-child').textContent = '已连接';
+          document.getElementById('embedStatusPill').dataset.state = 'ready';
           loadThumbnails();
         }
       } catch (e) {
-        console.error('Failed to sync backend tasks:', e);
+        if (disposed) return;
+        taskLoadState = 'error'; taskLoadError = e.message || '连接失败，请重试。';
+        document.querySelector('#embedStatusPill span:last-child').textContent = '连接异常';
+        document.getElementById('embedStatusPill').dataset.state = 'error';
+        if (!allTasks.length) document.getElementById('modelDeck').innerHTML = '<div class="state-panel" data-state="error">模型能力暂时无法读取，请在任务页重试。</div>';
+        renderGallery();
+      } finally {
+        syncingTasks = false;
+        document.getElementById('btnRefreshTasks').disabled = false;
       }
     }
 
     renderGallery();
     syncBackendTasks();
-    setInterval(syncBackendTasks, 5000);
+    const taskPoll = setInterval(syncBackendTasks, 5000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
+    window.addEventListener('pagehide', () => {
+      disposed = true; clearInterval(taskPoll); hostResizeObserver?.disconnect();
+      for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
+      viewportRequests.clear();
+      for (const req of pendingReqs.values()) { clearTimeout(req.timer); req.reject(new Error('页面已关闭')); }
+      pendingReqs.clear();
+      for (const url of artifactBlobMap.values()) URL.revokeObjectURL(url);
+      artifactBlobMap.clear();
+    });
   </script>
 </body>
 </html>
