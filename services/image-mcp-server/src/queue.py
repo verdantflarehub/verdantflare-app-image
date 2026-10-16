@@ -6,6 +6,7 @@ import time
 import hashlib
 import json
 import threading
+import base64
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
@@ -14,6 +15,7 @@ from .providers.codex import CodexProvider, DEFAULT_IMAGE_MODEL
 from .providers.gemini import GeminiProvider, DEFAULT_GEMINI_MODEL
 from .tasks import TaskRecord, TaskStore
 from .providers.grok import GrokImageProvider, GrokError
+from .providers.google_channel import ChannelUnavailable
 
 
 @dataclass
@@ -45,11 +47,20 @@ class TaskQueueManager:
         artifacts: ArtifactStore,
         codex_provider: CodexProvider,
         gemini_provider: GeminiProvider,
+        google_channel=None,
+        google_authorize=None,
+        grok_channel=None,
+        chatgpt_channel=None,
     ) -> None:
         self.tasks = tasks
         self.artifacts = artifacts
         self.codex_provider = codex_provider
         self.gemini_provider = gemini_provider
+        self.google_channel = google_channel
+        self.chatgpt_channel = chatgpt_channel
+        self.grok_channel = grok_channel
+        self.google_authorize = google_authorize
+        self.google_lock = threading.Lock()
         self.grok_provider = GrokImageProvider()
         self.grok_sem = asyncio.Semaphore(max(1, int(os.getenv("XAI_IMAGE_MAX_CONCURRENCY", "1"))))
         self.grok_lock = threading.Lock()
@@ -82,6 +93,7 @@ class TaskQueueManager:
             task = asyncio.create_task(self._worker_loop(i))
             self._worker_tasks.append(task)
         self._worker_tasks.append(asyncio.create_task(self._collect_grok()))
+        self._worker_tasks.append(asyncio.create_task(self._collect_channels()))
 
         # 3. 恢复历史未消费的 queued 任务
         pending = self.tasks.get_queued_tasks()
@@ -120,17 +132,62 @@ class TaskQueueManager:
     def prepare(self, engine, project_id, params):
         if engine not in {"codex", "gemini", "grok"}:
             raise ValueError("unsupported_engine")
-        if engine == "grok":
-            return self.grok_provider.normalize(params, project_id, self.artifacts)
         params = dict(params)
+        # Internal route/authority cannot be supplied in generation parameters.
+        for internal in ('channel_runtime', 'channel_authority'):
+            if internal in params:
+                raise ValueError('reserved_channel_parameter')
+        if engine == 'grok':
+            params = self.grok_provider.normalize(params, project_id, self.artifacts, channel=self.grok_channel is not None)
+        channel = {'gemini': self.google_channel, 'grok': self.grok_channel, 'codex': self.chatgpt_channel}.get(engine)
+        if channel is not None:
+            if self.google_authorize is None:
+                raise ValueError('project_authorization_not_configured')
+            import uuid
+            from decimal import Decimal, InvalidOperation
+            if params.get('channel_account_id') is not None:
+                params['channel_account_id'] = str(uuid.UUID(params['channel_account_id']))
+            ceiling = params.get('budget_limit')
+            try:
+                if not isinstance(ceiling, str) or len(ceiling) > 32:
+                    raise ValueError('invalid_budget_limit')
+                amount = Decimal(ceiling)
+                if not amount.is_finite() or amount <= 0 or amount > Decimal('1000000'):
+                    raise ValueError('invalid_budget_limit')
+            except InvalidOperation:
+                raise ValueError('invalid_budget_limit') from None
+            if engine == 'gemini' and params.get('model') not in (None, '', DEFAULT_GEMINI_MODEL):
+                raise ValueError('capability_not_supported')
+            params['channel_authority'] = self.google_authorize(project_id, None)
+            params['channel_runtime'] = {'gemini': 'google-channel-v1', 'grok': 'grok-channel-v1', 'codex': 'chatgpt-channel-v1'}[engine]
+        elif params.get('channel_account_id') is not None or params.get('budget_limit') is not None:
+            raise ValueError('channel_parameters_not_supported')
+        if engine == "grok":
+            return params
         params["quality"] = params.get("quality") or ("high" if params["action"] == "generate" else "auto")
         return params
 
     def capabilities(self):
-        return {"default_engine": "codex", "engines": [
+        grok = self.grok_provider.capability()
+        if self.grok_channel is not None:
+            grok.update(configured=True, adapter_version='grok-channel-v1')
+        engines = [
             {"engine": "codex", "model": DEFAULT_IMAGE_MODEL, "enabled": True},
             {"engine": "gemini", "model": DEFAULT_GEMINI_MODEL, "enabled": True},
-            self.grok_provider.capability()]}
+            grok]
+        for engine in engines:
+            name, channel = {
+                'codex': ('chatgpt', self.chatgpt_channel),
+                'gemini': ('google', self.google_channel),
+                'grok': ('grok', self.grok_channel),
+            }[engine['engine']]
+            if channel is not None:
+                engine.update(channel=name, adapter_version=name + '-channel-v1',
+                    account_selection='explicit_or_configured_default',
+                    budget_limit_required=True, budget_currency='USD',
+                    budget_limit_kind='reservation_ceiling',
+                    project_write_authorization_required=True)
+        return {"default_engine": "codex", "engines": engines}
 
     def _get_semaphore(self, engine: str) -> asyncio.Semaphore:
         if engine.lower() == "grok":
@@ -156,7 +213,10 @@ class TaskQueueManager:
                 loop = asyncio.get_running_loop()
 
                 try:
-                    if job.engine == "grok":
+                    if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
+                        await loop.run_in_executor(None, self._execute_channel, job)
+                        continue
+                    elif job.engine == "grok":
                         await loop.run_in_executor(None, self._execute_grok, job)
                     elif job.action == "generate":
                         await loop.run_in_executor(None, self._execute_generate, job)
@@ -174,6 +234,21 @@ class TaskQueueManager:
                     print(f"✅ [TaskQueue] 任务成功: {job.task_id} (action: {job.action}, engine: {job.engine}) 耗时: {duration}s", flush=True)
                 except Exception as exc:
                     duration = round(time.time() - start_time, 2)
+                    if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
+                        record = self.tasks.get(job.task_id)
+                        # This worker owns the claimed task. The submit fence is
+                        # persisted before any POST, so a missing phase proves
+                        # this attempt failed before sending. Never apply this
+                        # inference to recovered tasks after a process restart.
+                        if record.phase is None:
+                            self.tasks.update_status(job.task_id, 'failed',
+                                error='channel_preparation_failed', phase='failed',
+                                duration_seconds=duration)
+                        elif record.status == 'running':
+                            self.tasks.update_status(job.task_id, 'running',
+                                error='channel_recovery_pending',
+                                phase='collecting' if record.phase == 'collecting' else 'submission_unknown')
+                        continue
                     if job.engine == "grok":
                         code = exc.code if isinstance(exc, GrokError) else "collection_unavailable"
                         uncertain = not isinstance(exc, GrokError) or exc.uncertain
@@ -192,6 +267,109 @@ class TaskQueueManager:
                     )
                 finally:
                     self._queue.task_done()
+
+    def _execute_google(self, job, recovery=False):
+        return self._execute_channel(job, recovery)
+
+    def _execute_channel(self, job, recovery=False):
+        # The worker and collector serialize collection; only the claimed worker
+        # may submit. A crash anywhere after claiming leaves GET-only recovery.
+        with self.google_lock:
+            record = self.tasks.get(job.task_id)
+            if record.status != 'running':
+                return
+            runtime = job.params.get('channel_runtime')
+            is_grok = runtime == 'grok-channel-v1'
+            is_chatgpt = runtime == 'chatgpt-channel-v1'
+            channel_name, channel = {
+                'google-channel-v1': ('google', self.google_channel),
+                'grok-channel-v1': ('grok', self.grok_channel),
+                'chatgpt-channel-v1': ('chatgpt', self.chatgpt_channel),
+            }.get(runtime, ('unknown', None))
+            if channel is None or self.google_authorize is None:
+                raise ChannelUnavailable('channel_not_configured')
+            actor = self.google_authorize(job.project_id, job.params.get('channel_authority'))
+            if actor.get('organization_id') != job.params.get('channel_authority', {}).get('organization_id'):
+                raise ChannelUnavailable('channel_authority_mismatch')
+            organization = actor['organization_id']
+            if recovery or record.phase is not None:
+                result = channel.recover(organization, job.task_id, job.task_id)
+            else:
+                images = []
+                ids = [job.params.get('source_artifact_id')]
+                ids.extend(job.params.get('reference_artifact_ids') or [])
+                if not is_chatgpt:
+                    ids.append(job.params.get('mask_artifact_id'))
+                for artifact_id in dict.fromkeys(item for item in ids if item):
+                    artifact = self.artifacts.get(artifact_id, job.project_id)
+                    data = self.artifacts.content_path(artifact).read_bytes()
+                    if hashlib.sha256(data).hexdigest() != artifact.sha256:
+                        raise ValueError('source_integrity_failed')
+                    if is_grok and job.params.get('source_sha256') != artifact.sha256:
+                        raise ValueError('source_integrity_failed')
+                    images.append({'mime_type': artifact.media_type,
+                                   'data': base64.b64encode(data).decode()})
+                payload = {'prompt': job.params['prompt'], 'images': images}
+                if is_grok:
+                    payload = {key: job.params[key] for key in ('prompt', 'action', 'resolution')}
+                    if job.action == 'edit':
+                        payload['image'] = images[0]
+                    else:
+                        payload['aspect_ratio'] = job.params['aspect_ratio']
+                if is_chatgpt:
+                    p = job.params
+                    size = {'16:9': '2048x1152', '9:16': '1152x2048', '1:1': '1024x1024',
+                            '4:3': '1792x1344', '3:4': '1344x1792'}.get(p.get('aspect_ratio'), p.get('size') or '2048x1152')
+                    payload = {'prompt': p['prompt'], 'action': 'edit' if job.action == 'inpaint' else job.action, 'images': images,
+                        'size': size, 'prefer_4k': (p.get('resolution') or '2k').lower() == '4k',
+                        'quality': p.get('quality') or ('high' if job.action == 'generate' else 'auto'),
+                        'background': p.get('background') or 'auto'}
+                    if p.get('instructions') is not None:
+                        payload['instructions'] = p['instructions']
+                    if p.get('mask_artifact_id'):
+                        mask = self.artifacts.get(p['mask_artifact_id'], job.project_id)
+                        data = self.artifacts.content_path(mask).read_bytes()
+                        if hashlib.sha256(data).hexdigest() != mask.sha256:
+                            raise ValueError('source_integrity_failed')
+                        payload['mask'] = {'mime_type': mask.media_type, 'data': base64.b64encode(data).decode()}
+                self.tasks.update_status(job.task_id, 'running', phase='submitting')
+                result = channel.submit(organization, job.task_id, job.task_id,
+                    job.params.get('model') or (DEFAULT_IMAGE_MODEL if is_chatgpt else DEFAULT_GEMINI_MODEL),
+                    payload,
+                    job.params.get('channel_account_id'), job.params.get('budget_limit'))
+            if result['accepted'] is False or result.get('state') == 'failed':
+                self.tasks.update_status(job.task_id, 'failed',
+                    error='channel_call_failed', phase='failed')
+            elif result.get('state') == 'completed' and result['accepted'] is True:
+                self.tasks.update_status(job.task_id, 'running', phase='collecting')
+                data, media_type = channel.result(organization, job.task_id, result['call_id'])
+                extension = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp'}[media_type]
+                artifact = self.artifacts.create_from_bytes(project_id=job.project_id,
+                    artifact_id='art-' + hashlib.sha256(job.task_id.encode()).hexdigest()[:16],
+                    filename=job.task_id + extension, data=data, media_type=media_type,
+                    metadata={'engine': job.engine, 'channel': channel_name,
+                              'channel_call_id': result['call_id'], 'task_id': job.task_id})
+                self.tasks.update_status(job.task_id, 'completed', artifact_id=artifact.artifact_id,
+                                         error='', phase='completed')
+            else:
+                self.tasks.update_status(job.task_id, 'running',
+                    error='submission_unknown' if result['accepted'] is None else '',
+                    phase='submission_unknown' if result['accepted'] is None else 'channel_running')
+
+    async def _collect_channels(self):
+        while self._running:
+            await asyncio.sleep(15)
+            records, _ = self.tasks.list_tasks(status='running', limit=10000)
+            for record in records:
+                if record.request_params.get('channel_runtime') not in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
+                    continue
+                try:
+                    await asyncio.to_thread(self._execute_channel, TaskJob(record.task_id,
+                        record.project_id, record.engine, record.request_params['action'],
+                        record.request_params), True)
+                except Exception:
+                    # Read/collection failure never re-enqueues a generation POST.
+                    pass
 
     def _grok_journal(self, task_id):
         root = self.tasks.db_path.parent / ".grok-results"
@@ -227,6 +405,8 @@ class TaskQueueManager:
     def recover_grok(self):
         records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000)
         for rec in records:
+            if rec.request_params.get('channel_runtime') == 'grok-channel-v1':
+                continue
             if self._grok_journal(rec.task_id).with_suffix(".json").exists():
                 try:
                     self._execute_grok(TaskJob(rec.task_id, rec.project_id, rec.engine,
@@ -242,6 +422,8 @@ class TaskQueueManager:
             # Only persisted results are retried; never repeat a POST.
             records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000)
             for rec in records:
+                if rec.request_params.get('channel_runtime') == 'grok-channel-v1':
+                    continue
                 if rec.phase == "collect_retry" and self._grok_journal(rec.task_id).with_suffix(".json").exists():
                     try:
                         await asyncio.to_thread(self._execute_grok, TaskJob(rec.task_id, rec.project_id,

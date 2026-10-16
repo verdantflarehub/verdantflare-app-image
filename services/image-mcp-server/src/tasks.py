@@ -209,6 +209,7 @@ class TaskStore:
         with self._get_conn() as conn:
             changed = conn.execute(
                 "UPDATE tasks SET status='running', phase=CASE WHEN engine='grok' "
+                "AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') != 'grok-channel-v1' "
                 "THEN 'submitting' ELSE phase END, updated_at=? "
                 "WHERE task_id=? AND status='queued'",
                 (datetime.now(timezone.utc).isoformat(), task_id),
@@ -342,6 +343,7 @@ class TaskStore:
                     error = '服务重启，未完成任务已自动中断',
                     updated_at = ?
                 WHERE status = 'running' AND engine != 'grok'
+                  AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') NOT IN ('google-channel-v1', 'chatgpt-channel-v1')
                 """,
                 (now,),
             )

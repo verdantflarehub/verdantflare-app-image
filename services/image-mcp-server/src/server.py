@@ -4,6 +4,7 @@ import contextlib
 import hmac
 import json
 import os
+import httpx
 from pathlib import Path
 from typing import Any
 
@@ -31,16 +32,33 @@ from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProvid
 from .queue import TaskQueueManager
 from .registry import EtcdRegistry
 from .tasks import TaskNotFound, TaskStore
+from .channel_authority import CALLER, authorize
+from .providers.google_channel import GoogleChannel
+from .providers.channel import ImageChannel
 
 artifacts = ArtifactStore.from_environment()
 tasks = TaskStore.from_environment()
 codex_provider = CodexProvider()
 gemini_provider = GeminiProvider()
+channel_client = httpx.Client(trust_env=False)
+google_url = os.environ.get('IMAGE_GOOGLE_CHANNEL_URL', '')
+google_channel = GoogleChannel(google_url, os.environ.get('IMAGE_GOOGLE_CHANNEL_TOKEN', ''),
+                               channel_client) if google_url else None
+grok_url = os.environ.get('IMAGE_GROK_CHANNEL_URL', '')
+grok_channel = ImageChannel(grok_url, os.environ.get('IMAGE_GROK_CHANNEL_TOKEN', ''),
+                            channel_client) if grok_url else None
+chatgpt_url = os.environ.get('IMAGE_CHATGPT_CHANNEL_URL', '')
+chatgpt_channel = ImageChannel(chatgpt_url, os.environ.get('IMAGE_CHATGPT_CHANNEL_TOKEN', ''),
+                               channel_client) if chatgpt_url else None
 queue_manager = TaskQueueManager(
     tasks=tasks,
     artifacts=artifacts,
     codex_provider=codex_provider,
     gemini_provider=gemini_provider,
+    google_channel=google_channel,
+    grok_channel=grok_channel,
+    chatgpt_channel=chatgpt_channel,
+    google_authorize=lambda project_id, authority: authorize(channel_client, project_id, authority),
 )
 
 mcp = MCPServer("VerdantFlare Image")
@@ -147,9 +165,16 @@ IMAGE_TOOLS_SCHEMA = [
     },
 ]
 
+for tool in IMAGE_TOOLS_SCHEMA:
+    if tool['name'] in {'image.create', 'image.generate', 'image.edit', 'image.inpaint'}:
+        tool['inputSchema']['properties'].update({
+            'channel_account_id': {'type': 'string', 'description': 'Channel account for the selected engine; omitted uses explicit default'},
+            'budget_limit': {'type': 'string', 'description': 'Maximum USD reservation, not an estimated charge'},
+        })
+
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.16"
+SERVICE_VERSION = "v0.2.17"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -204,6 +229,8 @@ async def image_generate(
     quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
+    channel_account_id: str | None = None,
+    budget_limit: str | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词生成图像。
 
@@ -233,6 +260,10 @@ async def image_generate(
     }
     if instructions:
         params["instructions"] = str(instructions).strip()
+    if channel_account_id is not None:
+        params["channel_account_id"] = channel_account_id
+    if budget_limit is not None:
+        params["budget_limit"] = budget_limit
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
@@ -272,6 +303,8 @@ async def image_create(
     quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
+    channel_account_id: str | None = None,
+    budget_limit: str | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
     import uuid
@@ -289,6 +322,8 @@ async def image_create(
         quality=quality,
         background=background,
         instructions=instructions,
+        channel_account_id=channel_account_id,
+        budget_limit=budget_limit,
     )
 
 
@@ -306,6 +341,8 @@ async def image_edit(
     resolution: str | None = None,
     quality: str | None = None,
     background: str = "auto",
+    channel_account_id: str | None = None,
+    budget_limit: str | None = None,
 ) -> types.CallToolResult:
     """基于既有参考底图执行多模态指令编辑、骨相锁定换装或多图融合合成。
 
@@ -334,6 +371,10 @@ async def image_edit(
         "quality": quality,
         "background": background,
     }
+    if channel_account_id is not None:
+        params["channel_account_id"] = channel_account_id
+    if budget_limit is not None:
+        params["budget_limit"] = budget_limit
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
@@ -372,6 +413,8 @@ async def image_inpaint(
     engine: str = "codex",
     model: str = "",
     background: str = "auto",
+    channel_account_id: str | None = None,
+    budget_limit: str | None = None,
 ) -> types.CallToolResult:
     """基于遮罩（Mask）的精准局部重绘与无痕物体抹除，支持可选服装/主体参考图融合。"""
     resolved_model = model or (
@@ -387,6 +430,10 @@ async def image_inpaint(
         "model": resolved_model,
         "background": background,
     }
+    if channel_account_id is not None:
+        params["channel_account_id"] = channel_account_id
+    if budget_limit is not None:
+        params["budget_limit"] = budget_limit
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
@@ -562,6 +609,18 @@ class MCPPathRewriteMiddleware(BaseHTTPMiddleware):
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # Trust identity headers only when Studio's internal bearer is verified.
+        token = os.environ.get('IMAGE_MCP_BEARER_TOKEN', '').strip()
+        valid = bool(token) and hmac.compare_digest(request.headers.get('authorization', ''), 'Bearer ' + token)
+        caller = {'user_id': request.headers.get('X-User-Id', ''),
+                  'organization_id': request.headers.get('X-Organization-Id', '')}
+        context = CALLER.set(caller if valid else None)
+        try:
+            return await self._dispatch(request, call_next)
+        finally:
+            CALLER.reset(context)
+
+    async def _dispatch(self, request: Request, call_next):
         path = request.url.path
         # 放行健康检查、看板页面（前端自适应 Token 输入与存储）、API（内部鉴权）与产物下载
         if (

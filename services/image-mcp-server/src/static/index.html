@@ -1712,6 +1712,7 @@
          ======================================================================= -->
     <section class="tab-view" id="view-mcp" role="tabpanel">
       <p class="service-note">Image MCP 提供图像生成、编辑、状态查询与产物读取。统一经 Studio 受控入口（STUDIO_MCP_URL）访问，逐字保留提示词（Verbatim Prompt Passthrough）。</p>
+      <p class="service-note">启用渠道接入的引擎：使用 channel_account_id 选择账号，省略时仅使用已明确设置的默认账号；budget_limit 为本次美元预留上限，不是预算估算或结算金额。调用前通过 image.capabilities 查看当前要求，项目须有写入权限。</p>
       <div class="deck-grid">
         <div class="deck-card">
           <div class="deck-head">

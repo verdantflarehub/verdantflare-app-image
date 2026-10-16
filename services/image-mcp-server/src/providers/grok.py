@@ -66,9 +66,9 @@ class GrokImageProvider:
                 "aspect_ratios": ASPECT_RATIOS, "resolutions": ["1k", "2k"],
                 "max_reference_images": 1, "inpaint": False}
 
-    def normalize(self, params: dict, project_id: str, artifacts) -> dict:
+    def normalize(self, params: dict, project_id: str, artifacts, *, channel: bool = False) -> dict:
         p = dict(params)
-        if not self.enabled or not self.configured():
+        if not self.enabled or self.model not in IMAGE_MODELS or (not channel and not self.configured()):
             raise GrokError("provider_not_configured")
         if os.getenv("XAI_IMAGE_RESPONSE_MODE", "sync_base64") != "sync_base64":
             raise GrokError("unsupported_response_mode")
@@ -98,7 +98,8 @@ class GrokImageProvider:
             p.pop("aspect_ratio", None)
         for name in ("quality", "background", "instructions", "size", "mask_artifact_id", "reference_artifact_ids"):
             p.pop(name, None)
-        p["endpoint_profile_id"] = self.profile
+        if not channel:
+            p["endpoint_profile_id"] = self.profile
         p["adapter_version"] = ADAPTER_VERSION
         return p
 

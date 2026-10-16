@@ -531,6 +531,9 @@ async def api_create_task(request: Request) -> Response:
     queue_mgr = getattr(request.app.state, "queue_manager", None)
 
     try:
+        for key in ("channel_account_id", "budget_limit"):
+            if body.get(key) is not None:
+                params[key] = body[key]
         params = queue_mgr.prepare(engine, project_id, params)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

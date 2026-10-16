@@ -29,7 +29,7 @@ class TestTasks(unittest.TestCase):
                 project_id="proj-a",
                 idempotency_key="unit-1/attempt-1",
                 engine="gemini",
-                request_params={"prompt": "cyberpunk city"},
+                request_params={"prompt": "cyberpunk city", "model": "gemini-3.1-flash-image"},
             )
             self.assertEqual(t2.task_id, t1.task_id)
 
