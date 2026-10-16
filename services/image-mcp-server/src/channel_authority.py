@@ -16,6 +16,9 @@ def create_client():
     ca_file = os.environ.get('IMAGE_PROJECT_CA_FILE', '').strip()
     if ca_file:
         context.load_verify_locations(cafile=ca_file)
+    ca_pem = os.environ.get('IMAGE_PROJECT_CA_PEM', '').strip()
+    if ca_pem:
+        context.load_verify_locations(cadata=ca_pem)
     return httpx.Client(verify=context, trust_env=False, follow_redirects=False)
 
 

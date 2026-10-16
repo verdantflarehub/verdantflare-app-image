@@ -21,7 +21,7 @@ class ChannelAuthorityTests(unittest.TestCase):
             contexts.append(value)
             return value
 
-        with patch.dict('os.environ', {'IMAGE_PROJECT_CA_FILE': '', 'HTTPS_PROXY': 'http://127.0.0.1:1'}):
+        with patch.dict('os.environ', {'IMAGE_PROJECT_CA_FILE': '', 'IMAGE_PROJECT_CA_PEM': '', 'HTTPS_PROXY': 'http://127.0.0.1:1'}):
             with patch('src.channel_authority.ssl.create_default_context', side_effect=context):
                 with create_client() as client:
                     self.assertFalse(client.trust_env)
@@ -38,6 +38,11 @@ class ChannelAuthorityTests(unittest.TestCase):
                 with self.subTest(exists=exists), patch.dict('os.environ', {'IMAGE_PROJECT_CA_FILE': str(path)}):
                     with self.assertRaises(OSError):
                         create_client()
+
+    def test_invalid_inline_ca_fails_closed(self):
+        with patch.dict('os.environ', {'IMAGE_PROJECT_CA_FILE': '', 'IMAGE_PROJECT_CA_PEM': 'invalid PEM'}):
+            with self.assertRaises(ssl.SSLError):
+                create_client()
 
     def test_verified_actor_and_project_write_permission(self):
         def handle(request):
