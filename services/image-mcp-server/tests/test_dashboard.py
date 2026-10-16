@@ -129,10 +129,22 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertIn("channel-group", html)
         self.assertIn("model-cap-row", html)
         self.assertIn("model-quota-strip", html)
+        self.assertIn("detail-shell", html)
+        self.assertIn("inspect-head", html)
+        self.assertIn("inspect-layout", html)
+        self.assertIn("output-pane", html)
+        self.assertIn("input-pane", html)
+        self.assertIn("result-stage", html)
+        self.assertIn("inspect-tech", html)
+        self.assertIn("zoomDialog", html)
+        self.assertIn("prompt-ref-chip", html)
         self.assertIn("ref-image-grid", html)
         self.assertIn("object-fit: contain", html)
         self.assertIn("ref-empty-box", html)
         self.assertIn("openZoomModal", html)
+        self.assertNotIn("compare-container", html)
+        self.assertNotIn("btnScrollPrompt", html)
+        self.assertNotIn("creationConsole", html)
 
 
 if __name__ == "__main__":
