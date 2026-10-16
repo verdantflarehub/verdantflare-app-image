@@ -1,14 +1,44 @@
 import json
+import ssl
+import tempfile
 import unittest
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 
-from src.channel_authority import CALLER, authorize
+from src.channel_authority import CALLER, authorize, create_client
 
 
 class ChannelAuthorityTests(unittest.TestCase):
+    def test_tls_client_keeps_certificate_and_hostname_verification(self):
+        contexts = []
+        factory = ssl.create_default_context
+
+        def context():
+            value = factory()
+            contexts.append(value)
+            return value
+
+        with patch.dict('os.environ', {'IMAGE_PROJECT_CA_FILE': '', 'HTTPS_PROXY': 'http://127.0.0.1:1'}):
+            with patch('src.channel_authority.ssl.create_default_context', side_effect=context):
+                with create_client() as client:
+                    self.assertFalse(client.trust_env)
+                    self.assertFalse(client.follow_redirects)
+        self.assertTrue(contexts[0].check_hostname)
+        self.assertEqual(contexts[0].verify_mode, ssl.CERT_REQUIRED)
+
+    def test_invalid_ca_fails_without_unverified_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'ca.pem'
+            for exists in (False, True):
+                if exists:
+                    path.write_text('not a certificate')
+                with self.subTest(exists=exists), patch.dict('os.environ', {'IMAGE_PROJECT_CA_FILE': str(path)}):
+                    with self.assertRaises(OSError):
+                        create_client()
+
     def test_verified_actor_and_project_write_permission(self):
         def handle(request):
             self.assertEqual(json.loads(request.content), {'project_id': 'project', 'require_write': True})

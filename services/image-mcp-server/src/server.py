@@ -32,7 +32,7 @@ from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProvid
 from .queue import TaskQueueManager
 from .registry import EtcdRegistry
 from .tasks import TaskNotFound, TaskStore
-from .channel_authority import CALLER, authorize
+from .channel_authority import CALLER, authorize, create_client as create_authority_client
 from .providers.google_channel import GoogleChannel
 from .providers.channel import ImageChannel
 
@@ -41,6 +41,7 @@ tasks = TaskStore.from_environment()
 codex_provider = CodexProvider()
 gemini_provider = GeminiProvider()
 channel_client = httpx.Client(trust_env=False)
+authority_client = create_authority_client()
 google_url = os.environ.get('IMAGE_GOOGLE_CHANNEL_URL', '')
 google_channel = GoogleChannel(google_url, os.environ.get('IMAGE_GOOGLE_CHANNEL_TOKEN', ''),
                                channel_client) if google_url else None
@@ -58,7 +59,7 @@ queue_manager = TaskQueueManager(
     google_channel=google_channel,
     grok_channel=grok_channel,
     chatgpt_channel=chatgpt_channel,
-    google_authorize=lambda project_id, authority: authorize(channel_client, project_id, authority),
+    google_authorize=lambda project_id, authority: authorize(authority_client, project_id, authority),
 )
 
 mcp = MCPServer("VerdantFlare Image")
@@ -174,7 +175,7 @@ for tool in IMAGE_TOOLS_SCHEMA:
 
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.18"
+SERVICE_VERSION = "v0.2.19"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
