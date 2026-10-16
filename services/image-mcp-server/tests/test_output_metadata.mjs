@@ -11,7 +11,7 @@ export async function runOutputMetadataTests() {
     new vm.Script(match[1]);
   }
   const source = html.slice(html.indexOf('    function outputMediaLabels('), html.indexOf('    function updateCardThumb('));
-  let requests = 0, closes = 0, renders = 0, updates = 0;
+  let requests = 0, closes = 0, renders = 0, updates = 0, outputUpdates = 0;
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const png = new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])]);
@@ -25,6 +25,7 @@ export async function runOutputMetadataTests() {
     requestApi: async () => { requests++; await gate; return png; },
     createImageBitmap: async () => ({ width: 2048, height: 1152, close: () => { closes++; } }),
     renderGallery: () => { renders++; },
+    updateTaskOutput: () => { outputUpdates++; },
     updateInspectorImages: () => { updates++; }
   });
   vm.runInContext(source, context);
@@ -76,7 +77,8 @@ export async function runOutputMetadataTests() {
   assert.equal(context.activeTask.aspectRatio, '16:9');
   assert.equal(context.activeTask.resShort, '2048×1152 px');
   assert.equal(context.activeTask.img, 'blob:original');
-  assert.equal(renders, 1);
+  assert.equal(renders, 0, 'image loading must not rebuild the gallery');
+  assert.equal(outputUpdates, 1);
   assert.equal(updates, 1);
   assert.equal(await context.getArtifactBlobUrl('output'), 'blob:original');
   assert.equal(requests, 1);
@@ -89,6 +91,23 @@ export async function runOutputMetadataTests() {
   context.disposed = true;
   assert.equal(await context.getArtifactBlobUrl('late-output'), '');
   assert.equal(context.artifactMediaMap.has('late-output'), false);
+  const spans = Array.from({ length: 5 }, () => ({ textContent: 'old' }));
+  const cell = { textContent: 'old' };
+  context.CSS = { escape: value => value };
+  context.galleryContainer = { querySelectorAll: () => spans };
+  context.taskTableContainer = { querySelector: () => cell };
+  let thumbnailUpdates = 0;
+  context.updateCardThumb = () => { thumbnailUpdates++; };
+  vm.runInContext(html.slice(html.indexOf('    function taskStructureKey('), html.indexOf('    let thumbnailLoadInProgress')), context);
+  const task = { id: 'one', status: 'succeeded', artifactId: 'output', modeCode: 'I2I' };
+  const loaded = { ...task, ...labels({ width: 1672, height: 941, format: 'PNG', sizeBytes: 2080251 }), img: 'blob:original' };
+  assert.equal(context.taskStructureKey([task]), context.taskStructureKey([loaded]), 'media completion and subsequent polls preserve the list structure');
+  assert.notEqual(context.taskStructureKey([loaded]), context.taskStructureKey([{ ...loaded, status: 'failed' }]));
+  assert.notEqual(context.taskStructureKey([loaded]), context.taskStructureKey([]));
+  context.updateTaskOutput(loaded);
+  assert.equal(thumbnailUpdates, 1);
+  assert.deepEqual(spans.map(span => span.textContent), ['I2I', 'PNG', '≈16:9', '1672×941 px', '2.08MB']);
+  assert.equal(cell.textContent, 'I2I · PNG · ≈16:9 · 1672×941 px · 2.08MB');
   return 'Passed: script syntax, exact dimensions/ratios, file sizes/formats, unknown output, decode failure, shared loading, polling race, cache and disposal.';
 }
 

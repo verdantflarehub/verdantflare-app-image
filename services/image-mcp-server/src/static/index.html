@@ -2114,7 +2114,7 @@
     let modelChannelFilter = "all";
     let latestRuntimeEngines = [];
     let taskLoadState = 'loading', taskLoadError = '', taskTotal = 0, taskView = 'gallery';
-    let syncingTasks = false, disposed = false, lastGalleryMarkup = '', lastTableMarkup = '';
+    let syncingTasks = false, disposed = false, lastGalleryMarkup = '', lastTableMarkup = '', lastTaskStructure = '';
     let detailReturnFocus = null, detailReturnScroll = 0, detailEpoch = 0;
     let pendingDetailId = '';
     function applyImageRoute(path) {
@@ -2229,18 +2229,16 @@
           artifactBlobMap.set(artifactId, url);
           previewBlobs.set(url, blob);
           artifactMediaMap.set(artifactId, media);
-          let outputChanged = false;
           for (const task of allTasks) {
             if (task.artifactId === artifactId) {
               Object.assign(task, outputMediaLabels(media), { img: url });
-              outputChanged = true;
+              updateTaskOutput(task);
             }
           }
           if (activeTask?.artifactId === artifactId) {
             Object.assign(activeTask, outputMediaLabels(media), { img: url });
             updateInspectorImages(activeTask);
           }
-          if (outputChanged) renderGallery();
           return url;
         } catch (err) {
           console.warn(`Artifact ${artifactId} load failed:`, err);
@@ -2268,6 +2266,24 @@
           thumb.insertBefore(imgEl, thumb.firstChild);
         }
       }
+    }
+
+    function taskStructureKey(tasks) {
+      // Media arrives independently of task state. It must not invalidate list DOM.
+      return JSON.stringify(tasks.map(({ img, resShort, resolution, aspectRatio, pixels, formatLabel, sizeLabel, ...task }) => task));
+    }
+
+    function updateTaskOutput(task) {
+      if (task.img) updateCardThumb(task.id, task.img, task.title);
+      const key = CSS.escape(task.id);
+      const labels = [task.modeCode, task.formatLabel, task.aspectRatio, task.resShort, task.sizeLabel];
+      const spans = galleryContainer.querySelectorAll(`.task-card[data-task-id="${key}"] .card-foot .tags span`);
+      spans.forEach((span, index) => {
+        if (span.textContent !== labels[index]) span.textContent = labels[index];
+      });
+      const cell = taskTableContainer.querySelector(`[data-output-task="${key}"]`);
+      const text = labels.join(' · ');
+      if (cell && cell.textContent !== text) cell.textContent = text;
     }
 
     let thumbnailLoadInProgress = false;
@@ -2337,7 +2353,13 @@
       if (state === 'empty') taskState.innerHTML = `<h3>${allTasks.length ? '没有匹配的任务' : '暂无图像任务'}</h3><p>${allTasks.length ? '请调整状态、模型、渠道或搜索条件。' : '通过 Studio 或 Image MCP 工具提交图像任务后将在此实时显示。'}</p>`;
       galleryContainer.hidden = empty || taskView !== 'gallery';
       taskTableContainer.hidden = empty || taskView !== 'table';
-      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td><button data-open-task="${escapeHtml(t.id)}">查看</button></td></tr>`).join('')}</tbody></table>`;
+      const structure = taskStructureKey(filtered);
+      if (structure === lastTaskStructure) {
+        filtered.forEach(updateTaskOutput);
+        return;
+      }
+      lastTaskStructure = structure;
+      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num" data-output-task="${escapeHtml(t.id)}">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td><button data-open-task="${escapeHtml(t.id)}">查看</button></td></tr>`).join('')}</tbody></table>`;
       if (tableMarkup !== lastTableMarkup) { taskTableContainer.innerHTML = tableMarkup; lastTableMarkup = tableMarkup; }
       if (empty) { galleryContainer.replaceChildren(); lastGalleryMarkup = ''; return; }
       const markup = filtered.map(task => {
@@ -2924,7 +2946,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.13',
+        version: 'v0.2.14',
         kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
         billing: '本地算力 (local_resources)',
         models: [
@@ -2964,7 +2986,7 @@
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.13',
+        version: 'v0.2.14',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
@@ -3015,7 +3037,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.13',
+            version: 'v0.2.14',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
