@@ -99,8 +99,12 @@ class TestTasks(unittest.TestCase):
             self.assertEqual(recovered_count, 1)
 
             recovered_task = store.get(t.task_id)
-            self.assertEqual(recovered_task.status, "failed")
+            self.assertEqual(recovered_task.status, "running")
+            self.assertEqual(recovered_task.phase, "submission_unknown")
             self.assertIn("服务重启", recovered_task.error)
+            self.assertEqual(store.recover_hanging_tasks(), 0)
+            self.assertEqual(store.get_queued_tasks(), [])
+            self.assertFalse(store.claim_task(t.task_id))
 
 
 class TestCodexProvider(unittest.TestCase):

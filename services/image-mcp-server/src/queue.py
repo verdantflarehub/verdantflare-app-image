@@ -86,7 +86,7 @@ class TaskQueueManager:
         recovered = self.tasks.recover_hanging_tasks()
         self.recover_grok()
         if recovered > 0:
-            print(f"⚠️ [TaskQueue] 已自动恢复并标记 {recovered} 个中断的任务为 failed")
+            print(f"⚠️ [TaskQueue] 保留 {recovered} 个原调用结果未知的任务；未重新提交")
 
         # 2. 启动 Worker 协程池
         for i in range(self.worker_count):

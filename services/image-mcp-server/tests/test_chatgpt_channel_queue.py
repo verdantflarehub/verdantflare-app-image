@@ -134,6 +134,9 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
         record = self.tasks.create('project-test', 'legacy', 'codex', params)
         self.tasks.claim_task(record.task_id)
         self.assertEqual(self.tasks.recover_hanging_tasks(), 1)
+        self.assertEqual(self.tasks.get(record.task_id).status, 'running')
+        self.assertEqual(self.tasks.get(record.task_id).phase, 'submission_unknown')
+        self.assertFalse(self.tasks.claim_task(record.task_id))
 
     def test_capabilities_distinguish_channel_requirements_from_legacy(self):
         engines = {e['engine']: e for e in self.queue.capabilities()['engines']}

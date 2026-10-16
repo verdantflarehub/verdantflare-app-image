@@ -332,17 +332,21 @@ class TaskStore:
             }
 
     def recover_hanging_tasks(self) -> int:
-        """服务重启时将残留的 running 任务标为 failed，防止永远卡死。"""
+        """Preserve legacy submissions whose supplier outcome is unknown.
+
+        A restart is not evidence of supplier rejection. These records remain
+        running and are never requeued; channel and Grok recovery stay separate.
+        """
         self.ensure_ready()
         now = datetime.now(timezone.utc).isoformat()
         with self._get_conn() as conn:
             cur = conn.execute(
                 """
                 UPDATE tasks
-                SET status = 'failed',
-                    error = '服务重启，未完成任务已自动中断',
+                SET phase = 'submission_unknown',
+                    error = '服务重启，原调用结果待确认；未重新提交',
                     updated_at = ?
-                WHERE status = 'running' AND engine != 'grok'
+                WHERE status = 'running' AND phase IS NULL AND engine != 'grok'
                   AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') NOT IN ('google-channel-v1', 'chatgpt-channel-v1')
                 """,
                 (now,),
