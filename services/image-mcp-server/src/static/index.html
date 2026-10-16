@@ -1155,6 +1155,9 @@
       min-width: 0;
       position: sticky;
       top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
     }
 
     .input-pane {
@@ -1784,24 +1787,24 @@
 
         <div class="inspect-layout">
           <div class="output-pane">
-            <div class="pane-title">
-              <h3>生成结果</h3>
-              <span class="quota-badge" id="inspOutputBadge">1 / 1 张图像产物</span>
-            </div>
-            <div class="result-stage" id="inspStage">
-              <img id="inspResultImg" src="" alt="" hidden/>
-              <div id="inspStagePlaceholder" class="card-thumb-placeholder" style="border-radius:8px;height:100%;">
-                <span class="thumb-status-text" id="inspStagePlaceholderText">正在读取图像产物…</span>
+            <div>
+              <div class="pane-title">
+                <h3>生成结果</h3>
+                <span class="quota-badge" id="inspOutputBadge">1 / 1 张图像产物</span>
               </div>
+              <div class="result-stage" id="inspStage">
+                <img id="inspResultImg" src="" alt="" hidden/>
+                <div id="inspStagePlaceholder" class="card-thumb-placeholder" style="border-radius:8px;height:100%;">
+                  <span class="thumb-status-text" id="inspStagePlaceholderText">正在读取图像产物…</span>
+                </div>
+              </div>
+              <div class="result-controls">
+                <span id="inspResultStatusText">输出 01 · 已登记项目 Artifact（点击画面可滚轮无极缩放）</span>
+                <a class="btn primary" id="btnDownloadResult" download>下载原图 ↓</a>
+              </div>
+              <div class="output-meta" id="inspOutputMeta"></div>
             </div>
-            <div class="result-controls">
-              <span id="inspResultStatusText">输出 01 · 已登记项目 Artifact（点击画面可滚轮无极缩放）</span>
-              <a class="btn primary" id="btnDownloadResult" download>下载原图 ↓</a>
-            </div>
-            <div class="output-meta" id="inspOutputMeta"></div>
-          </div>
 
-          <div class="input-pane">
             <!-- 1. 提示词 (Verbatim Prompt) -->
             <section class="detail-section-block" aria-label="1. 提示词">
               <div class="pane-title">
@@ -1810,7 +1813,9 @@
               </div>
               <div class="prompt-sheet" id="inspPromptBox"></div>
             </section>
+          </div>
 
+          <div class="input-pane">
             <!-- 2. 参考图 (4-column grid with object-fit: contain) -->
             <section class="detail-section-block" aria-label="2. 参考图">
               <div class="pane-title">
@@ -2791,7 +2796,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.8',
+        version: 'v0.2.9',
         kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
         billing: '本地算力 (local_resources)',
         models: [
@@ -2831,7 +2836,7 @@
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.8',
+        version: 'v0.2.9',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
@@ -2882,7 +2887,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.8',
+            version: 'v0.2.9',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
