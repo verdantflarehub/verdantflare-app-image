@@ -145,6 +145,10 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertNotIn("compare-container", html)
         self.assertNotIn("btnScrollPrompt", html)
         self.assertNotIn("creationConsole", html)
+        self.assertNotIn("令牌直通", html)
+        self.assertNotIn("inspTriSteps", html)
+        self.assertIn('html[data-embedded="true"] #imageBreadcrumb', html)
+        self.assertIn("M22.282 9.821", html)
 
 
 if __name__ == "__main__":
