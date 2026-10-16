@@ -149,7 +149,7 @@ IMAGE_TOOLS_SCHEMA = [
 
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.10"
+SERVICE_VERSION = "v0.2.11"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 

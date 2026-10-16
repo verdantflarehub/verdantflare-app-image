@@ -1772,16 +1772,12 @@
           <div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <span id="inspChannelLine" class="identity-channel" style="font-size:12px;color:var(--accent);font-weight:600"></span>
-              <span class="cap-pill" id="inspModePill"></span>
-              <span class="physics-pill num" id="inspQuotaPill">单任务最大容量 ≤ 50MB</span>
             </div>
-            <h2 id="inspTitle" style="font-size:20px;margin-top:4px"></h2>
+            <h2 tabindex="-1" id="inspTitle" style="font-size:20px;margin-top:4px"></h2>
             <small id="inspSubtitle" class="num" style="color:var(--muted)"></small>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <button type="button" class="btn" id="btnZoomMain">🔍 游标仿射缩放预览</button>
-            <button type="button" class="btn" id="btnCopyTaskId">复制任务 ID</button>
-            <button type="button" class="btn primary" id="btnCloseInspector">← 返回任务列表（保留筛选与滚动）</button>
+            <span class="quota-badge" id="inspStatus"></span>
           </div>
         </div>
 
@@ -1793,7 +1789,7 @@
                 <span class="quota-badge" id="inspOutputBadge">1 / 1 张图像产物</span>
               </div>
               <div class="result-stage" id="inspStage">
-                <img id="inspResultImg" src="" alt="" hidden/>
+                <img id="inspResultImg" src="" alt="" hidden role="button" tabindex="0" aria-label="放大生成结果"/>
                 <div id="inspStagePlaceholder" class="card-thumb-placeholder" style="border-radius:8px;height:100%;">
                   <span class="thumb-status-text" id="inspStagePlaceholderText">正在读取图像产物…</span>
                 </div>
@@ -1846,8 +1842,9 @@
         </div>
 
         <section class="inspect-tech">
-          <details open>
-            <summary>任务信息、生成规格与模型参考配额明细</summary>
+          <details>
+            <summary>技术信息与生成参数</summary>
+            <button type="button" class="btn" id="btnCopyTaskId">复制任务 ID</button>
             <div class="tech-grid" id="inspTechGrid"></div>
           </details>
         </section>
@@ -2152,6 +2149,7 @@
     // Artifact Blob URL Cache & Queue Loader (Opaque iframe safe)
     const artifactBlobMap = new Map();
     const artifactLoadingMap = new Map();
+    const previewBlobs = new Map();
 
     async function getArtifactBlobUrl(artifactId) {
       if (!artifactId) return '';
@@ -2168,6 +2166,7 @@
           if (disposed) return '';
           const url = URL.createObjectURL(blob);
           artifactBlobMap.set(artifactId, url);
+          previewBlobs.set(url, blob);
           return url;
         } catch (err) {
           console.warn(`Artifact ${artifactId} load failed:`, err);
@@ -2348,10 +2347,47 @@
 
     inputSearch.addEventListener("input", renderGallery);
 
+    let previewRevision = 0, previewRequestId = 0;
+    const previewPending = new Map(), previewFocus = new Map();
+    function closeHostPreview() {
+      previewRevision++;
+      for (const item of previewPending.values()) { clearTimeout(item.timer); item.resolve(); }
+      previewPending.clear(); previewFocus.clear();
+      if (isEmbedded) parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'media-close' }, hostOrigin);
+    }
+    async function openHostPreview(url, title) {
+      const revision = ++previewRevision, focus = document.activeElement;
+      const blob = previewBlobs.get(url);
+      if (!blob) throw Error('图片尚未准备好，请重试。');
+      const bytes = await blob.arrayBuffer();
+      if (revision !== previewRevision || disposed || !activeTask || document.hidden) return;
+      const id = ++previewRequestId;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { previewPending.delete(id); previewFocus.delete(id); reject(Error('图片预览超时，请重试。')); }, 15000);
+        previewPending.set(id, {resolve, reject, timer}); previewFocus.set(id, focus);
+        parent.postMessage({channel:'vf-image',view:viewEpoch,type:'media-preview',id,bytes,mime:blob.type,title:title || '图像预览'},hostOrigin,[bytes]);
+      });
+    }
+    window.addEventListener('message', e => {
+      if (!isEmbedded || e.source !== parent || e.origin !== hostOrigin || e.data?.channel !== 'vf-studio') return;
+      const d = e.data;
+      if (d.type === 'media-result' && previewPending.has(d.id)) {
+        const item = previewPending.get(d.id); previewPending.delete(d.id); clearTimeout(item.timer);
+        if (d.ok) item.resolve(); else { previewFocus.delete(d.id); item.reject(Error('无法打开图片预览，请刷新后重试。')); }
+      }
+      if (d.type === 'media-closed') { const el = previewFocus.get(d.id); previewFocus.delete(d.id); if (el?.isConnected && activeTask) el.focus({preventScroll:true}); }
+    });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) closeHostPreview(); });
+    document.getElementById('inspResultImg').addEventListener('keydown', e => { if (['Enter',' '].includes(e.key)) { e.preventDefault(); e.currentTarget.click(); } });
+
     /* Cursor-Invariant Affine Zoom Lightbox (0.5x - 5.0x) */
     let zoomScale = 1, zoomTx = 0, zoomTy = 0, isZoomDragging = false, zoomStartX = 0, zoomStartY = 0;
     function openZoomModal(src, label) {
       if (!src) return;
+      if (isEmbedded) {
+        openHostPreview(src, label).catch(error => { document.getElementById('inspResultStatusText').textContent = error.message; });
+        return;
+      }
       zoomScale = 1; zoomTx = 0; zoomTy = 0;
       const dlg = document.getElementById('zoomDialog');
       if (!dlg) return;
@@ -2640,7 +2676,7 @@
         techGrid.innerHTML = `
           <span>任务 ID</span><span><code>${escapeHtml(task.id)}</code></span>
           <span>模型 × 渠道</span><span class="identity-channel">${escapeHtml(task.model)} × ${channelLogo(task.engine || task.channelLabel)}${escapeHtml(task.channelLabel)}</span>
-          <span>输出规格</span><span>${escapeHtml(task.modeCode)} (${escapeHtml(task.typeName)}) · 分辨率 ${escapeHtml(task.resolution)} · 画幅 ${escapeHtml(task.aspectRatio)} · 像素 ${escapeHtml(task.pixels)} · 格式 ${escapeHtml(task.formatLabel)}</span>
+          <span>输出规格</span><span>${escapeHtml(task.modeCode)} · 分辨率 ${escapeHtml(task.resolution)} · 画幅 ${escapeHtml(task.aspectRatio)} · 像素 ${escapeHtml(task.pixels)} · 格式 ${escapeHtml(task.formatLabel)}</span>
           <span>四要素输入快照</span><span>1. 提示词 1/1（唯一） · 2. 参考图 ${refImgs.length}/${maxImages} 张（全局最大 8 张） · 3. 蒙版与控制图 ${refMasks.length}/${maxMasks} 张 · 4. 骨相人脸源 ${refFaces.length}/${maxFaces} 张</span>
           <span>所属项目与耗时</span><span>${escapeHtml(task.project)} · 创建于 ${escapeHtml(task.time)} · 累计耗时 ${escapeHtml(task.duration)}</span>
         `;
@@ -2668,6 +2704,7 @@
       });
     }
     const openInspector = async function(id, notifyStudio = true) {
+      closeHostPreview();
       const task = allTasks.find(t => t.id === id);
       if (!task) return;
       const savedWinScroll = window.scrollY;
@@ -2694,12 +2731,12 @@
 
       const statusLabel = { succeeded: '已完成', running: '生成中', queued: '排队中', failed: '已失败' }[task.status] || task.status;
       document.getElementById('inspChannelLine').innerHTML = `${escapeHtml(task.model)} × ${channelLogo(task.engine || task.channelLabel)}${escapeHtml(task.channelLabel)}`;
-      document.getElementById('inspModePill').innerHTML = `<strong>${escapeHtml(task.modeCode)}</strong><small>${escapeHtml(task.typeName)}</small>`;
+      document.getElementById('inspStatus').textContent = statusLabel;
       document.getElementById('inspTitle').textContent = task.title;
-      document.getElementById('inspSubtitle').textContent = `状态：${statusLabel} · 规格：${task.resShort} / ${task.aspectRatio} / ${task.pixels !== '—' ? task.pixels : task.resolution} / ${task.formatLabel} · 累计耗时：${task.duration}`;
+      document.getElementById('inspSubtitle').textContent = `规格：${task.resShort} / ${task.aspectRatio} / ${task.pixels !== '—' ? task.pixels : task.resolution} / ${task.formatLabel} · 累计耗时：${task.duration}`;
       document.getElementById('inspOutputMeta').innerHTML = `
         <span>${escapeHtml(task.model)}</span>
-        <span>${escapeHtml(task.modeCode)} (${escapeHtml(task.typeName)})</span>
+        <span>${escapeHtml(task.modeCode)}</span>
         <span>${escapeHtml(task.resShort)}</span>
         <span>${escapeHtml(task.aspectRatio)}</span>
         <span>${escapeHtml(task.pixels !== '—' ? task.pixels : task.resolution)}</span>
@@ -2741,12 +2778,13 @@
       if (!isEmbedded) {
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
-      document.getElementById('btnCloseInspector')?.focus({ preventScroll: true });
+      document.getElementById('inspTitle')?.focus({ preventScroll: true });
       window.notifyHostHeight?.();
       if (notifyStudio) window.studioNavigate('/dashboard/tasks/' + encodeURIComponent(id));
     };
 
     const closeInspector = async function(restorePosition = true, notifyStudio = true) {
+      closeHostPreview();
       pendingDetailId = '';
       const epoch = ++detailEpoch;
       const taskId = activeTask?.id;
@@ -2817,7 +2855,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.10',
+        version: 'v0.2.11',
         kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
         billing: '本地算力 (local_resources)',
         models: [
@@ -2857,7 +2895,7 @@
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.10',
+        version: 'v0.2.11',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
@@ -2908,7 +2946,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.10',
+            version: 'v0.2.11',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3113,6 +3151,7 @@
     const taskPoll = setInterval(syncBackendTasks, 5000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
     window.addEventListener('pagehide', () => {
+      closeHostPreview(); previewFocus.clear(); previewBlobs.clear();
       disposed = true; clearInterval(taskPoll); hostResizeObserver?.disconnect();
       for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
       viewportRequests.clear();
