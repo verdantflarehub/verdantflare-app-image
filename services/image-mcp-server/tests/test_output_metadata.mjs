@@ -34,7 +34,15 @@ export async function runOutputMetadataTests() {
   assert.equal(labels({ width: 1152, height: 2048 }).aspectRatio, '9:16');
   assert.equal(labels({ width: 1254, height: 1254 }).aspectRatio, '1:1');
   assert.equal(labels({ width: 1536, height: 1024 }).aspectRatio, '3:2');
-  assert.equal(labels({ width: 1001, height: 777 }).aspectRatio, '143:111');
+  assert.equal(labels({ width: 1672, height: 941 }).aspectRatio, '≈16:9');
+  assert.equal(labels({ width: 941, height: 1672 }).aspectRatio, '≈9:16');
+  assert.equal(labels({ width: 1672, height: 941 }).resShort, '1672×941 px');
+  assert.equal(labels({ width: 1001, height: 777 }).aspectRatio, '≈1.29:1');
+  assert.equal(labels({ width: 777, height: 1001 }).aspectRatio, '≈1:1.29');
+  assert.equal(labels({ width: 1700, height: 1000 }).aspectRatio, '17:10');
+  assert.equal(labels({ width: 1001, height: 1000 }).aspectRatio, '≈1:1');
+  assert.equal(labels({ width: 1786, height: 1000 }).aspectRatio, '≈16:9');
+  assert.equal(labels({ width: 1787, height: 1000 }).aspectRatio, '≈1.79:1');
   for (const value of [undefined, {}, { width: 2048 }, { width: 0, height: 10 }, { width: -1, height: 1 }, { width: NaN, height: 1 }, { width: '2048', height: 1152 }]) {
     assert.equal(labels(value).resShort, '实际尺寸未测得');
     assert.equal(labels(value).aspectRatio, '实际比例未测得');
