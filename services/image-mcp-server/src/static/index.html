@@ -2150,6 +2150,50 @@
     const artifactBlobMap = new Map();
     const artifactLoadingMap = new Map();
     const previewBlobs = new Map();
+    const artifactMediaMap = new Map();
+
+    function outputMediaLabels(media = {}) {
+      const { width, height, sizeBytes, format } = media;
+      const measured = Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0;
+      let a = width, b = height;
+      if (measured) while (b) [a, b] = [b, a % b];
+      const dimensions = measured ? `${width}×${height} px` : '实际尺寸未测得';
+      return {
+        resShort: dimensions,
+        resolution: dimensions,
+        aspectRatio: measured ? `${width / a}:${height / a}` : '实际比例未测得',
+        pixels: measured ? `${width * height} 物理像素` : '—',
+        formatLabel: format || '格式未测得',
+        sizeLabel: Number.isSafeInteger(sizeBytes) && sizeBytes >= 0
+          ? (sizeBytes >= 1000000 ? `${Number((sizeBytes / 1000000).toFixed(2))}MB`
+            : sizeBytes >= 1000 ? `${Number((sizeBytes / 1000).toFixed(2))}KB` : `${sizeBytes}B`)
+          : '大小未测得'
+      };
+    }
+
+    async function measureOutputBlob(blob) {
+      const bytes = new Uint8Array(await blob.slice(0, 16).arrayBuffer());
+      const ascii = (start, end) => String.fromCharCode(...bytes.slice(start, end));
+      const format = bytes[0] === 137 && ascii(1, 4) === 'PNG' ? 'PNG'
+        : bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 ? 'JPEG'
+        : ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP' ? 'WebP'
+        : ['GIF87a', 'GIF89a'].includes(ascii(0, 6)) ? 'GIF'
+        : ascii(4, 8) === 'ftyp' && ['avif', 'avis'].includes(ascii(8, 12)) ? 'AVIF' : '';
+      const media = { sizeBytes: blob.size, format };
+      try {
+        const bitmap = await createImageBitmap(blob);
+        media.width = bitmap.width;
+        media.height = bitmap.height;
+        bitmap.close();
+      } catch (_) { /* Keep unknown dimensions; never substitute request parameters. */ }
+      return media;
+    }
+
+    function renderOutputMetadata(task) {
+      document.getElementById('inspSubtitle').textContent = `输出：${task.resShort} / ${task.aspectRatio} / ${task.formatLabel} / ${task.sizeLabel} · 累计耗时：${task.duration}`;
+      document.getElementById('inspOutputMeta').innerHTML = [task.model, task.modeCode, task.formatLabel, task.aspectRatio, task.resShort, task.sizeLabel]
+        .map(label => `<span>${escapeHtml(label)}</span>`).join('');
+    }
 
     async function getArtifactBlobUrl(artifactId) {
       if (!artifactId) return '';
@@ -2164,9 +2208,24 @@
         try {
           const blob = await requestApi(`/artifacts/${artifactId}/content`, { blob: true });
           if (disposed) return '';
+          const media = await measureOutputBlob(blob);
+          if (disposed) return '';
           const url = URL.createObjectURL(blob);
           artifactBlobMap.set(artifactId, url);
           previewBlobs.set(url, blob);
+          artifactMediaMap.set(artifactId, media);
+          let outputChanged = false;
+          for (const task of allTasks) {
+            if (task.artifactId === artifactId) {
+              Object.assign(task, outputMediaLabels(media), { img: url });
+              outputChanged = true;
+            }
+          }
+          if (activeTask?.artifactId === artifactId) {
+            Object.assign(activeTask, outputMediaLabels(media), { img: url });
+            updateInspectorImages(activeTask);
+          }
+          if (outputChanged) renderGallery();
           return url;
         } catch (err) {
           console.warn(`Artifact ${artifactId} load failed:`, err);
@@ -2263,7 +2322,7 @@
       if (state === 'empty') taskState.innerHTML = `<h3>${allTasks.length ? '没有匹配的任务' : '暂无图像任务'}</h3><p>${allTasks.length ? '请调整状态、模型、渠道或搜索条件。' : '通过 Studio 或 Image MCP 工具提交图像任务后将在此实时显示。'}</p>`;
       galleryContainer.hidden = empty || taskView !== 'gallery';
       taskTableContainer.hidden = empty || taskView !== 'table';
-      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>规格 (模式 / 分辨率 / 画幅 / 格式)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num">${escapeHtml(t.modeCode)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.formatLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td><button data-open-task="${escapeHtml(t.id)}">查看</button></td></tr>`).join('')}</tbody></table>`;
+      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td><button data-open-task="${escapeHtml(t.id)}">查看</button></td></tr>`).join('')}</tbody></table>`;
       if (tableMarkup !== lastTableMarkup) { taskTableContainer.innerHTML = tableMarkup; lastTableMarkup = tableMarkup; }
       if (empty) { galleryContainer.replaceChildren(); lastGalleryMarkup = ''; return; }
       const markup = filtered.map(task => {
@@ -2310,9 +2369,10 @@
             <div class="card-foot">
               <div class="tags">
                 <span title="模式码">${t.modeCode}</span>
-                <span title="输出分辨率">${t.resShort}</span>
-                <span title="画幅比">${t.aspectRatio}</span>
                 <span title="输出格式">${t.formatLabel}</span>
+                <span title="实际画幅比">${t.aspectRatio}</span>
+                <span title="实际像素尺寸">${t.resShort}</span>
+                <span title="原图文件大小">${t.sizeLabel}</span>
               </div>
               <span class="card-action-text">查看</span>
             </div>
@@ -2548,6 +2608,7 @@
 
     function updateInspectorImages(task) {
       if (!task) return;
+      renderOutputMetadata(task);
       const resultImg = document.getElementById("inspResultImg");
       const stagePlaceholder = document.getElementById("inspStagePlaceholder");
       const stagePlaceholderText = document.getElementById("inspStagePlaceholderText");
@@ -2677,6 +2738,8 @@
           <span>任务 ID</span><span><code>${escapeHtml(task.id)}</code></span>
           <span>模型 × 渠道</span><span class="identity-channel">${escapeHtml(task.model)} × ${channelLogo(task.engine || task.channelLabel)}${escapeHtml(task.channelLabel)}</span>
           <span>输出规格</span><span>${escapeHtml(task.modeCode)} · 分辨率 ${escapeHtml(task.resolution)} · 画幅 ${escapeHtml(task.aspectRatio)} · 像素 ${escapeHtml(task.pixels)} · 格式 ${escapeHtml(task.formatLabel)}</span>
+          <span>文件大小</span><span>${escapeHtml(task.sizeLabel)}（十进制单位，1 MB = 1,000,000 字节）</span>
+          <span>请求参数</span><span>分辨率 ${escapeHtml(task.requestedResolution || '未指定')} · 画幅 ${escapeHtml(task.requestedAspectRatio || '未指定')}（不代表实际输出）</span>
           <span>四要素输入快照</span><span>1. 提示词 1/1（唯一） · 2. 参考图 ${refImgs.length}/${maxImages} 张（全局最大 8 张） · 3. 蒙版与控制图 ${refMasks.length}/${maxMasks} 张 · 4. 骨相人脸源 ${refFaces.length}/${maxFaces} 张</span>
           <span>所属项目与耗时</span><span>${escapeHtml(task.project)} · 创建于 ${escapeHtml(task.time)} · 累计耗时 ${escapeHtml(task.duration)}</span>
         `;
@@ -2733,15 +2796,6 @@
       document.getElementById('inspChannelLine').innerHTML = `${escapeHtml(task.model)} × ${channelLogo(task.engine || task.channelLabel)}${escapeHtml(task.channelLabel)}`;
       document.getElementById('inspStatus').textContent = statusLabel;
       document.getElementById('inspTitle').textContent = task.title;
-      document.getElementById('inspSubtitle').textContent = `规格：${task.resShort} / ${task.aspectRatio} / ${task.pixels !== '—' ? task.pixels : task.resolution} / ${task.formatLabel} · 累计耗时：${task.duration}`;
-      document.getElementById('inspOutputMeta').innerHTML = `
-        <span>${escapeHtml(task.model)}</span>
-        <span>${escapeHtml(task.modeCode)}</span>
-        <span>${escapeHtml(task.resShort)}</span>
-        <span>${escapeHtml(task.aspectRatio)}</span>
-        <span>${escapeHtml(task.pixels !== '—' ? task.pixels : task.resolution)}</span>
-        <span>${escapeHtml(task.formatLabel)}</span>
-      `;
 
       updateInspectorImages(task);
 
@@ -2855,7 +2909,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.11',
+        version: 'v0.2.12',
         kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
         billing: '本地算力 (local_resources)',
         models: [
@@ -2895,7 +2949,7 @@
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.11',
+        version: 'v0.2.12',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
@@ -2946,7 +3000,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.11',
+            version: 'v0.2.12',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3066,7 +3120,6 @@
           taskLoadState = 'ready'; taskLoadError = ''; taskTotal = tasksRes.total ?? tasksRes.tasks.length;
           allTasks = tasksRes.tasks.map(t => {
             const req = t.request_params || {};
-            const is4k = req.resolution === '4k';
             const action = req.action || 't2i';
             const sourceArtifactId = req.source_artifact_id || req.target_artifact_id || '';
             const maskArtifactId = req.mask_artifact_id || '';
@@ -3081,10 +3134,6 @@
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
             const imgUrl = artifactBlobMap.get(artifactId) || '';
-            const resShort = t.media?.width ? `${t.media.width}×${t.media.height}` : (req.resolution ? String(req.resolution).toUpperCase() : '2K');
-            const aspectRatio = req.aspect_ratio || (t.media?.width && t.media?.height ? (t.media.width === t.media.height ? '1:1' : (t.media.width > t.media.height ? '16:9' : '9:16')) : '1:1');
-            const mime = String(t.media?.mime_type || 'image/png').toLowerCase();
-            const formatLabel = mime.includes('webp') ? 'WebP' : mime.includes('jpeg') || mime.includes('jpg') ? 'JPEG' : 'PNG';
 
             return {
               id: t.task_id,
@@ -3100,11 +3149,8 @@
               channelLabel,
               phase: t.phase,
               requestedResolution: req.resolution,
-              resShort,
-              aspectRatio,
-              formatLabel,
-              resolution: t.media?.width ? `${t.media.width} × ${t.media.height}` : (req.resolution ? `请求 ${String(req.resolution).toUpperCase()}` : '等待产物实测'),
-              pixels: t.media?.width ? `${t.media.width * t.media.height} 物理像素` : '—',
+              requestedAspectRatio: req.aspect_ratio,
+              ...outputMediaLabels(artifactMediaMap.get(artifactId)),
               duration: t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物' : dur,
               status: t.status === 'completed' ? 'succeeded' : t.status,
               project: t.project_id || 'default',
@@ -3114,8 +3160,7 @@
               refImageIds,
               maskArtifactId,
               sourceIdentityArtifactId,
-              img: imgUrl,
-              is4k
+              img: imgUrl
             };
           });
           updateTaskFilters();
@@ -3159,6 +3204,7 @@
       pendingReqs.clear();
       for (const url of artifactBlobMap.values()) URL.revokeObjectURL(url);
       artifactBlobMap.clear();
+      artifactMediaMap.clear();
     });
   </script>
 </body>
