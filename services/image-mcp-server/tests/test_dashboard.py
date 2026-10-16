@@ -110,6 +110,32 @@ class TestDashboard(unittest.TestCase):
             self.assertEqual(created["status"], "queued")
 
 
+class TestDashboardStaticHtml(unittest.TestCase):
+    def test_static_index_html_v12_contracts(self):
+        from pathlib import Path
+        html_path = Path(__file__).resolve().parent.parent / "src" / "static" / "index.html"
+        html = html_path.read_text(encoding="utf-8")
+        self.assertIn("VerdantFlare", html)
+        self.assertIn("IMAGE STATION", html.upper())
+        self.assertIn("tokenModal", html)
+        self.assertIn("--vf-hairline-outer", html)
+        self.assertIn("--vf-hairline-inner", html)
+        self.assertIn("--vf-shadow-card", html)
+        self.assertIn("--vf-shadow-card-hover", html)
+        self.assertIn("--vf-ease-spring", html)
+        self.assertIn("--vf-shimmer", html)
+        self.assertIn("tabular-nums", html)
+        self.assertNotIn("btnThemeToggle", html)
+        self.assertIn("channel-group", html)
+        self.assertIn("model-cap-row", html)
+        self.assertIn("model-quota-strip", html)
+        self.assertIn("ref-image-grid", html)
+        self.assertIn("object-fit: contain", html)
+        self.assertIn("ref-empty-box", html)
+        self.assertIn("openZoomModal", html)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
