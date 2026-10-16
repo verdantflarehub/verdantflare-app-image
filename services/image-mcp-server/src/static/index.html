@@ -1975,7 +1975,7 @@
 
       // Hash Routing Synchronization from Studio
       if (d.type === 'route' && typeof d.hash === 'string') {
-        switchView(d.hash, false);
+        applyImageRoute(typeof d.path === 'string' ? d.path : '/dashboard#' + d.hash);
         return;
       }
 
@@ -2066,6 +2066,8 @@
 
     // Tab Navigation Logic
     function switchView(targetNav, notifyStudio = true) {
+      pendingDetailId = '';
+      ++detailEpoch;
       const valid = ['tasks', 'models', 'mcp'];
       const nav = valid.includes(targetNav) ? targetNav : 'tasks';
       const labels = { tasks: '任务', models: '模型', mcp: 'MCP' };
@@ -2073,8 +2075,9 @@
       if (crumbEl) crumbEl.textContent = labels[nav] || '任务';
 
       if (document.body.classList.contains('inspecting')) {
-        closeInspector(false);
+        closeInspector(false, false);
       }
+      if (crumbEl) crumbEl.textContent = labels[nav] || '任务';
 
       const mainTabsEl = document.getElementById('mainTabs');
       if (mainTabsEl) mainTabsEl.hidden = false;
@@ -2107,10 +2110,6 @@
       tab.onclick = () => switchView(tab.dataset.nav, true);
     });
 
-    // Initial View from Hash
-    const initialNav = location.hash.slice(1);
-    if (initialNav) switchView(initialNav, false);
-
     // Real Tasks Store (Driven purely by /api/tasks backend)
     let allTasks = [];
     let currentFilter = "all";
@@ -2120,6 +2119,21 @@
     let taskLoadState = 'loading', taskLoadError = '', taskTotal = 0, taskView = 'gallery';
     let syncingTasks = false, disposed = false, lastGalleryMarkup = '', lastTableMarkup = '';
     let detailReturnFocus = null, detailReturnScroll = 0, detailEpoch = 0;
+    let pendingDetailId = '';
+    function applyImageRoute(path) {
+      const match = /^\/dashboard\/tasks\/([a-zA-Z0-9_-]+)(?:#tasks)?$/.exec(path);
+      if (match) {
+        pendingDetailId = match[1];
+        if (activeTask?.id !== pendingDetailId) void openInspector(pendingDetailId, false);
+      } else if (/^\/dashboard(?:#(?:tasks|models|mcp))?$/.test(path)) {
+        const tasksRoute = !path.includes('#') || path.endsWith('#tasks');
+        // Host acknowledgement must not cancel the return's pending scroll restore.
+        if (tasksRoute && !pendingDetailId && !activeTask && document.getElementById('view-tasks').classList.contains('active')) return;
+        pendingDetailId = '';
+        if (document.body.classList.contains('inspecting') && tasksRoute) void closeInspector(true, false);
+        else switchView(path.split('#')[1] || 'tasks', false);
+      }
+    }
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
     const taskState = document.getElementById('taskState');
     const taskTableContainer = document.getElementById('taskTableContainer');
@@ -2653,7 +2667,7 @@
         parent.postMessage({ channel: 'vf-image', view: viewEpoch, type: 'wheel', deltaY: 0, captureId }, hostOrigin);
       });
     }
-    window.openInspector = async function(id) {
+    const openInspector = async function(id, notifyStudio = true) {
       const task = allTasks.find(t => t.id === id);
       if (!task) return;
       const savedWinScroll = window.scrollY;
@@ -2675,7 +2689,7 @@
 
       const crumbEl = document.getElementById('crumbCurrent');
       if (crumbEl) {
-        crumbEl.innerHTML = `<a href="#tasks" onclick="closeInspector(); return false;">任务</a> <span aria-hidden="true">/</span> <span aria-current="page">${escapeHtml(task.title)}</span>`;
+        crumbEl.innerHTML = `<a href="#tasks" data-close-inspector>任务</a> <span aria-hidden="true">/</span> <span aria-current="page">${escapeHtml(task.title)}</span>`;
       }
 
       const statusLabel = { succeeded: '已完成', running: '生成中', queued: '排队中', failed: '已失败' }[task.status] || task.status;
@@ -2729,9 +2743,11 @@
       }
       document.getElementById('btnCloseInspector')?.focus({ preventScroll: true });
       window.notifyHostHeight?.();
+      if (notifyStudio) window.studioNavigate('/dashboard/tasks/' + encodeURIComponent(id));
     };
 
-    window.closeInspector = async function(restorePosition = true) {
+    const closeInspector = async function(restorePosition = true, notifyStudio = true) {
+      pendingDetailId = '';
       const epoch = ++detailEpoch;
       const taskId = activeTask?.id;
       inspectorDrawer.classList.remove("open");
@@ -2739,6 +2755,7 @@
       inspectorDrawer.inert = true;
       activeTask = null;
       document.body.classList.remove('inspecting');
+      if (notifyStudio) window.studioNavigate('/dashboard#tasks');
 
       const mainTabsEl = document.getElementById('mainTabs');
       if (mainTabsEl) mainTabsEl.hidden = false;
@@ -2775,7 +2792,11 @@
       }
     });
 
-    document.getElementById("btnCloseInspector").onclick = () => closeInspector(true);
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#btnCloseInspector, [data-close-inspector]')) return;
+      e.preventDefault();
+      void closeInspector(true);
+    });
     document.getElementById("btnCopyTaskId").onclick = async () => {
       if (!activeTask?.id) return;
       const btn = document.getElementById("btnCopyTaskId");
@@ -2796,7 +2817,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.9',
+        version: 'v0.2.10',
         kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
         billing: '本地算力 (local_resources)',
         models: [
@@ -2836,7 +2857,7 @@
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.9',
+        version: 'v0.2.10',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
@@ -2887,7 +2908,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.9',
+            version: 'v0.2.10',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3061,6 +3082,7 @@
           });
           updateTaskFilters();
           renderGallery();
+          if (pendingDetailId && activeTask?.id !== pendingDetailId) void openInspector(pendingDetailId, false);
           if (activeTask) {
             const refreshed = allTasks.find(x => x.id === activeTask.id);
             if (refreshed) {
@@ -3085,6 +3107,7 @@
       }
     }
 
+    applyImageRoute('/dashboard#' + (location.hash.slice(1) || 'tasks'));
     renderGallery();
     syncBackendTasks();
     const taskPoll = setInterval(syncBackendTasks, 5000);
