@@ -1688,6 +1688,10 @@
 
       <!-- Task Gallery Grid -->
       <div class="gallery-grid" id="galleryContainer"></div>
+      <div id="taskPagination" style="padding:24px;text-align:center" hidden>
+        <p id="taskPageStatus" role="status" aria-live="polite"></p>
+        <button class="btn" id="btnLoadMoreTasks" type="button">加载更多</button>
+      </div>
 
     </section>
 
@@ -2114,6 +2118,9 @@
     let latestRuntimeEngines = [];
     let taskLoadState = 'loading', taskLoadError = '', taskTotal = 0, taskView = 'gallery';
     let syncingTasks = false, disposed = false, lastGalleryMarkup = '', lastTableMarkup = '', lastTaskStructure = '';
+    let taskNextOffset = 0, taskPageError = '', taskPageExhausted = false;
+    const taskPageSize = 50;
+    let galleryTaskKeys = new Map();
     let detailReturnFocus = null, detailReturnScroll = 0, detailEpoch = 0;
     let pendingDetailId = '';
     function applyImageRoute(path) {
@@ -2326,6 +2333,7 @@
 
     // Render Gallery & Table (Task Cards: top-left 模型 × [Logo] 渠道, bottom-left 模式码 + 分辨率 + 画幅比 + 格式, bottom-right 查看)
     function renderGallery() {
+      updateTaskPagination();
       const q = inputSearch.value.trim().toLowerCase();
       const filtered = allTasks.filter(t => {
         if (currentFilter !== "all" && t.status !== currentFilter) return false;
@@ -2415,7 +2423,23 @@
           </div>
         </article>
       `; }).join('');
-      if (markup !== lastGalleryMarkup) { galleryContainer.innerHTML = markup; lastGalleryMarkup = markup; }
+      if (markup !== lastGalleryMarkup) {
+        const template = document.createElement('template');
+        template.innerHTML = markup;
+        const existing = new Map([...galleryContainer.children].map(node => [node.dataset.taskId, node]));
+        const nextKeys = new Map(filtered.map(task => [task.id, taskStructureKey([task])]));
+        const desired = [...template.content.children].map(node => {
+          const id = node.dataset.taskId;
+          return existing.has(id) && galleryTaskKeys.get(id) === nextKeys.get(id) ? existing.get(id) : node;
+        });
+        for (let i = 0; i < desired.length; i++) {
+          if (galleryContainer.children[i] !== desired[i]) galleryContainer.insertBefore(desired[i], galleryContainer.children[i] || null);
+        }
+        while (galleryContainer.children.length > desired.length) galleryContainer.lastElementChild.remove();
+        galleryTaskKeys = nextKeys;
+        lastGalleryMarkup = markup;
+        filtered.forEach(updateTaskOutput);
+      }
     }
 
     for (const container of [galleryContainer, taskTableContainer]) {
@@ -2945,7 +2969,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.15',
+        version: 'v0.2.16',
         kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
         billing: '本地算力 (local_resources)',
         models: [
@@ -2985,7 +3009,7 @@
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.15',
+        version: 'v0.2.16',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
@@ -3036,7 +3060,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.15',
+            version: 'v0.2.16',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3142,19 +3166,48 @@
     // Render initial channel catalog immediately so Models view is always ready
     renderChannelCatalog();
 
+    function mergeTaskPage(previous, incoming, append) {
+      return [...new Map((append ? [...previous, ...incoming] : incoming).map(task => [task.id, task])).values()];
+    }
+
+    function updateTaskPagination() {
+      const footer = document.getElementById('taskPagination');
+      const button = document.getElementById('btnLoadMoreTasks');
+      footer.hidden = taskLoadState === 'loading' || !allTasks.length;
+      const finished = taskPageExhausted || taskNextOffset >= taskTotal;
+      button.hidden = finished && !taskPageError;
+      button.disabled = syncingTasks;
+      button.textContent = taskPageError ? '重试加载' : syncingTasks ? '正在加载…' : '加载更多';
+      document.getElementById('taskPageStatus').textContent = taskPageError
+        ? `加载失败：${taskPageError}` : finished ? `已加载全部 ${allTasks.length} 项` : `已加载 ${allTasks.length} / ${taskTotal} 项`;
+    }
+
+    function loadMoreTasks() {
+      if (taskLoadState !== 'ready' || taskPageExhausted || taskNextOffset >= taskTotal) return;
+      return syncBackendTasks(true);
+    }
+    document.getElementById('btnLoadMoreTasks').addEventListener('click', loadMoreTasks);
+    const taskPageObserver = window.IntersectionObserver ? new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting) && !taskPageError) void loadMoreTasks();
+    }) : null;
+    taskPageObserver?.observe(document.getElementById('taskPagination'));
+
     // Live Tasks Sync
-    async function syncBackendTasks() {
+    async function syncBackendTasks(append = false) {
       if (syncingTasks || disposed || document.hidden) return;
       syncingTasks = true;
       document.getElementById('btnRefreshTasks').disabled = true;
+      updateTaskPagination();
       try {
-        const tasksRes = await requestApi('/api/tasks?limit=50');
+        const offset = append ? taskNextOffset : 0;
+        const limit = append ? taskPageSize : Math.max(taskPageSize, taskNextOffset);
+        const tasksRes = await requestApi(`/api/tasks?limit=${limit}&offset=${offset}`);
         if (disposed) return;
         if (!Array.isArray(tasksRes?.tasks)) throw new Error('任务响应格式无效');
         loadCapabilities(tasksRes.capabilities);
         if (tasksRes && Array.isArray(tasksRes.tasks)) {
           taskLoadState = 'ready'; taskLoadError = ''; taskTotal = tasksRes.total ?? tasksRes.tasks.length;
-          allTasks = tasksRes.tasks.map(t => {
+          const incoming = tasksRes.tasks.map(t => {
             const req = t.request_params || {};
             const action = req.action || 't2i';
             const sourceArtifactId = req.source_artifact_id || req.target_artifact_id || '';
@@ -3199,6 +3252,10 @@
               img: imgUrl
             };
           });
+          allTasks = mergeTaskPage(allTasks, incoming, append);
+          taskNextOffset = offset + tasksRes.tasks.length;
+          taskPageExhausted = tasksRes.tasks.length < limit;
+          if (append || !taskPageError) taskPageError = '';
           updateTaskFilters();
           renderGallery();
           if (pendingDetailId && activeTask?.id !== pendingDetailId) void openInspector(pendingDetailId, false);
@@ -3215,6 +3272,7 @@
         }
       } catch (e) {
         if (disposed) return;
+        if (append) { taskPageError = e.message || '请重试'; return; }
         taskLoadState = 'error'; taskLoadError = e.message || '连接失败，请重试。';
         document.getElementById('connText').textContent = '连接异常';
         document.getElementById('embedStatusPill').dataset.state = 'error';
@@ -3223,6 +3281,11 @@
       } finally {
         syncingTasks = false;
         document.getElementById('btnRefreshTasks').disabled = false;
+        updateTaskPagination();
+        if (!taskPageError && taskLoadState === 'ready') {
+          taskPageObserver?.unobserve(document.getElementById('taskPagination'));
+          taskPageObserver?.observe(document.getElementById('taskPagination'));
+        }
       }
     }
 
@@ -3233,7 +3296,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
     window.addEventListener('pagehide', () => {
       closeHostPreview(); previewFocus.clear(); previewBlobs.clear();
-      disposed = true; clearInterval(taskPoll); hostResizeObserver?.disconnect();
+      disposed = true; taskPageObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
       for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
       viewportRequests.clear();
       for (const req of pendingReqs.values()) { clearTimeout(req.timer); req.reject(new Error('页面已关闭')); }
