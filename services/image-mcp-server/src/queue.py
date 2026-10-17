@@ -51,6 +51,7 @@ class TaskQueueManager:
         google_authorize=None,
         grok_channel=None,
         chatgpt_channel=None,
+        channel_directory=None,
     ) -> None:
         self.tasks = tasks
         self.artifacts = artifacts
@@ -60,6 +61,7 @@ class TaskQueueManager:
         self.chatgpt_channel = chatgpt_channel
         self.grok_channel = grok_channel
         self.google_authorize = google_authorize
+        self.channel_directory = channel_directory
         self.google_lock = threading.Lock()
         self.grok_provider = GrokImageProvider()
         self.grok_sem = asyncio.Semaphore(max(1, int(os.getenv("XAI_IMAGE_MAX_CONCURRENCY", "1"))))
@@ -140,7 +142,10 @@ class TaskQueueManager:
         if engine == 'grok':
             params = self.grok_provider.normalize(params, project_id, self.artifacts, channel=self.grok_channel is not None)
         channel = {'gemini': self.google_channel, 'grok': self.grok_channel, 'codex': self.chatgpt_channel}.get(engine)
+        if self.channel_directory is not None and channel is None:
+            raise ValueError('channel_not_configured')
         if channel is not None:
+            self._check_channel_discovery(engine, params.get('action'), channel)
             if self.google_authorize is None:
                 raise ValueError('project_authorization_not_configured')
             import uuid
@@ -167,6 +172,15 @@ class TaskQueueManager:
         params["quality"] = params.get("quality") or ("high" if params["action"] == "generate" else "auto")
         return params
 
+    def _check_channel_discovery(self, engine, action, channel):
+        if self.channel_directory is None:
+            return
+        name = {'gemini': 'google', 'codex': 'chatgpt', 'grok': 'grok'}[engine]
+        capability = 'image.generate' if action == 'generate' else 'image.edit'
+        origin = self.channel_directory.resolve(name, capability)
+        if not origin or origin != channel.endpoint:
+            raise ValueError('channel_discovery_unavailable')
+
     def capabilities(self):
         grok = self.grok_provider.capability()
         if self.grok_channel is not None:
@@ -181,12 +195,16 @@ class TaskQueueManager:
                 'gemini': ('google', self.google_channel),
                 'grok': ('grok', self.grok_channel),
             }[engine['engine']]
+            if self.channel_directory is not None and channel is None:
+                engine['enabled'] = False
             if channel is not None:
                 engine.update(channel=name, adapter_version=name + '-channel-v1',
                     account_selection='explicit_or_configured_default',
                     budget_limit_required=True, budget_currency='USD',
                     budget_limit_kind='reservation_ceiling',
                     project_write_authorization_required=True)
+                if self.channel_directory is not None:
+                    engine['enabled'] = self.channel_directory.resolve(name, 'image.generate') == channel.endpoint
         return {"default_engine": "codex", "engines": engines}
 
     def _get_semaphore(self, engine: str) -> asyncio.Semaphore:
@@ -332,6 +350,7 @@ class TaskQueueManager:
                         if hashlib.sha256(data).hexdigest() != mask.sha256:
                             raise ValueError('source_integrity_failed')
                         payload['mask'] = {'mime_type': mask.media_type, 'data': base64.b64encode(data).decode()}
+                self._check_channel_discovery(job.engine, job.action, channel)
                 self.tasks.update_status(job.task_id, 'running', phase='submitting')
                 result = channel.submit(organization, job.task_id, job.task_id,
                     job.params.get('model') or (DEFAULT_IMAGE_MODEL if is_chatgpt else DEFAULT_GEMINI_MODEL),

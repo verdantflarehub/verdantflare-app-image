@@ -35,6 +35,7 @@ from .tasks import TaskNotFound, TaskStore
 from .channel_authority import CALLER, authorize, create_client as create_authority_client
 from .providers.google_channel import GoogleChannel
 from .providers.channel import ImageChannel
+from .channel_discovery_client import ChannelDiscoveryClient
 
 artifacts = ArtifactStore.from_environment()
 tasks = TaskStore.from_environment()
@@ -51,6 +52,7 @@ grok_channel = ImageChannel(grok_url, os.environ.get('IMAGE_GROK_CHANNEL_TOKEN',
 chatgpt_url = os.environ.get('IMAGE_CHATGPT_CHANNEL_URL', '')
 chatgpt_channel = ImageChannel(chatgpt_url, os.environ.get('IMAGE_CHATGPT_CHANNEL_TOKEN', ''),
                                channel_client) if chatgpt_url else None
+channel_discovery = ChannelDiscoveryClient.from_environment()
 queue_manager = TaskQueueManager(
     tasks=tasks,
     artifacts=artifacts,
@@ -59,6 +61,7 @@ queue_manager = TaskQueueManager(
     google_channel=google_channel,
     grok_channel=grok_channel,
     chatgpt_channel=chatgpt_channel,
+    channel_directory=channel_discovery.directory if channel_discovery else None,
     google_authorize=lambda project_id, authority: authorize(authority_client, project_id, authority),
 )
 
@@ -175,7 +178,7 @@ for tool in IMAGE_TOOLS_SCHEMA:
 
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.24"
+SERVICE_VERSION = "v0.2.25"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -652,6 +655,8 @@ async def lifespan(app: Starlette):
     app.state.tasks = tasks
     app.state.artifacts = artifacts
     app.state.queue_manager = queue_manager
+    if channel_discovery:
+        channel_discovery.start()
     await queue_manager.start()
     await registry.start()
     try:
@@ -660,6 +665,8 @@ async def lifespan(app: Starlette):
         async with mcp.session_manager.run():
             yield
     finally:
+        if channel_discovery:
+            await channel_discovery.stop()
         await registry.stop()
         await queue_manager.stop()
 

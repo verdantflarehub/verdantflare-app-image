@@ -55,6 +55,34 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
         self.assertEqual(record.status, 'completed')
         self.assertEqual(self.artifacts.get(record.artifact_id, 'project-test').metadata['channel'], 'chatgpt')
 
+    def test_discovery_blocks_new_submission_but_allows_original_recovery(self):
+        job = self.job()
+        directory = Mock()
+        directory.resolve.return_value = None
+        self.queue.channel_directory = directory
+        with self.assertRaisesRegex(ValueError, 'channel_discovery_unavailable'):
+            self.queue._execute_channel(job)
+        self.channel.submit.assert_not_called()
+        self.assertIsNone(self.tasks.get(job.task_id).phase)
+        self.queue._execute_channel(job, recovery=True)
+        self.channel.recover.assert_called_once()
+        self.channel.submit.assert_not_called()
+        self.assertEqual(self.tasks.get(job.task_id).status, 'completed')
+
+    def test_discovery_rejects_new_task_before_authorization(self):
+        self.queue.channel_directory = Mock()
+        self.queue.channel_directory.resolve.return_value = None
+        with self.assertRaisesRegex(ValueError, 'channel_discovery_unavailable'):
+            self.job()
+        self.authorize.assert_not_called()
+
+    def test_discovery_never_falls_back_to_legacy_when_channel_is_missing(self):
+        self.queue.channel_directory = Mock()
+        self.queue.chatgpt_channel = None
+        with self.assertRaisesRegex(ValueError, 'channel_not_configured'):
+            self.job()
+        self.legacy.generate.assert_not_called()
+
     def test_edit_keeps_mask_separate_and_reference_order(self):
         sources = [self.artifacts.create_from_bytes('project-test', name + '.png', self.image)
                    for name in ('source', 'reference', 'mask')]
