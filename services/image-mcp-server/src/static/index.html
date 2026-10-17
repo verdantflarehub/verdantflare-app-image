@@ -1666,6 +1666,7 @@
           </div>
           <label class="toolbar-filter">模型<select class="select-dropdown" id="filterModel"><option value="">全部模型</option></select></label>
           <label class="toolbar-filter">渠道<select class="select-dropdown" id="filterEngine"><option value="">全部渠道</option></select></label>
+          <label class="toolbar-filter">项目<select class="select-dropdown" id="filterProject"><option value="">全部项目</option></select></label>
         </div>
         <div class="toolbar-right">
           <div class="view-switch" role="group" aria-label="任务视图">
@@ -2141,10 +2142,10 @@
     const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
     const taskState = document.getElementById('taskState');
     const taskTableContainer = document.getElementById('taskTableContainer');
-    const filterModel = document.getElementById('filterModel'), filterEngine = document.getElementById('filterEngine');
+    const filterModel = document.getElementById('filterModel'), filterEngine = document.getElementById('filterEngine'), filterProject = document.getElementById('filterProject');
 
     function updateTaskFilters() {
-      for (const [select, values, label] of [[filterModel, allTasks.map(t => t.model), '全部模型'], [filterEngine, allTasks.map(t => t.engine), '全部渠道']]) {
+      for (const [select, values, label] of [[filterModel, allTasks.map(t => t.model), '全部模型'], [filterEngine, allTasks.map(t => t.engine), '全部渠道'], [filterProject, allTasks.map(t => t.project), '全部项目']]) {
         const previous = select.value;
         const options = [...new Set(values.filter(Boolean))].sort();
         if (previous && !options.includes(previous)) options.push(previous);
@@ -2340,6 +2341,7 @@
         if (currentFilter !== "all" && t.status !== currentFilter) return false;
         if (filterModel.value && t.model !== filterModel.value) return false;
         if (filterEngine.value && t.engine !== filterEngine.value) return false;
+        if (filterProject.value && t.project !== filterProject.value) return false;
         if (q && ![t.title, t.prompt, t.id, t.project, t.model, t.channelLabel].some(v => String(v || '').toLowerCase().includes(q))) return false;
         return true;
       });
@@ -2447,7 +2449,7 @@
       container.addEventListener('click', e => { const card = e.target.closest('[data-open-task]'); if (card) openInspector(card.dataset.openTask); });
       container.addEventListener('keydown', e => { if (e.target.matches('article[data-open-task]') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); openInspector(e.target.dataset.openTask); } });
     }
-    for (const select of [filterModel, filterEngine]) select.addEventListener('change', renderGallery);
+    for (const select of [filterModel, filterEngine, filterProject]) select.addEventListener('change', renderGallery);
     document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
       taskView = button.dataset.view;
       document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
