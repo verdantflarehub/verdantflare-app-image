@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -34,6 +35,12 @@ class EtcdRegistry:
         lease_ttl: int = 300,
         heartbeat_interval: int = 60,
     ) -> None:
+        self._username = os.environ.get("ETCD_USERNAME", "")
+        self._password = os.environ.get("ETCD_PASSWORD", "")
+        if bool(self._username) != bool(self._password):
+            raise ValueError("incomplete_etcd_credentials")
+        self._auth_tokens: dict[str, str] = {}
+        self._auth_lock = asyncio.Lock()
         self.domain = domain
         self.tools = tools
         self.lease_ttl = lease_ttl
@@ -45,6 +52,14 @@ class EtcdRegistry:
         self.endpoints = [ep.strip().rstrip("/") for ep in raw_etcd.split(",") if ep.strip()]
         if not self.endpoints:
             self.endpoints = ["http://127.0.0.1:2379"]
+
+        for address in self.endpoints:
+            parsed = urlsplit(address)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                    or parsed.username is not None or parsed.password is not None
+                    or parsed.path not in {"", "/"} or parsed.query or parsed.fragment
+                    or any(c.isspace() for c in address)):
+                raise ValueError("invalid_etcd_endpoint")
 
         self.service_endpoint = endpoint or os.environ.get(
             "MCP_SERVICE_ENDPOINT",
@@ -63,7 +78,7 @@ class EtcdRegistry:
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=5.0)
+            self._client = httpx.AsyncClient(timeout=5.0, trust_env=False, follow_redirects=False)
         return self._client
 
     def build_metadata(self) -> dict[str, Any]:
@@ -76,20 +91,52 @@ class EtcdRegistry:
             "tools": self.tools,
         }
 
+    async def _authenticate(self, client: httpx.AsyncClient, endpoint: str) -> bool:
+        response = await client.post(endpoint + "/v3/auth/authenticate",
+                                     json={"name": self._username, "password": self._password},
+                                     follow_redirects=False)
+        if response.status_code != 200:
+            return False
+        data = response.json()
+        token = data.get("token") if isinstance(data, dict) else None
+        if not isinstance(token, str) or not token or len(token) > 16384 or any(c.isspace() for c in token):
+            return False
+        self._auth_tokens[endpoint] = token
+        return True
+
     async def _request(self, path: str, json_body: dict[str, Any]) -> dict[str, Any] | None:
-        client = self._get_client()
-        for base_url in self.endpoints:
-            url = f"{base_url}{path}"
-            try:
-                resp = await client.post(url, json=json_body)
-                if resp.status_code == 200:
-                    return resp.json()
-                logger.warning(
-                    "[EtcdRegistry] HTTP %s from %s: %s", resp.status_code, url, resp.text
-                )
-            except Exception as err:
-                logger.debug("[EtcdRegistry] Failed to call %s: %s", url, err)
-        return None
+        # Serialize refresh and requests so concurrent keepalive/shutdown cannot
+        # replace a newer token with a rejected one. Never retry anonymously.
+        async with self._auth_lock:
+            client = self._get_client()
+            for endpoint in self.endpoints:
+                try:
+                    for attempt in range(2):
+                        if self._username and endpoint not in self._auth_tokens:
+                            if not await self._authenticate(client, endpoint):
+                                break
+                        token = self._auth_tokens.get(endpoint)
+                        headers = {"Authorization": token} if token else {}
+                        response = await client.post(endpoint + path, json=json_body,
+                                                     headers=headers, follow_redirects=False)
+                        try:
+                            data = response.json()
+                        except ValueError:
+                            data = None
+                        unauthenticated = response.status_code == 401 or (
+                            isinstance(data, dict) and data.get("code") in (16, "16"))
+                        if self._username and unauthenticated:
+                            self._auth_tokens.pop(endpoint, None)
+                            if attempt == 0:
+                                continue
+                        if response.status_code == 200 and isinstance(data, dict) and "error" not in data and "code" not in data:
+                            return data
+                        logger.warning("[EtcdRegistry] Registry request rejected (HTTP %s)", response.status_code)
+                        break
+                except (httpx.HTTPError, ValueError, TypeError):
+                    # Upstream responses and exception text may contain credentials.
+                    logger.warning("[EtcdRegistry] Registry transport unavailable")
+            return None
 
     async def register(self) -> bool:
         """Grants a lease and registers service metadata under /verdantflare/mcp/services/{domain}."""
@@ -118,6 +165,7 @@ class EtcdRegistry:
                 self.service_endpoint,
             )
             return True
+        await self.deregister()
         logger.warning("[EtcdRegistry] Failed to put service key into etcd")
         return False
 
@@ -126,8 +174,13 @@ class EtcdRegistry:
             return await self.register()
 
         resp = await self._request("/v3/lease/keepalive", {"ID": self._lease_id})
-        if resp and "result" in resp:
-            return True
+        result = resp.get("result") if isinstance(resp, dict) else None
+        if isinstance(result, dict) and str(result.get("ID")) == self._lease_id:
+            try:
+                if int(result.get("TTL", 0)) > 0:
+                    return True
+            except (TypeError, ValueError):
+                pass
 
         logger.warning("[EtcdRegistry] Lease keepalive failed, attempting re-registration")
         return await self.register()
@@ -182,6 +235,7 @@ class EtcdRegistry:
             self._heartbeat_task = None
 
         await self.deregister()
+        self._auth_tokens.clear()
 
         if self._client and not self._client.is_closed:
             await self._client.aclose()
