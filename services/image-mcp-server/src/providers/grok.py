@@ -68,12 +68,12 @@ class GrokImageProvider:
 
     def normalize(self, params: dict, project_id: str, artifacts, *, channel: bool = False) -> dict:
         p = dict(params)
-        if not self.enabled or self.model not in IMAGE_MODELS or (not channel and not self.configured()):
+        if (not self.enabled and not channel) or self.model not in IMAGE_MODELS or (not channel and not self.configured()):
             raise GrokError("provider_not_configured")
         if os.getenv("XAI_IMAGE_RESPONSE_MODE", "sync_base64") != "sync_base64":
             raise GrokError("unsupported_response_mode")
         p["model"] = p.get("model") or self.model
-        if p["model"] != self.model:
+        if (p["model"] not in IMAGE_MODELS) if channel else (p["model"] != self.model):
             raise GrokError("model_route_mismatch")
         if not isinstance(p.get("prompt"), str) or not p["prompt"].strip():
             raise GrokError("invalid_prompt")

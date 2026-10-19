@@ -178,8 +178,14 @@ for tool in IMAGE_TOOLS_SCHEMA:
 
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.26"
+SERVICE_VERSION = "v0.2.27"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
+
+
+def _channel_for_engine(engine: str):
+    return {"gemini": queue_manager.google_channel,
+            "grok": queue_manager.grok_channel,
+            "codex": queue_manager.chatgpt_channel}.get(engine.lower())
 
 
 def _result(value: dict[str, Any]) -> types.CallToolResult:
@@ -266,8 +272,11 @@ async def image_generate(
         params["instructions"] = str(instructions).strip()
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
-    if budget_limit is not None:
-        params["budget_limit"] = budget_limit
+    effective_budget = budget_limit if budget_limit is not None else (
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+    )
+    if effective_budget is not None:
+        params["budget_limit"] = effective_budget
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
@@ -377,8 +386,11 @@ async def image_edit(
     }
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
-    if budget_limit is not None:
-        params["budget_limit"] = budget_limit
+    effective_budget = budget_limit if budget_limit is not None else (
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+    )
+    if effective_budget is not None:
+        params["budget_limit"] = effective_budget
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
@@ -436,8 +448,11 @@ async def image_inpaint(
     }
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
-    if budget_limit is not None:
-        params["budget_limit"] = budget_limit
+    effective_budget = budget_limit if budget_limit is not None else (
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+    )
+    if effective_budget is not None:
+        params["budget_limit"] = effective_budget
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,

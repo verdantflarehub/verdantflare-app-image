@@ -534,6 +534,12 @@ async def api_create_task(request: Request) -> Response:
         for key in ("channel_account_id", "budget_limit"):
             if body.get(key) is not None:
                 params[key] = body[key]
+        if "budget_limit" not in params and queue_mgr is not None:
+            ch = {"gemini": queue_mgr.google_channel,
+                  "grok": queue_mgr.grok_channel,
+                  "codex": queue_mgr.chatgpt_channel}.get(engine)
+            if ch is not None:
+                params["budget_limit"] = os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1")
         params = queue_mgr.prepare(engine, project_id, params)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

@@ -161,7 +161,7 @@ class TaskQueueManager:
                     raise ValueError('invalid_budget_limit')
             except InvalidOperation:
                 raise ValueError('invalid_budget_limit') from None
-            if engine == 'gemini' and params.get('model') not in (None, '', DEFAULT_GEMINI_MODEL):
+            if engine == 'gemini' and params.get('model') not in (None, '', DEFAULT_GEMINI_MODEL, 'gemini-3.1-flash-image-preview'):
                 raise ValueError('capability_not_supported')
             params['channel_authority'] = self.google_authorize(project_id, None)
             params['channel_runtime'] = {'gemini': 'google-channel-v1', 'grok': 'grok-channel-v1', 'codex': 'chatgpt-channel-v1'}[engine]
@@ -184,7 +184,7 @@ class TaskQueueManager:
     def capabilities(self):
         grok = self.grok_provider.capability()
         if self.grok_channel is not None:
-            grok.update(configured=True, adapter_version='grok-channel-v1')
+            grok.update(enabled=True, configured=True, adapter_version='grok-channel-v1')
         engines = [
             {"engine": "codex", "model": DEFAULT_IMAGE_MODEL, "enabled": True},
             {"engine": "gemini", "model": DEFAULT_GEMINI_MODEL, "enabled": True},
