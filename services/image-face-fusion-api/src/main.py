@@ -20,7 +20,7 @@ async def lifespan(app):
         await asyncio.to_thread(pipeline.close)
 
 
-app = FastAPI(title="VerdantFlare Image Face Fusion API", version="0.2.0",
+app = FastAPI(title="VerdantFlare Image Face Fusion API", version="0.2.1",
               description="Internal API backed by official FaceFusion 3.9.0", lifespan=lifespan)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,

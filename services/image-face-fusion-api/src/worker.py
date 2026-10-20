@@ -28,7 +28,7 @@ def load_upstream(settings):
 
 
 class OfficialBackend:
-    def __init__(self, settings, initialize=True):
+    def __init__(self, settings, initialize=True, download_providers=()):
         load_upstream(settings)
         import numpy as np
         import cv2
@@ -39,7 +39,7 @@ class OfficialBackend:
         self.creator, self.analyser = face_creator, content_analyser
         self.swapper, self.enhancer, self.settings = swapper, enhancer, settings
         defaults = {
-            "download_providers": [], "download_scope": "full", "log_level": "error",
+            "download_providers": list(download_providers), "download_scope": "full", "log_level": "error",
             "execution_device_ids": [0], "execution_providers": [settings.provider],
             "execution_thread_count": 1, "video_memory_strategy": "tolerant",
             "face_detector_model": "yolo_face", "face_detector_size": "640x640",
@@ -89,7 +89,8 @@ class OfficialBackend:
                 options = module.get_model_options()
                 hashes, sources = options["hashes"], options["sources"]
             for key, spec in sources.items():
-                result[module.__name__ + ":" + key] = dict(path=spec["path"], hash_path=hashes[key]["path"])
+                result[module.__name__ + ":" + key] = dict(path=spec["path"], hash_path=hashes[key]["path"],
+                    url=spec.get("url"), hash_url=hashes[key].get("url"))
         return result
 
     def initialize(self):
