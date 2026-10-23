@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
 from .artifacts import ArtifactStore
+from .gpu_lease import GpuCoordinator
 from .providers.codex import CodexProvider, DEFAULT_IMAGE_MODEL
 from .providers.gemini import GeminiProvider, DEFAULT_GEMINI_MODEL
+from .providers.moss import DEFAULT_MOSS_MODEL, MossProvider
 from .tasks import TaskRecord, TaskStore
 from .providers.grok import GrokImageProvider, GrokError
 from .providers.google_channel import ChannelUnavailable
@@ -52,6 +54,8 @@ class TaskQueueManager:
         grok_channel=None,
         chatgpt_channel=None,
         channel_directory=None,
+        moss_provider: MossProvider | None = None,
+        moss_gpu: GpuCoordinator | None = None,
     ) -> None:
         self.tasks = tasks
         self.artifacts = artifacts
@@ -66,6 +70,9 @@ class TaskQueueManager:
         self.grok_provider = GrokImageProvider()
         self.grok_sem = asyncio.Semaphore(max(1, int(os.getenv("XAI_IMAGE_MAX_CONCURRENCY", "1"))))
         self.grok_lock = threading.Lock()
+        self.moss_provider = moss_provider or MossProvider()
+        self.moss_gpu = moss_gpu or GpuCoordinator.from_environment()
+        self.moss_sem = asyncio.Semaphore(max(1, int(os.getenv("MOSS_IMAGE_MAX_CONCURRENCY", "1"))))
 
         codex_limit = int(os.environ.get("CODEX_MAX_CONCURRENCY", "2"))
         gemini_limit = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "5"))
@@ -96,6 +103,7 @@ class TaskQueueManager:
             self._worker_tasks.append(task)
         self._worker_tasks.append(asyncio.create_task(self._collect_grok()))
         self._worker_tasks.append(asyncio.create_task(self._collect_channels()))
+        self._worker_tasks.append(asyncio.create_task(self._idle_moss()))
 
         # 3. 恢复历史未消费的 queued 任务
         pending = self.tasks.get_queued_tasks()
@@ -132,13 +140,15 @@ class TaskQueueManager:
         await self._queue.put(job)
 
     def prepare(self, engine, project_id, params):
-        if engine not in {"codex", "gemini", "grok"}:
+        if engine not in {"codex", "gemini", "grok", "moss-image"}:
             raise ValueError("unsupported_engine")
         params = dict(params)
         # Internal route/authority cannot be supplied in generation parameters.
         for internal in ('channel_runtime', 'channel_authority'):
             if internal in params:
                 raise ValueError('reserved_channel_parameter')
+        if engine == 'moss-image':
+            return self.moss_provider.normalize(params)
         if engine == 'grok':
             params = self.grok_provider.normalize(params, project_id, self.artifacts, channel=self.grok_channel is not None)
         channel = {'gemini': self.google_channel, 'grok': self.grok_channel, 'codex': self.chatgpt_channel}.get(engine)
@@ -205,14 +215,27 @@ class TaskQueueManager:
                     project_write_authorization_required=True)
                 if self.channel_directory is not None:
                     engine['enabled'] = self.channel_directory.resolve(name, 'image.generate') == channel.endpoint
-        return {"default_engine": "codex", "engines": engines}
+        engines.append(self.moss_provider.capability())
+        return {
+            "default_engine": "codex",
+            "engines": engines,
+            "content_rating": {
+                "supported": True,
+                "tool": "image.rate_content",
+                "rubric_version": "rubric v1.0",
+                "add_only": True,
+            },
+        }
 
     def _get_semaphore(self, engine: str) -> asyncio.Semaphore:
-        if engine.lower() == "grok":
+        eng = engine.lower()
+        if eng == "grok":
             return self.grok_sem
-        if engine.lower() not in {"codex", "gemini"}:
+        if eng == "moss-image":
+            return self.moss_sem
+        if eng not in {"codex", "gemini"}:
             raise ValueError("unsupported_engine")
-        return self.gemini_sem if engine.lower() == "gemini" else self.codex_sem
+        return self.gemini_sem if eng == "gemini" else self.codex_sem
 
     async def _worker_loop(self, worker_id: int) -> None:
         while self._running:
@@ -236,6 +259,8 @@ class TaskQueueManager:
                         continue
                     elif job.engine == "grok":
                         await loop.run_in_executor(None, self._execute_grok, job)
+                    elif job.engine == "moss-image":
+                        await loop.run_in_executor(None, self._execute_moss, job)
                     elif job.action == "generate":
                         await loop.run_in_executor(None, self._execute_generate, job)
                     elif job.action in ("edit", "inpaint"):
@@ -378,7 +403,7 @@ class TaskQueueManager:
     async def _collect_channels(self):
         while self._running:
             await asyncio.sleep(15)
-            records, _ = self.tasks.list_tasks(status='running', limit=10000)
+            records, _ = self.tasks.list_tasks(status='running', limit=10000, include_nsfw=True)
             for record in records:
                 if record.request_params.get('channel_runtime') not in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
                     continue
@@ -422,7 +447,7 @@ class TaskQueueManager:
                                      error="", phase="completed")
 
     def recover_grok(self):
-        records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000)
+        records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000, include_nsfw=True)
         for rec in records:
             if rec.request_params.get('channel_runtime') == 'grok-channel-v1':
                 continue
@@ -439,7 +464,7 @@ class TaskQueueManager:
         while self._running:
             await asyncio.sleep(15)
             # Only persisted results are retried; never repeat a POST.
-            records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000)
+            records, _ = self.tasks.list_tasks(engine="grok", status="running", limit=10000, include_nsfw=True)
             for rec in records:
                 if rec.request_params.get('channel_runtime') == 'grok-channel-v1':
                     continue
@@ -449,6 +474,39 @@ class TaskQueueManager:
                             rec.engine, rec.request_params["action"], rec.request_params))
                     except Exception:
                         pass
+
+    async def _idle_moss(self) -> None:
+        while self._running:
+            await asyncio.sleep(15)
+            try:
+                await asyncio.to_thread(self.moss_gpu.maybe_scale_down)
+            except Exception:
+                pass
+
+    def _execute_moss(self, job: TaskJob) -> None:
+        with self.moss_gpu.hold():
+            self.tasks.update_status(job.task_id, "running", phase="acquiring_gpu")
+            self.moss_gpu.ensure_worker_ready(self.moss_provider.health)
+            self.tasks.update_status(job.task_id, "running", phase="generating")
+            img_bytes, meta = self.moss_provider.generate(job.params)
+            meta["task_id"] = job.task_id
+            extension, media_type = _image_storage_type(img_bytes)
+            filename = f"moss-{job.task_id}{extension}"
+            artifact_id = "art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16]
+            record = self.artifacts.create_from_bytes(
+                project_id=job.project_id,
+                artifact_id=artifact_id,
+                filename=filename,
+                data=img_bytes,
+                media_type=media_type,
+                metadata=meta,
+            )
+            self.tasks.update_status(
+                job.task_id,
+                "running",
+                artifact_id=record.artifact_id,
+                phase="completed",
+            )
 
     def _execute_generate(self, job: TaskJob) -> None:
         p = job.params

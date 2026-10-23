@@ -7,8 +7,9 @@ from typing import Any
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
-from .artifacts import ArtifactStore
-from .tasks import TaskStore
+from .artifacts import ArtifactNotFound, ArtifactStore
+from .content_rating import ContentRatingError, include_nsfw_from_headers
+from .tasks import TaskNotFound, TaskStore
 
 STATIC_HTML_PATH = Path(__file__).parent / "static" / "index.html"
 
@@ -426,6 +427,12 @@ async def api_list_tasks(request: Request) -> Response:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     tasks_store = request.app.state.tasks
+    ratings_store = getattr(request.app.state, "ratings", None)
+    if ratings_store is None or ratings_store.db_path != tasks_store.db_path:
+        from .content_rating import ContentRatingStore
+        ratings_store = ContentRatingStore(tasks_store.db_path, domain="image")
+        request.app.state.ratings = ratings_store
+    include_nsfw = include_nsfw_from_headers(request.headers)
     project_id = request.query_params.get("project_id")
     engine = request.query_params.get("engine")
     status = request.query_params.get("status")
@@ -438,6 +445,7 @@ async def api_list_tasks(request: Request) -> Response:
         status=status,
         limit=limit,
         offset=offset,
+        include_nsfw=include_nsfw,
     )
     values = []
     for record in records:
@@ -446,8 +454,16 @@ async def api_list_tasks(request: Request) -> Response:
             try:
                 metadata = request.app.state.artifacts.get(record.artifact_id, record.project_id).metadata
                 value["media"] = {k: metadata[k] for k in ("width", "height") if k in metadata}
-            except (OSError, ValueError, KeyError):
+            except (OSError, ValueError, KeyError, ArtifactNotFound):
                 pass
+        if ratings_store is not None:
+            value.update(
+                ratings_store.ui_fields(
+                    record.artifact_id,
+                    task_id=record.task_id,
+                    can_write=True,
+                )
+            )
         values.append(value)
     return JSONResponse({
         "tasks": values,
@@ -463,7 +479,8 @@ async def api_task_stats(request: Request) -> Response:
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     tasks_store = request.app.state.tasks
-    stats = tasks_store.get_stats()
+    include_nsfw = include_nsfw_from_headers(request.headers)
+    stats = tasks_store.get_stats(include_nsfw=include_nsfw)
     return JSONResponse(stats)
 
 
@@ -482,18 +499,20 @@ async def api_create_task(request: Request) -> Response:
         return JSONResponse({"error": "prompt_is_required"}, status_code=400)
 
     engine = str(body.get("engine", "codex")).strip().lower()
-    if engine not in ("codex", "gemini", "grok"):
+    if engine not in ("codex", "gemini", "grok", "moss-image"):
         return JSONResponse({"error": "unsupported_engine"}, status_code=400)
 
-    aspect_ratio = str(body.get("aspect_ratio", "16:9")).strip()
-    resolution = str(body.get("resolution", "2k")).strip()
+    aspect_ratio = str(body.get("aspect_ratio", "1:1" if engine == "moss-image" else "16:9")).strip()
+    resolution = str(body.get("resolution", "1k" if engine == "moss-image" else "2k")).strip()
     quality = str(body.get("quality", "hd")).strip()
     if not quality or quality == "auto":
         quality = "hd"
 
     model = str(body.get("model", "")).strip()
     resolved_model = model or (
-        "gpt-image-2.5-sunburst" if engine == "codex" else "gemini-3.1-flash-image"
+        "gpt-image-2.5-sunburst" if engine == "codex"
+        else "moss-image-sft-int8-convrot" if engine == "moss-image"
+        else "gemini-3.1-flash-image"
     )
 
     if engine == "grok":
@@ -506,7 +525,7 @@ async def api_create_task(request: Request) -> Response:
     if source_artifact_id and action == "generate":
         action = "edit"
 
-    params = {
+    params: dict[str, Any] = {
         "action": action,
         "prompt": prompt,
         "model": resolved_model,
@@ -514,6 +533,22 @@ async def api_create_task(request: Request) -> Response:
         "resolution": resolution,
         "quality": quality,
     }
+    if engine == "moss-image":
+        for key in (
+            "negative_prompt",
+            "width",
+            "height",
+            "steps",
+            "cfg_scale",
+            "sampler",
+            "scheduler",
+            "shift",
+            "skip_single_layers",
+            "seed",
+            "layout",
+        ):
+            if body.get(key) is not None:
+                params[key] = body[key]
     if source_artifact_id:
         params["source_artifact_id"] = source_artifact_id
     if ref_ids:
@@ -560,6 +595,84 @@ async def api_create_task(request: Request) -> Response:
         )
 
     return JSONResponse(task.to_dict(), status_code=201)
+
+
+def _resolve_version_target(request: Request, version_id: str, project_id_hint: str | None = None) -> tuple[str, str | None, str]:
+    tasks_store: TaskStore = request.app.state.tasks
+    artifacts_store: ArtifactStore = request.app.state.artifacts
+    if version_id.startswith("imgtask-"):
+        task = tasks_store.get(version_id)
+        return task.artifact_id or task.task_id, task.task_id, task.project_id
+    try:
+        art = artifacts_store.get(version_id, project_id_hint)
+        records, _ = tasks_store.list_tasks(project_id=art.project_id, limit=1000, include_nsfw=True)
+        matched_task_id = next((r.task_id for r in records if r.artifact_id == art.artifact_id), None)
+        return art.artifact_id, matched_task_id, art.project_id
+    except ArtifactNotFound:
+        task = tasks_store.get(version_id)
+        return task.artifact_id or task.task_id, task.task_id, task.project_id
+
+
+async def api_clear_content_rating(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    version_id = str(request.path_params.get("version_id", "")).strip()
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    actor_user_id = (
+        request.headers.get("x-user-id", "").strip()
+        or str(body.get("actor_user_id") or body.get("user_id") or "").strip()
+    )
+    project_hint = str(body.get("project_id") or "").strip() or None
+    note = body.get("note")
+    try:
+        resolved_ver, task_id, project_id = _resolve_version_target(request, version_id, project_hint)
+        res = request.app.state.ratings.clear_rating(
+            version_id=resolved_ver,
+            project_id=project_id,
+            actor_user_id=actor_user_id,
+            note=note,
+            task_id=task_id,
+        )
+        return JSONResponse(res, status_code=200)
+    except (ArtifactNotFound, TaskNotFound):
+        return JSONResponse({"error_code": "NOT_FOUND", "message": f"Version not found: {version_id}"}, status_code=404)
+    except ContentRatingError as exc:
+        return JSONResponse({"error_code": exc.error_code, "message": exc.message}, status_code=exc.status_code)
+
+
+async def api_mark_content_rating(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    version_id = str(request.path_params.get("version_id", "")).strip()
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    actor_user_id = (
+        request.headers.get("x-user-id", "").strip()
+        or str(body.get("actor_user_id") or body.get("user_id") or "").strip()
+    )
+    project_hint = str(body.get("project_id") or "").strip() or None
+    reason = body.get("reason")
+    try:
+        resolved_ver, task_id, project_id = _resolve_version_target(request, version_id, project_hint)
+        res = request.app.state.ratings.mark_rating(
+            version_id=resolved_ver,
+            project_id=project_id,
+            actor_user_id=actor_user_id,
+            reason=reason,
+            task_id=task_id,
+        )
+        return JSONResponse(res, status_code=200)
+    except (ArtifactNotFound, TaskNotFound):
+        return JSONResponse({"error_code": "NOT_FOUND", "message": f"Version not found: {version_id}"}, status_code=404)
+    except ContentRatingError as exc:
+        return JSONResponse({"error_code": exc.error_code, "message": exc.message}, status_code=exc.status_code)
 
 
 async def api_upload_artifact(request: Request) -> Response:

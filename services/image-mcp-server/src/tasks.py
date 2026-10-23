@@ -117,6 +117,7 @@ class TaskStore:
         return conn
 
     def ensure_ready(self) -> None:
+        from .content_rating import CONTENT_RATING_SCHEMA_SQL
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = self._get_conn()
         try:
@@ -124,6 +125,7 @@ class TaskStore:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA synchronous=NORMAL;")
             conn.executescript(SCHEMA_SQL)
+            conn.executescript(CONTENT_RATING_SCHEMA_SQL)
             if "phase" not in {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}:
                 conn.execute("ALTER TABLE tasks ADD COLUMN phase TEXT")
         finally:
@@ -230,6 +232,16 @@ class TaskStore:
                 raise TaskNotFound(f"任务未找到: {task_id}")
             return TaskRecord.from_row(row)
 
+    def find_by_artifact_or_task(self, version_id: str) -> TaskRecord | None:
+        self.ensure_ready()
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "SELECT * FROM tasks WHERE task_id = ? OR artifact_id = ? ORDER BY created_at DESC LIMIT 1",
+                (version_id, version_id),
+            )
+            row = cur.fetchone()
+            return TaskRecord.from_row(row) if row else None
+
     def update_status(
         self,
         task_id: str,
@@ -271,6 +283,7 @@ class TaskStore:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        include_nsfw: bool = False,
     ) -> tuple[list[TaskRecord], int]:
         self.ensure_ready()
         conditions: list[str] = []
@@ -285,6 +298,12 @@ class TaskStore:
         if status:
             conditions.append("status = ?")
             params.append(status)
+        if not include_nsfw:
+            conditions.append(
+                "NOT EXISTS (SELECT 1 FROM content_ratings cr "
+                "WHERE (cr.version_id = tasks.artifact_id OR cr.task_id = tasks.task_id OR cr.version_id = tasks.task_id) "
+                "AND cr.rating = 'nsfw')"
+            )
 
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -304,11 +323,20 @@ class TaskStore:
 
         return records, total
 
-    def get_stats(self) -> dict[str, Any]:
+    def get_stats(self, *, include_nsfw: bool = False) -> dict[str, Any]:
         self.ensure_ready()
+        where_clause = (
+            ""
+            if include_nsfw
+            else (
+                "WHERE NOT EXISTS (SELECT 1 FROM content_ratings cr "
+                "WHERE (cr.version_id = tasks.artifact_id OR cr.task_id = tasks.task_id OR cr.version_id = tasks.task_id) "
+                "AND cr.rating = 'nsfw')"
+            )
+        )
         with self._get_conn() as conn:
             cur = conn.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) as total,
                     SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued,
@@ -318,6 +346,7 @@ class TaskStore:
                     SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceled,
                     AVG(CASE WHEN status = 'completed' THEN duration_seconds ELSE NULL END) as avg_duration
                 FROM tasks
+                {where_clause}
                 """
             )
             row = cur.fetchone()
@@ -336,17 +365,30 @@ class TaskStore:
 
         A restart is not evidence of supplier rejection. These records remain
         running and are never requeued; channel and Grok recovery stay separate.
+        Self-hosted moss-image tasks without an artifact are reset to queued so
+        get_queued_tasks() re-executes them idempotently.
         """
         self.ensure_ready()
         now = datetime.now(timezone.utc).isoformat()
         with self._get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'queued',
+                    phase = NULL,
+                    error = NULL,
+                    updated_at = ?
+                WHERE status = 'running' AND engine = 'moss-image' AND artifact_id IS NULL
+                """,
+                (now,),
+            )
             cur = conn.execute(
                 """
                 UPDATE tasks
                 SET phase = 'submission_unknown',
                     error = '服务重启，原调用结果待确认；未重新提交',
                     updated_at = ?
-                WHERE status = 'running' AND phase IS NULL AND engine != 'grok'
+                WHERE status = 'running' AND phase IS NULL AND engine NOT IN ('grok', 'moss-image')
                   AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') NOT IN ('google-channel-v1', 'chatgpt-channel-v1')
                 """,
                 (now,),

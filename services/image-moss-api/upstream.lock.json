@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/Comfy-Org/ComfyUI.git",
+  "version": "0.42.0",
+  "commit": "355cd6b14c92c19ac3188fe528e47a3f21ef5178",
+  "models_repository": "https://modelscope.cn/models/Comfy-Org/MOSS-Image"
+}

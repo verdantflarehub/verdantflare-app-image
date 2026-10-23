@@ -19,6 +19,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
 from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore
+from .content_rating import ContentRatingError, ContentRatingStore, include_nsfw_from_headers
 from .dashboard import (
     api_create_task,
     api_list_tasks,
@@ -29,6 +30,7 @@ from .dashboard import (
 from .faceswap import handle_faceswap
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
+from .providers.moss import DEFAULT_MOSS_MODEL
 from .queue import TaskQueueManager
 from .registry import EtcdRegistry
 from .tasks import TaskNotFound, TaskStore
@@ -39,6 +41,7 @@ from .channel_discovery_client import ChannelDiscoveryClient
 
 artifacts = ArtifactStore.from_environment()
 tasks = TaskStore.from_environment()
+ratings = ContentRatingStore(tasks.db_path, domain="image")
 codex_provider = CodexProvider()
 gemini_provider = GeminiProvider()
 channel_client = httpx.Client(trust_env=False)
@@ -70,18 +73,29 @@ mcp = MCPServer("VerdantFlare Image")
 IMAGE_TOOLS_SCHEMA = [
     {
         "name": "image.create",
-        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.5) or Gemini.",
+        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.5), Gemini, Grok, or MOSS-Image.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Image description prompt"},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
                 "model": {"type": "string", "description": "Model identifier, e.g. gpt-image-2.5-sunburst"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4"], "default": "16:9"},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
                 "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter"},
+                "negative_prompt": {"type": "string", "description": "Optional negative prompt (moss-image)"},
+                "width": {"type": "integer", "description": "Pixel width, multiple of 16 (moss-image)"},
+                "height": {"type": "integer", "description": "Pixel height, multiple of 16 (moss-image)"},
+                "steps": {"type": "integer", "description": "Sampling steps (default 50 for moss-image)"},
+                "cfg_scale": {"type": "number", "description": "Guidance scale (default 3.0 for moss-image)"},
+                "sampler": {"type": "string", "description": "Sampler name (default euler for moss-image)"},
+                "scheduler": {"type": "string", "description": "Scheduler name (default simple for moss-image)"},
+                "shift": {"type": "number", "description": "ModelSamplingFlux/AuraFlow shift (default 5.0 for moss-image)"},
+                "skip_single_layers": {"type": "string", "description": "SkipLayerGuidanceDiTSimple single_layers (default '22' for moss-image)"},
+                "seed": {"type": "integer", "description": "Random seed (moss-image)"},
+                "layout": {"type": "object", "description": "Experimental JSON layout (abs_centralized yxyx, <=32 items, moss-image)"},
                 "project_id": {"type": "string", "description": "Project ID"},
                 "idempotency_key": {"type": "string", "description": "Unique idempotency key"},
             },
@@ -176,6 +190,23 @@ for tool in IMAGE_TOOLS_SCHEMA:
             'budget_limit': {'type': 'string', 'description': 'Maximum USD reservation, not an estimated charge'},
         })
 
+IMAGE_TOOLS_SCHEMA.append(
+    {
+        "name": "image.rate_content",
+        "description": "Record content rating (general or nsfw) for an image artifact or task version. Add-only; cannot clear an existing nsfw rating.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "version_id": {"type": "string", "description": "Target artifact_id or task_id"},
+                "rating": {"type": "string", "enum": ["general", "nsfw"], "description": "Content rating"},
+                "reason": {"type": "string", "description": "Reason for rating"},
+                "rubric_version": {"type": "string", "default": "v1.0", "description": "Rubric version"},
+                "project_id": {"type": "string", "description": "Optional project_id for cross-project isolation check"},
+            },
+            "required": ["version_id", "rating", "reason"],
+        },
+    }
+)
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
 SERVICE_VERSION = "v0.2.27"
@@ -231,7 +262,7 @@ async def api_capabilities(request: Request) -> JSONResponse:
 async def image_generate(
     project_id: str,
     idempotency_key: str,
-    prompt: str,
+    prompt: str = "",
     engine: str = "codex",
     model: str = "",
     aspect_ratio: str = "16:9",
@@ -241,14 +272,30 @@ async def image_generate(
     instructions: str | None = None,
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
+    negative_prompt: str = "",
+    width: int | None = None,
+    height: int | None = None,
+    steps: int | None = None,
+    cfg_scale: float | None = None,
+    guidance: float | None = None,
+    sampler: str | None = None,
+    scheduler: str | None = None,
+    shift: float | None = None,
+    skip_single_layers: str | None = None,
+    seed: int | None = None,
+    layout: dict[str, Any] | None = None,
+    reference_images: list[str] | None = None,
+    mask: str | None = None,
+    prefer_4k: bool | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词生成图像。
 
     遵循 GPT Image 2.5 官方提示词标准 (Scene, Subject, Details, Constraints)。
-    - engine: 默认 "codex" (OpenAI Responses API 驱动)，亦可选 "gemini"
+    - engine: 默认 "codex" (OpenAI Responses API 驱动)，亦可选 "gemini", "grok", "moss-image"
     - model:
         codex 引擎推荐: "gpt-image-2.5-sunburst" (画质首选，微观细节与皮肤毛孔) 或 "gpt-image-2.5-flare" (极速响应)
         gemini 引擎: "gemini-3.1-flash-image"
+        moss-image 引擎: "moss-image-sft-int8-convrot" (自托管 INT8-ConvRot 文字排版与版式生成)
     - aspect_ratio: "16:9", "9:16", "1:1", "4:3", "3:4"
     - resolution: "2k" (默认), "4k" (对齐 3840x2160 / 2160x3840 官方尺寸约束)
     - quality: "auto", "low", "medium", "high", "xhigh", "max" (历史 "hd" 兼容映射为 "high")
@@ -257,9 +304,9 @@ async def image_generate(
     """
     resolved_model = model or (
         {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
-         "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
+         "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
     )
-    params = {
+    params: dict[str, Any] = {
         "action": "generate",
         "prompt": prompt,
         "model": resolved_model,
@@ -277,6 +324,36 @@ async def image_generate(
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
+    if negative_prompt:
+        params["negative_prompt"] = negative_prompt
+    if width is not None:
+        params["width"] = width
+    if height is not None:
+        params["height"] = height
+    if steps is not None:
+        params["steps"] = steps
+    if cfg_scale is not None:
+        params["cfg_scale"] = cfg_scale
+    if guidance is not None:
+        params["guidance"] = guidance
+    if sampler is not None:
+        params["sampler"] = sampler
+    if scheduler is not None:
+        params["scheduler"] = scheduler
+    if shift is not None:
+        params["shift"] = shift
+    if skip_single_layers is not None:
+        params["skip_single_layers"] = skip_single_layers
+    if seed is not None:
+        params["seed"] = seed
+    if layout is not None:
+        params["layout"] = layout
+    if reference_images is not None:
+        params["reference_images"] = reference_images
+    if mask is not None:
+        params["mask"] = mask
+    if prefer_4k is not None:
+        params["prefer_4k"] = prefer_4k
     params = queue_manager.prepare(engine, project_id, params)
     task = tasks.create(
         project_id=project_id,
@@ -306,8 +383,8 @@ async def image_generate(
 
 @mcp.tool(name="image.create")
 async def image_create(
-    prompt: str,
-    project_id: str,
+    prompt: str = "",
+    project_id: str = "",
     idempotency_key: str = "",
     engine: str = "codex",
     model: str = "",
@@ -318,6 +395,21 @@ async def image_create(
     instructions: str | None = None,
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
+    negative_prompt: str = "",
+    width: int | None = None,
+    height: int | None = None,
+    steps: int | None = None,
+    cfg_scale: float | None = None,
+    guidance: float | None = None,
+    sampler: str | None = None,
+    scheduler: str | None = None,
+    shift: float | None = None,
+    skip_single_layers: str | None = None,
+    seed: int | None = None,
+    layout: dict[str, Any] | None = None,
+    reference_images: list[str] | None = None,
+    mask: str | None = None,
+    prefer_4k: bool | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
     import uuid
@@ -337,6 +429,21 @@ async def image_create(
         instructions=instructions,
         channel_account_id=channel_account_id,
         budget_limit=budget_limit,
+        negative_prompt=negative_prompt,
+        width=width,
+        height=height,
+        steps=steps,
+        cfg_scale=cfg_scale,
+        guidance=guidance,
+        sampler=sampler,
+        scheduler=scheduler,
+        shift=shift,
+        skip_single_layers=skip_single_layers,
+        seed=seed,
+        layout=layout,
+        reference_images=reference_images,
+        mask=mask,
+        prefer_4k=prefer_4k,
     )
 
 
@@ -514,9 +621,82 @@ async def image_faceswap(
     return _result(res)
 
 
+def _active_ratings() -> ContentRatingStore:
+    global ratings
+    if ratings.db_path != tasks.db_path:
+        ratings = ContentRatingStore(tasks.db_path, domain="image")
+    return ratings
+
+
+def _resolve_rating_target(version_id: str, project_id: str | None = None) -> tuple[str, str | None]:
+    """Resolve (project_id, task_id) for an artifact_id or task_id, or raise TaskNotFound."""
+    vid = (version_id or "").strip()
+    if not vid:
+        raise TaskNotFound("NOT_FOUND: version_id is required")
+    matched_task = tasks.find_by_artifact_or_task(vid)
+    if matched_task is not None:
+        if project_id and matched_task.project_id != project_id:
+            raise TaskNotFound(f"NOT_FOUND: {vid}")
+        return matched_task.project_id, matched_task.task_id
+    try:
+        art = artifacts.get(vid, project_id)
+        return art.project_id, None
+    except ArtifactNotFound as exc:
+        raise TaskNotFound(f"NOT_FOUND: {vid}") from exc
+
+
+def _is_task_nsfw(task_id: str, artifact_id: str | None) -> bool:
+    return _active_ratings().is_nsfw(artifact_id, task_id=task_id)
+
+
+@mcp.tool(name="image.rate_content")
+def image_rate_content(
+    version_id: str,
+    rating: str,
+    reason: str | None = None,
+    reasons: list[str] | None = None,
+    rubric_version: str = "rubric v1.0",
+    evaluator_model: str | None = None,
+    project_id: str | None = None,
+) -> types.CallToolResult:
+    """为图片产物或任务版本记录内容分级（general 或 nsfw，只增不减）。"""
+    resolved_project_id, resolved_task_id = _resolve_rating_target(version_id, project_id)
+    caller = CALLER.get() or {}
+    actor_id = caller.get("user_id") or "skill:k09"
+    store = _active_ratings()
+    res = store.rate_content(
+        version_id=version_id,
+        project_id=resolved_project_id,
+        rating=rating,
+        reasons=reasons,
+        reason=reason,
+        rubric_version=rubric_version,
+        evaluator_model=evaluator_model,
+        rated_by=actor_id,
+        task_id=resolved_task_id,
+    )
+    if resolved_task_id:
+        matched_task = tasks.find_by_artifact_or_task(version_id)
+        if matched_task and matched_task.artifact_id and matched_task.artifact_id != version_id:
+            store.rate_content(
+                version_id=matched_task.artifact_id,
+                project_id=resolved_project_id,
+                rating=rating,
+                reasons=reasons,
+                reason=reason,
+                rubric_version=rubric_version,
+                evaluator_model=evaluator_model,
+                rated_by=actor_id,
+                task_id=resolved_task_id,
+            )
+    return _result(res)
+
+
 @mcp.tool(name="image.status")
 def image_status(task_id: str) -> types.CallToolResult:
     task = tasks.get(task_id)
+    if _is_task_nsfw(task.task_id, task.artifact_id):
+        raise TaskNotFound(f"NOT_FOUND: {task_id}")
     return _result(
         {
             "task_id": task.task_id,
@@ -535,6 +715,8 @@ def image_status(task_id: str) -> types.CallToolResult:
 @mcp.tool(name="image.result")
 def image_result(task_id: str) -> types.CallToolResult:
     task = tasks.get(task_id)
+    if _is_task_nsfw(task.task_id, task.artifact_id):
+        raise TaskNotFound(f"NOT_FOUND: {task_id}")
     if task.status != "completed" or not task.artifact_id:
         return _result(
             {
@@ -574,6 +756,7 @@ def image_list(
         status=status,
         limit=limit,
         offset=offset,
+        include_nsfw=False,
     )
     return _result(
         {
@@ -610,11 +793,91 @@ async def health(request: Request) -> JSONResponse:
 async def artifact_content(request: Request) -> Response:
     try:
         artifact_id = request.path_params.get("artifact_id")
+        include_nsfw = include_nsfw_from_headers(request.headers)
+        store = _active_ratings()
+        if not include_nsfw and artifact_id:
+            matched_task = tasks.find_by_artifact_or_task(artifact_id)
+            if store.is_nsfw(artifact_id, task_id=matched_task.task_id if matched_task else None):
+                return JSONResponse({"error": "artifact_not_found"}, status_code=404)
         rec = artifacts.get(artifact_id)
         path = artifacts.content_path(rec)
         return FileResponse(path, media_type=rec.media_type, filename=rec.filename)
     except (ValueError, ArtifactNotFound):
         return JSONResponse({"error": "artifact_not_found"}, status_code=404)
+
+
+async def internal_clear_rating(request: Request) -> JSONResponse:
+    version_id = (request.path_params.get("version_id") or "").strip()
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        body = {}
+    project_id = body.get("project_id") or request.headers.get("X-Project-Id") or None
+    note = body.get("note") or body.get("reason")
+    actor_id = request.headers.get("X-User-Id", "").strip() or body.get("actor_user_id") or body.get("actor_id") or "human"
+    store = _active_ratings()
+    try:
+        resolved_project_id, resolved_task_id = _resolve_rating_target(version_id, project_id)
+        rec = store.clear_rating(
+            version_id=version_id,
+            project_id=resolved_project_id,
+            actor_user_id=actor_id,
+            note=note,
+            task_id=resolved_task_id,
+        )
+        matched_task = tasks.find_by_artifact_or_task(version_id)
+        if matched_task:
+            for cid in {matched_task.task_id, matched_task.artifact_id}:
+                if cid and cid != version_id:
+                    store.clear_rating(
+                        version_id=cid,
+                        project_id=resolved_project_id,
+                        actor_user_id=actor_id,
+                        note=note,
+                        task_id=resolved_task_id,
+                    )
+        return JSONResponse(rec)
+    except TaskNotFound:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    except ContentRatingError as exc:
+        return JSONResponse({"error": exc.error_code, "message": exc.message}, status_code=exc.status_code)
+
+
+async def internal_mark_rating(request: Request) -> JSONResponse:
+    version_id = (request.path_params.get("version_id") or "").strip()
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        body = {}
+    project_id = body.get("project_id") or request.headers.get("X-Project-Id") or None
+    reason = body.get("reason") or body.get("note")
+    actor_id = request.headers.get("X-User-Id", "").strip() or body.get("actor_user_id") or body.get("actor_id") or "human"
+    store = _active_ratings()
+    try:
+        resolved_project_id, resolved_task_id = _resolve_rating_target(version_id, project_id)
+        rec = store.mark_rating(
+            version_id=version_id,
+            project_id=resolved_project_id,
+            actor_user_id=actor_id,
+            reason=reason,
+            task_id=resolved_task_id,
+        )
+        matched_task = tasks.find_by_artifact_or_task(version_id)
+        if matched_task:
+            for cid in {matched_task.task_id, matched_task.artifact_id}:
+                if cid and cid != version_id:
+                    store.mark_rating(
+                        version_id=cid,
+                        project_id=resolved_project_id,
+                        actor_user_id=actor_id,
+                        reason=reason,
+                        task_id=resolved_task_id,
+                    )
+        return JSONResponse(rec)
+    except TaskNotFound:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    except ContentRatingError as exc:
+        return JSONResponse({"error": exc.error_code, "message": exc.message}, status_code=exc.status_code)
 
 
 class MCPPathRewriteMiddleware(BaseHTTPMiddleware):
@@ -667,8 +930,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: Starlette):
     artifacts.ensure_ready()
     tasks.ensure_ready()
+    ratings.ensure_ready()
     app.state.tasks = tasks
     app.state.artifacts = artifacts
+    app.state.ratings = ratings
     app.state.queue_manager = queue_manager
     if channel_discovery:
         channel_discovery.start()
@@ -710,6 +975,10 @@ app = Starlette(
         Route("/image/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
         Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
         Route("/image/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
+        Route("/internal/content-ratings/{version_id}/clear", internal_clear_rating, methods=["POST"]),
+        Route("/image/internal/content-ratings/{version_id}/clear", internal_clear_rating, methods=["POST"]),
+        Route("/internal/content-ratings/{version_id}/mark", internal_mark_rating, methods=["POST"]),
+        Route("/image/internal/content-ratings/{version_id}/mark", internal_mark_rating, methods=["POST"]),
         Mount("/mcp", app=mcp_app),
         Mount("/image", app=mcp_app),
         Mount("/", app=mcp_app),
@@ -720,3 +989,7 @@ app = Starlette(
     ],
     lifespan=lifespan,
 )
+app.state.tasks = tasks
+app.state.artifacts = artifacts
+app.state.ratings = ratings
+app.state.queue_manager = queue_manager
