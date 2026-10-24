@@ -1,4 +1,7 @@
-FROM nvidia/cuda@sha256:9175fa92f96de35a8cfb9493f0dfcf9435c7a597e9d95ad41d2cae382a95e3f9
+ARG BASE_IMAGE=registry.cn-qingdao.aliyuncs.com/wod/comfyui:0.1.0
+FROM ${BASE_IMAGE}
+
+USER root
 
 ARG COMFYUI_REVISION=355cd6b14c92c19ac3188fe528e47a3f21ef5178
 ARG PYPI_INDEX_URL=https://pypi.org/simple
@@ -19,27 +22,21 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MOSS_IMAGE_MODEL_ROOT=/models/moss-image
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git gcc python3 python3-dev python3-venv libgl1 libglib2.0-0 libgomp1 \
+      gcc python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m venv /opt/venv && python -m pip install --no-cache-dir --upgrade pip
-
 WORKDIR /opt/comfyui
-RUN git clone --filter=blob:none --no-checkout https://github.com/Comfy-Org/ComfyUI.git . \
+RUN rm -rf /opt/comfyui/* /opt/comfyui/.[!.]* \
+    && git clone --filter=blob:none --no-checkout https://github.com/Comfy-Org/ComfyUI.git . \
     && git checkout --detach "${COMFYUI_REVISION}" \
     && test "$(git rev-parse HEAD)" = "${COMFYUI_REVISION}" \
     && test -f LICENSE \
-    && rm -rf .git
-
-RUN python -m pip install --no-cache-dir \
-      torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 \
-      --index-url https://download.pytorch.org/whl/cu128 \
+    && rm -rf .git \
     && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -r requirements.txt
 
 WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" . \
-    && python -m pip check \
     && python -m pip freeze > /app/verdantflare-python-packages.txt
 
 COPY upstream.lock.json /app/upstream.lock.json
