@@ -406,17 +406,6 @@ class CodexProvider:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             formatted = format_http_error_detail(exc.code, detail)
-            # 4K 回退支持
-            if prefer_4k and target_size != size:
-                return self.generate(
-                    prompt,
-                    size=size,
-                    prefer_4k=False,
-                    quality=quality,
-                    background=background,
-                    model=model,
-                    instructions=instructions,
-                )
             raise CodexProviderError(f"Codex 生图请求失败: {formatted}") from exc
         except CodexProviderError:
             raise
@@ -526,19 +515,6 @@ class CodexProvider:
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             formatted = format_http_error_detail(exc.code, detail)
-            # 4K 回退支持
-            if prefer_4k and target_size != size:
-                return self.edit(
-                    prompt=prompt,
-                    source_bytes=source_bytes,
-                    mask_bytes=mask_bytes,
-                    size=size,
-                    prefer_4k=False,
-                    quality=quality,
-                    background=background,
-                    model=model,
-                    instructions=instructions,
-                )
             raise CodexProviderError(f"Codex 图片编辑失败: {formatted}") from exc
         except CodexProviderError:
             raise

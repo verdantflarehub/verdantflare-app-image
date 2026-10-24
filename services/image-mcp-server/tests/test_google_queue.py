@@ -136,6 +136,24 @@ class GoogleQueueTests(unittest.TestCase):
             ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview'],
         )
 
+    def test_gemini_rejects_mask_and_inpaint(self):
+        with self.assertRaises(ValueError):
+            self.queue.prepare('gemini', 'project-test', {
+                'action': 'inpaint',
+                'prompt': 'test',
+                'source_artifact_id': 'art-1',
+                'mask_artifact_id': 'art-mask',
+                'budget_limit': '1',
+            })
+        with self.assertRaises(ValueError):
+            self.queue.prepare('gemini', 'project-test', {
+                'action': 'edit',
+                'prompt': 'test',
+                'source_artifact_id': 'art-1',
+                'mask_artifact_id': 'art-mask',
+                'budget_limit': '1',
+            })
+
 
 if __name__ == '__main__':
     unittest.main()

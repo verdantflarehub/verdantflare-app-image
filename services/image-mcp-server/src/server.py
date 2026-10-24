@@ -95,18 +95,18 @@ IMAGE_TOOLS_SCHEMA = [
                 "reference_artifact_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional reference image artifact IDs (up to 6 for Gemini multimodal reference, 1 for MOSS-Image identity fusion)",
+                    "description": "Optional reference image artifact IDs (up to 6 for Gemini multimodal reference, 1 for MOSS-Image Qwen3.5-9B vision reference)",
                 },
                 "face_reference_artifact_id": {
                     "type": "string",
-                    "description": "Optional face identity reference artifact ID (e.g. master-v20 for MOSS-Image two-stage Face-Fusion)",
+                    "description": "Optional identity/visual reference artifact ID for MOSS-Image Qwen3.5-9B vision conditioning",
                 },
                 "source_identity_artifact_id": {
                     "type": "string",
                     "description": "Alias for face_reference_artifact_id",
                 },
                 "identity_strength": {"type": "number", "default": 0.95, "description": "Face identity fusion strength [0.5, 1.0] (moss-image)"},
-                "restore_face": {"type": "boolean", "default": True, "description": "Enable CodeFormer face enhancement after face fusion (moss-image)"},
+                "restore_face": {"type": "boolean", "default": True, "description": "Preserve face restoration metadata flag (moss-image)"},
                 "restoration_fidelity": {"type": "number", "default": 0.85, "description": "Face restoration fidelity [0.0, 1.0] (moss-image)"},
                 "target_face_index": {"type": "integer", "default": 0, "description": "Target face index sorted by largest area (moss-image)"},
                 "negative_prompt": {"type": "string", "description": "Optional negative prompt (moss-image)"},
@@ -137,8 +137,8 @@ IMAGE_TOOLS_SCHEMA = [
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
                 "mask_artifact_id": {"type": "string"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]},
-                "resolution": {"type": "string", "description": "Grok editing: 1k or 2k"},
-                "engine": {"type": "string", "default": "codex"},
+                "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "description": "Target resolution (1k/2k for Grok and MOSS-Image; 2k/4k for Codex)"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
                 "model": {"type": "string"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "default": "auto"},
@@ -236,7 +236,7 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.34"
+SERVICE_VERSION = "v0.2.35"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 

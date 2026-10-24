@@ -370,6 +370,25 @@ class TestMossProviderExecution(unittest.TestCase):
             self.assertEqual(art.metadata["conditioning_mode"], "qwen3.5_9b_vision")
             self.assertEqual(art.metadata["prompt_mode"], "reference")
 
+            # Also verify image.edit (action="edit", source_artifact_id=...) normalizes and executes on moss-image
+            edit_params = qm.prepare(
+                "moss-image",
+                "proj-moss",
+                {
+                    "action": "edit",
+                    "prompt": "保持同一女性骨相与黑发造型，改为秋日风衣街拍",
+                    "source_artifact_id": ref_rec.artifact_id,
+                    "aspect_ratio": "2:3",
+                    "resolution": "1k",
+                },
+            )
+            self.assertEqual(edit_params["action"], "generate")
+            self.assertEqual(edit_params["width"], 832)
+            self.assertEqual(edit_params["height"], 1248)
+            self.assertEqual(edit_params["source_artifact_id"], "art-01e71e31ecaf4f0d")
+            self.assertEqual(edit_params["face_reference_artifact_id"], "art-01e71e31ecaf4f0d")
+            self.assertEqual(edit_params["reference_artifact_ids"], ["art-01e71e31ecaf4f0d"])
+
 
 if __name__ == "__main__":
     unittest.main()

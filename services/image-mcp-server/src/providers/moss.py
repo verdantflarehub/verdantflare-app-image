@@ -157,6 +157,7 @@ class MossProvider:
             "budget_limit_required": False,
             "capabilities": [
                 "text_to_image",
+                "reference_to_image",
                 "layout_to_image",
                 "bilingual_typography",
                 "face_identity_reference",
@@ -179,6 +180,8 @@ class MossProvider:
                 "max_layout_items": 32,
                 "max_reference_images": 1,
                 "max_face_references": 1,
+                "aspect_ratios": list(ASPECT_SIZE_MAP_1K.keys()),
+                "resolutions": ["1k", "2k"],
             },
         }
 
@@ -209,6 +212,7 @@ class MossProvider:
 
         if face_ref_id:
             face_ref_id = str(face_ref_id).strip()
+            out["source_artifact_id"] = str(out.get("source_artifact_id") or face_ref_id).strip()
             out["face_reference_artifact_id"] = face_ref_id
             out["source_identity_artifact_id"] = face_ref_id
             if face_ref_id not in ref_list:
@@ -243,13 +247,24 @@ class MossProvider:
 
         width = out.get("width")
         height = out.get("height")
+        raw_size = str(out.get("size") or "").strip()
+        if width is None and height is None and not out.get("aspect_ratio") and raw_size:
+            size_match = re.fullmatch(r"(\d+)\s*x\s*(\d+)", raw_size, re.IGNORECASE)
+            if size_match:
+                width, height = int(size_match.group(1)), int(size_match.group(2))
         if width is None and height is None:
             aspect = str(out.get("aspect_ratio") or "1:1").strip()
             res = str(out.get("resolution") or "1k").strip().lower()
             if res == "4k":
                 raise ValueError("INVALID_DIMENSIONS: moss-image max_pixels is 2097152 (4k is not supported)")
+            if res not in {"1k", "2k"}:
+                raise ValueError(f"INVALID_DIMENSIONS: unsupported resolution {res!r}")
+            if aspect not in ASPECT_SIZE_MAP_1K:
+                raise ValueError(f"INVALID_DIMENSIONS: unsupported aspect_ratio {aspect!r}")
             size_table = ASPECT_SIZE_MAP_2K if res == "2k" and aspect in ASPECT_SIZE_MAP_2K else ASPECT_SIZE_MAP_1K
-            width, height = size_table.get(aspect, (1024, 1024))
+            width, height = size_table[aspect]
+            out["resolution"] = res
+            out["aspect_ratio"] = aspect
         elif width is None or height is None:
             raise ValueError("INVALID_DIMENSIONS: width and height must both be provided")
 

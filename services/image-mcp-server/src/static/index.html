@@ -1776,7 +1776,7 @@
          ======================================================================= -->
     <section class="tab-view" id="view-models" role="tabpanel">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-        <p class="service-note" style="margin-bottom:0;">分渠道展示模型服务卡片（本地 / fal.ai / Google / ChatGPT / Higgsfield）：不重复外层渠道名、不展示无业务查看按钮；直接展示支持能力（T2I / I2I / INPAINT / OUTPAINT / UPSCALE / R2I / FaceSwap）、参考图配额、单任务最大容量（≤ 50MB）与底部 3 项输出规格胶囊。</p>
+        <p class="service-note" style="margin-bottom:0;">分渠道展示模型服务卡片（本地 / Google / ChatGPT / Grok）：不重复外层渠道名、不展示无业务查看按钮；直接展示支持能力（T2I / I2I / INPAINT / R2I / LAYOUT / FACESWAP）、参考图配额、单任务最大容量（≤ 50MB）与底部 3 项输出规格胶囊。</p>
         <span class="physics-pill num" id="modelSummaryBadge">分渠道零冗余目录</span>
       </div>
       <div class="filter-chips" id="modelChannelTabs" role="group" aria-label="模型渠道筛选"></div>
@@ -1913,7 +1913,7 @@
             <!-- 4. 骨相人脸身份锚点 -->
             <section class="detail-section-block" aria-label="4. 骨相人脸身份锚点">
               <div class="pane-title">
-                <h3>4. 骨相人脸身份锚点 <small style="font-weight:400;color:var(--muted)">（InstantID / InsightFace 源脸，不同模型上限不同）</small></h3>
+                <h3>4. 骨相人脸身份锚点 <small style="font-weight:400;color:var(--muted)">（FaceFusion 3.9.0 / MOSS-Image 源脸参考，不同模型上限不同）</small></h3>
                 <span class="quota-badge empty" id="refFacesQuotaBadge">0 / 1 张 · 当前模型上限 1 张</span>
               </div>
               <div id="drawerRefFacesBox"></div>
@@ -2103,16 +2103,12 @@
 
     // Inline Channel Logos & Display Helpers
     const localChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>`;
-    const higgsfieldLogo = `<svg width="14" height="14" class="channel-logo" aria-hidden="true" focusable="false" viewBox="0 0 1355 1355" fill="none" xmlns="http://www.w3.org/2000/svg"><rect width="1355" height="1355" rx="363" fill="#D1FE17"/><path d="M1088.73 670.726L1087.95 662.156C1080.52 579.906 1026.99 425.16 878.52 425.16C768.341 425.16 685.111 533.914 611.658 629.796C553.046 706.582 502.264 772.452 446.385 772.452C431.533 770.898 412.391 763.49 400.676 746.73C390.125 731.522 387.392 712.035 392.858 688.649C401.448 651.619 450.686 617.315 502.644 580.677C531.161 561.19 560.472 540.529 580.79 520.651C639.402 464.134 669.094 423.205 669.094 357.336C669.094 291.467 632.76 258.716 602.283 244.682C541.331 216.625 451.862 232.994 394.818 282.114C386.227 289.913 377.625 297.31 369.807 304.328C312.371 355.392 273.696 390.086 185 363.571V470.369C302.605 522.216 401.46 423.205 438.97 377.605C467.878 347.592 498.355 330.049 521.024 330.049H522.2C532.359 330.441 540.95 334.34 547.211 341.357C557.37 353.056 561.279 366.699 559.319 381.896C555.018 413.864 521.808 451.273 460.856 492.203C389.352 540.149 269.799 620.444 260.413 721.399C253.379 793.905 290.889 866.4 349.501 894.458C486.247 959.165 569.477 847.684 657.77 729.969C725.365 639.149 789.443 553.01 878.531 553.01C958.625 553.01 988.318 619.271 988.318 660.982V669.173L980.5 670.726C786.318 705.029 680.429 886.67 680.429 970.473C680.429 1054.28 751.541 1126 839.061 1126C941.433 1126 1068.02 1038.69 1088.34 793.123L1089.12 784.162H1170V670.737H1088.73V670.726ZM982.841 796.62C967.216 943.566 891.804 1012.17 846.095 1012.17C825.385 1012.17 796.477 995.021 796.477 963.064C796.477 927.208 850.003 818.454 970.341 786.106L984.409 782.597L982.841 796.632V796.62Z" fill="black"/></svg>`;
-    const falChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><rect x="2" y="2" width="20" height="20" rx="5" fill="#18241f"/><path d="M9.5 17V9.5c0-1.6 1-2.5 2.6-2.5H15v2h-2.2c-.6 0-.9.3-.9.9V11h2.8v1.9H11.9V17H9.5z" fill="#f1f3ee"/></svg>`;
     const chatgptChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
     const googleChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>`;
     const grokChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><path d="M4 20L20 4M8 4h12v12"/></svg>`;
 
     function channelLogo(ch) {
       const s = String(ch || '').toLowerCase();
-      if (s.includes('higgsfield')) return higgsfieldLogo;
-      if (s.includes('fal')) return falChannelLogo;
       if (s.includes('chatgpt') || s.includes('openai') || s.includes('codex')) return chatgptChannelLogo;
       if (s.includes('google') || s.includes('gemini') || s.includes('vertex')) return googleChannelLogo;
       if (s.includes('grok')) return grokChannelLogo;
@@ -2121,11 +2117,9 @@
 
     function channelDisplayName(ch) {
       const s = String(ch || '').toLowerCase();
-      if (!s || s === 'local' || s === '本地' || s.includes('faceswap') || s.includes('comfy') || s.includes('moss')) return '本地';
-      if (s.includes('fal')) return 'fal.ai';
+      if (!s || s === 'local' || s === '本地' || s.includes('faceswap') || s.includes('facefusion') || s.includes('comfy') || s.includes('moss')) return '本地';
       if (s.includes('google') || s.includes('gemini') || s.includes('vertex')) return 'Google';
       if (s.includes('chatgpt') || s.includes('openai') || s.includes('codex')) return 'ChatGPT';
-      if (s.includes('higgsfield')) return 'Higgsfield';
       if (s.includes('grok')) return 'Grok';
       return '本地';
     }
@@ -2400,13 +2394,12 @@
       const m = String(modelName || '').toLowerCase();
       const a = String(action || '').toLowerCase();
       if (m.includes('moss')) return { maxImages: 1, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
-      if (m.includes('qwen')) return { maxImages: 4, maxMasks: 1, maxFaces: 0, maxSize: '50 MB' };
-      if (m.includes('seedream')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '50 MB' };
-      if (m.includes('fill') || a === 'inpaint') return { maxImages: 1, maxMasks: 2, maxFaces: 0, maxSize: '40 MB' };
-      if (m.includes('instantid') || m.includes('insightface') || a === 'faceswap') return { maxImages: 1, maxMasks: 1, maxFaces: 1, maxSize: '50 MB' };
-      if (m.includes('flare')) return { maxImages: 2, maxMasks: 0, maxFaces: 0, maxSize: '20 MB' };
-      if (m.includes('gemini')) return { maxImages: 6, maxMasks: 1, maxFaces: 0, maxSize: '50 MB' };
-      return { maxImages: 8, maxMasks: 2, maxFaces: 1, maxSize: '50 MB' };
+      if (m.includes('facefusion') || m.includes('hyperswap') || a === 'faceswap') return { maxImages: 1, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
+      if (m.includes('grok')) return { maxImages: 1, maxMasks: 0, maxFaces: 0, maxSize: '10 MB' };
+      if (m.includes('flare')) return { maxImages: 2, maxMasks: 0, maxFaces: 0, maxSize: '10 MB' };
+      if (m.includes('sunburst') || m.includes('gpt-image')) return { maxImages: 8, maxMasks: 1, maxFaces: 0, maxSize: '10 MB' };
+      if (m.includes('gemini')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '24 MB' };
+      return { maxImages: 8, maxMasks: 1, maxFaces: 1, maxSize: '50 MB' };
     }
 
     // Render Gallery & Table (Task Cards: top-left 模型 × [Logo] 渠道, bottom-left 模式码 + 分辨率 + 画幅比 + 格式, bottom-right 查看)
@@ -2950,7 +2943,7 @@
         maxImages,
         'ref-img',
         '未传入参考图',
-        '不同模型支持上限不同：Soul 2.0 / GPT Image 2.5 最高支持 8 张参考图，Seedream 5.0 支持 6 张，Qwen-Image-Edit 支持 4 张，纯文生 T2I 为 0 张',
+        '不同模型支持上限不同：GPT Image 2.5 Sunburst 最高支持 8 张参考图，Gemini 支持 6 张，Flare 支持 2 张，Grok / MOSS-Image 支持 1 张，纯文生 T2I 为 0 张',
         document.getElementById('refImagesQuotaBadge'),
         document.getElementById('drawerRefImagesBox')
       );
@@ -2959,7 +2952,7 @@
         maxMasks,
         'ref-mask',
         '未传入重绘蒙版或结构控制图',
-        '不同模型支持上限不同：Inpaint 局部重绘支持黑白/Alpha 蒙版，ControlNet 支持 OpenPose/Depth 控制图，常规文生图/多参考生图为 0 张',
+        '不同模型支持上限不同：GPT Image 2.5 Sunburst (Inpaint) 支持 1 张 Alpha 蒙版，常规文生图/多参考生图为 0 张',
         document.getElementById('refMasksQuotaBadge'),
         document.getElementById('drawerRefMasksBox')
       );
@@ -2968,7 +2961,7 @@
         maxFaces,
         'ref-face',
         '未启用独立骨相人脸替换源',
-        '不同模型支持上限不同：InstantID + InsightFace 骨相换脸管线支持锁定源人脸 512 维特征向量，通用文生图模型为 0 张',
+        '不同模型支持上限不同：FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer) 与 MOSS-Image 支持 1 张源人脸参考，通用文生图模型为 0 张',
         document.getElementById('refFacesQuotaBadge'),
         document.getElementById('drawerRefFacesBox')
       );
@@ -3143,36 +3136,19 @@
       } catch (_) {}
     };
 
-    // Channel-Grouped Zero-Redundancy Model Catalog (本地 / fal.ai / Google / ChatGPT / Higgsfield)
+    // Channel-Grouped Zero-Redundancy Model Catalog (本地 / Google / ChatGPT / Grok)
     // No channel name repeated inside cards, no "查看" button on model cards!
     const baseChannelCatalog = [
       {
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.16',
-        kindLabel: '本地计算资源 · 语义修图、极速文生与骨相换脸管线',
+        version: 'v0.2.35',
+        kindLabel: '本地计算资源 · INT8 多模态参考生图与 FaceFusion 3.9.0 人脸融合管线',
         billing: '本地算力 (local_resources)',
         models: [
-          { mark: 'QE', title: 'Qwen-Image-Edit-2511', biz: '图像编辑', res: '2048p', duration: '1:1-21:9', fps: 'PNG/WebP', maxSize: '50MB', caps: [['I2I', '图生图'], ['R2I', '多参考编辑'], ['INPAINT', '局部重绘']], refQuota: '最多 4张参考图 · 1张重绘蒙版 · 0张人脸源', desc: '本地语义指令修图与多图融合主力模型，支持中英双语精准局部改字与换装。' },
-          { mark: 'ZI', title: 'Z-Image-Turbo', biz: '图像生成', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 · 0张蒙版 · 0张人脸源', desc: '8 步极速蒸馏文生图与构图预演模型，适合大批量角色与分镜草稿探索。' },
-          { mark: 'ID', title: 'InstantID + InsightFace (antelopev2)', biz: '骨相换脸', res: '2048p', duration: '1:1-9:16', fps: 'PNG', maxSize: '50MB', caps: [['FaceSwap', '骨相换脸'], ['R2I', '身份锚定']], refQuota: '1张目标底图 · 最多 4张源人脸参考 · 1张姿态控制图', desc: '真人 IP 专属骨相级人脸身份锁定与高保真换脸管线，含 CodeFormer 细节修复。' },
-          { mark: 'SD', title: 'SDXL ControlNet Union', biz: '角色定妆', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '40MB', caps: [['T2I', '文生图'], ['I2I', '线稿/深度控制'], ['INPAINT', '局部重绘']], refQuota: '最多 3张控制参考图 (OpenPose/Depth/Canny) · 1张蒙版', desc: '多条件空间结构控制生成，精确锁定人物站姿、镜头透视与服装轮廓。' },
-          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2048p (≤2MP)', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '多模态参考'], ['LAYOUT', '版式控制']], refQuota: '最多 1张参考图 · 1张骨相人脸源 · 支持最多 32 项 yxyx 版式框', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
-        ]
-      },
-      {
-        id: 'fal',
-        name: 'fal.ai',
-        fullName: 'fal.ai',
-        version: 'v0.3.0',
-        kindLabel: 'API Key 聚合渠道 · FLUX 全家桶与超分重绘端点',
-        billing: '按量计费 (provider_billed · USD)',
-        models: [
-          { mark: 'FK', title: 'FLUX.1 Kontext [max]', biz: '图像编辑', res: '2K', duration: '1:1-21:9', fps: 'PNG', maxSize: '50MB', caps: [['I2I', '上下文修图'], ['R2I', '多参考合图']], refQuota: '最多 4张参考图 · 无需手绘蒙版自动定位主体', desc: '基于上下文语义保持人物与物体几何一致性的连续编辑端点。' },
-          { mark: 'FF', title: 'FLUX.1 Fill [pro]', biz: '图像编辑', res: '2K', duration: '1:1-21:9', fps: 'PNG', maxSize: '40MB', caps: [['INPAINT', '局部重绘'], ['OUTPAINT', '扩图延展']], refQuota: '1张源底图 · 1张黑白重绘蒙版 (Mask)', desc: '工业级无痕局部重绘与画幅扩图端点，边缘光影与透视自动缝合。' },
-          { mark: 'F1U', title: 'FLUX1.1 [pro] Ultra', biz: '图像生成', res: '4MP (2K+)', duration: '1:1-21:9', fps: 'PNG/JPEG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', 'Raw 摄影模式']], refQuota: '最多 1张风格参考图 · 0张蒙版', desc: '支持 Raw 胶片模式与 400 万像素直出的旗舰文生图端点。' },
-          { mark: 'AU', title: 'AuraSR v2 Upscaler', biz: '图像编辑', res: '4K (4×)', duration: '保持原画幅', fps: 'PNG', maxSize: '50MB', caps: [['UPSCALE', '4倍无损超分']], refQuota: '1张待超分源图像 · 0张蒙版', desc: 'GAN 驱动的高频纹理超分辨率放大服务，用于分镜定妆图 4K 终混交付。' }
+          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 1张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' },
+          { mark: 'FF', title: 'FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)', biz: '人脸融合 (image.faceswap)', res: '保持原画幅', duration: '1:1-9:16', fps: 'PNG', maxSize: '50MB', caps: [['FACESWAP', '人脸融合']], refQuota: '1张目标底图 · 1张源人脸参考', desc: '本地 5090 真实运行 FaceFusion 3.9.0 (yolo_face + hyperswap_1a_256 + codeformer) 人脸融合与面部增强微服务，对应工具 image.faceswap。' }
         ]
       },
       {
@@ -3183,8 +3159,8 @@
         kindLabel: 'Google AI Studio · Gemini 3 Pro / 3.1 Flash 原生多模态图像渠道',
         billing: '按量计费 (Google Cloud Credits)',
         models: [
-          { mark: 'GP3', title: 'gemini-3-pro-image-preview', biz: '旗舰图像生成', res: '2K / 4K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 1张蒙版', desc: 'Google 旗舰光学摄影感多模态生图模型 (Nano Banana Pro)，具备强空间肢体理解与复杂长提示词遵循能力。' },
-          { mark: 'GF3', title: 'gemini-3.1-flash-image-preview', biz: '极速图像生成', res: '2K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 1张蒙版', desc: 'Google 极速多模态生图与参考图编辑底座 (Nano Banana 2)，支持多张参考图融合，高并发低延迟。' }
+          { mark: 'GP3', title: 'gemini-3-pro-image-preview', biz: '旗舰图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 旗舰光学摄影感多模态生图模型 (Nano Banana Pro)，具备强空间肢体理解与复杂长提示词遵循能力。' },
+          { mark: 'GF3', title: 'gemini-3.1-flash-image-preview', biz: '极速图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 极速多模态生图与参考图编辑底座 (Nano Banana 2)，支持多张参考图融合，高并发低延迟。' }
         ]
       },
       {
@@ -3195,20 +3171,19 @@
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
-          { mark: 'SB', title: 'gpt-image-2.5-sunburst', biz: '图像生成', res: '4K', duration: '1:1 / 9:16 / 16:9 / 3:4', fps: 'PNG/WebP', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识与复杂空间排版理解能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
-          { mark: 'FL', title: 'gpt-image-2.5-flare', biz: '图像生成', res: '2K', duration: '1:1 / 9:16 / 16:9', fps: 'PNG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '快速概念设计与分镜草图生成底座。' }
+          { mark: 'SB', title: 'gpt-image-2.5-sunburst', biz: '图像生成', res: '1K / 2K / 4K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识与复杂空间排版理解能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
+          { mark: 'FL', title: 'gpt-image-2.5-flare', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '快速概念设计与分镜草图生成底座。' }
         ]
       },
       {
-        id: 'higgsfield',
-        name: 'Higgsfield',
-        fullName: 'Higgsfield',
-        version: 'v0.4.2',
-        kindLabel: '会员订阅渠道 · 电影级角色一致性与超清定妆',
-        billing: '会员额度 (Credits)',
+        id: 'grok',
+        name: 'Grok',
+        fullName: 'Grok (xAI)',
+        version: 'v0.2.16',
+        kindLabel: 'xAI Grok Imagine · 文生图与单参考图编辑渠道',
+        billing: '按张数计费 (USD)',
         models: [
-          { mark: 'S2', title: 'Soul 2.0', biz: '角色定妆', res: '4K', duration: '1:1-21:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 8张参考图 (人物身份+服装+光影) · 0张蒙版', desc: '旗舰级人物写实与剧照定妆模型，支持最多 8 张多角度参考图保持跨镜头骨相一致。' },
-          { mark: 'SR5', title: 'Seedream 5.0', biz: '图像生成', res: '4K', duration: '1:1-21:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版 · 支持中文字形渲染', desc: '超清东方美学与影视概念设计主模型，原生 4K 输出与高审美光影构图。' }
+          { mark: 'GRK', title: 'grok-imagine-image-2.0', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/JPEG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 (I2I)', desc: 'xAI Grok Imagine 2.0 图像生成与单参考图编辑渠道，支持 1K/2K 分辨率与多画幅比例。' }
         ]
       }
     ];
@@ -3230,10 +3205,8 @@
         const eName = String(eng.engine).toLowerCase();
         const statusLabel = eng.configured === false ? '未配置' : eng.enabled === false ? '未启用' : eng.verification_status === 'verified' ? '已验证' : eng.configured === true ? '已配置' : '已声明';
         let targetId = 'local';
-        if (eName.includes('fal')) targetId = 'fal';
-        else if (eName.includes('gemini') || eName.includes('google')) targetId = 'google';
+        if (eName.includes('gemini') || eName.includes('google')) targetId = 'google';
         else if (eName.includes('codex') || eName.includes('chatgpt') || eName.includes('openai')) targetId = 'chatgpt';
-        else if (eName.includes('higgsfield')) targetId = 'higgsfield';
         else if (eName.includes('grok')) targetId = 'grok';
 
         let grp = groups.find(g => g.id === targetId);
@@ -3242,7 +3215,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.16',
+            version: 'v0.2.35',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3260,7 +3233,9 @@
             ? 'gemini-3.1-flash-image-preview'
             : lowerRaw === 'gemini-3-pro-image'
               ? 'gemini-3-pro-image-preview'
-              : String(rawTitle);
+              : (lowerRaw === 'hyperswap_1a_256' || eName === 'faceswap')
+                ? 'FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)'
+                : String(rawTitle);
           const existing = grp.items.find(m => m.title.toLowerCase() === modelTitle.toLowerCase());
           if (existing) {
             if (!existing.biz.includes(statusLabel)) {
@@ -3271,12 +3246,12 @@
               mark: String(modelTitle).slice(0, 3).toUpperCase(),
               title: modelTitle,
               biz: `图像生成 · ${statusLabel}`,
-              res: '2K / 4K',
-              duration: '1:1 / 9:16 / 16:9',
+              res: '1K / 2K',
+              duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9',
               fps: 'PNG',
-              maxSize: '50MB',
+              maxSize: '10MB',
               caps: [['T2I', '文生图'], ['I2I', '图生图']],
-              refQuota: '最多 6张参考底图 · 纯文本提示词驱动',
+              refQuota: '最多 1张参考底图 (I2I)',
               desc: '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。'
             });
           }

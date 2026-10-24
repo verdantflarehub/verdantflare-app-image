@@ -153,9 +153,29 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertNotIn("return String(ch);", html)
         self.assertIn("gemini-3-pro-image-preview", html)
         self.assertIn("gemini-3.1-flash-image-preview", html)
-        self.assertNotIn("Imagen 4 Ultra", html)
-        self.assertNotIn("Gemini 2.5 Flash Image", html)
-        self.assertNotIn("gemini-2.5-flash-image", html)
+        self.assertIn("FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)", html)
+        self.assertIn("moss-image-sft-int8-convrot", html)
+        self.assertIn("grok-imagine-image-2.0", html)
+        self.assertIn("gpt-image-2.5-sunburst", html)
+        self.assertIn("gpt-image-2.5-flare", html)
+        for fake_entry in (
+            "Imagen 4 Ultra",
+            "Gemini 2.5 Flash Image",
+            "gemini-2.5-flash-image",
+            "fal.ai",
+            "Higgsfield",
+            "FLUX.1 Kontext",
+            "FLUX.1 Fill",
+            "FLUX1.1 [pro] Ultra",
+            "AuraSR v2 Upscaler",
+            "Soul 2.0",
+            "Seedream 5.0",
+            "Qwen-Image-Edit-2511",
+            "Z-Image-Turbo",
+            "InstantID + InsightFace",
+            "SDXL ControlNet Union",
+        ):
+            self.assertNotIn(fake_entry, html)
         self.assertRegex(
             html,
             r'(?s)<div class="output-pane">.*?id="inspOutputMeta".*?id="inspPromptBox".*?</div>\s*<div class="input-pane">\s*<!-- 2\. 参考图',

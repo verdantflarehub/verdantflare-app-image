@@ -156,11 +156,25 @@ class TaskQueueManager:
             return self.moss_provider.normalize(params)
         if engine == 'grok':
             params = self.grok_provider.normalize(params, project_id, self.artifacts, channel=self.grok_channel is not None)
+        if engine == 'gemini':
+            if params.get('action') == 'inpaint' or params.get('mask_artifact_id') is not None or params.get('mask') is not None:
+                raise ValueError('unsupported_parameter')
+            if params.get('model') not in (None, '', *SUPPORTED_GEMINI_MODELS):
+                raise ValueError('capability_not_supported')
+            if params.get('model') == 'gemini-3-pro-image':
+                params['model'] = 'gemini-3-pro-image-preview'
         channel = {'gemini': self.google_channel, 'grok': self.grok_channel, 'codex': self.chatgpt_channel}.get(engine)
         if self.channel_directory is not None and channel is None:
             raise ValueError('channel_not_configured')
         if channel is not None:
-            self._check_channel_discovery(engine, params.get('action'), channel)
+            has_refs = bool(
+                params.get('source_artifact_id')
+                or params.get('reference_artifact_ids')
+                or params.get('reference_images')
+                or params.get('mask_artifact_id')
+            )
+            discovery_action = 'edit' if (engine == 'codex' and has_refs) else params.get('action')
+            self._check_channel_discovery(engine, discovery_action, channel)
             if self.google_authorize is None:
                 raise ValueError('project_authorization_not_configured')
             import uuid
@@ -176,11 +190,6 @@ class TaskQueueManager:
                     raise ValueError('invalid_budget_limit')
             except InvalidOperation:
                 raise ValueError('invalid_budget_limit') from None
-            if engine == 'gemini':
-                if params.get('model') not in (None, '', *SUPPORTED_GEMINI_MODELS):
-                    raise ValueError('capability_not_supported')
-                if params.get('model') == 'gemini-3-pro-image':
-                    params['model'] = 'gemini-3-pro-image-preview'
             params['channel_authority'] = self.google_authorize(project_id, None)
             params['channel_runtime'] = {'gemini': 'google-channel-v1', 'grok': 'grok-channel-v1', 'codex': 'chatgpt-channel-v1'}[engine]
         elif params.get('channel_account_id') is not None or params.get('budget_limit') is not None:
@@ -346,12 +355,14 @@ class TaskQueueManager:
             if recovery or record.phase is not None:
                 result = channel.recover(organization, job.task_id, job.task_id)
             else:
+                if runtime == 'google-channel-v1' and (
+                    job.action == 'inpaint' or job.params.get('mask_artifact_id') or job.params.get('mask')
+                ):
+                    raise ValueError('unsupported_parameter')
                 images = []
                 ids = [job.params.get('source_artifact_id')]
                 ids.extend(job.params.get('reference_artifact_ids') or [])
                 ids.extend(job.params.get('reference_images') or [])
-                if not is_chatgpt:
-                    ids.append(job.params.get('mask_artifact_id'))
                 for artifact_id in dict.fromkeys(item for item in ids if item):
                     artifact = self.artifacts.get(artifact_id, job.project_id)
                     data = self.artifacts.content_path(artifact).read_bytes()
@@ -362,6 +373,7 @@ class TaskQueueManager:
                     images.append({'mime_type': artifact.media_type,
                                    'data': base64.b64encode(data).decode()})
                 payload = {'prompt': job.params['prompt'], 'images': images}
+                effective_action = job.action
                 if runtime == 'google-channel-v1' and job.params.get('aspect_ratio'):
                     payload['aspect_ratio'] = job.params['aspect_ratio']
                 if is_grok:
@@ -373,10 +385,12 @@ class TaskQueueManager:
                 if is_chatgpt:
                     p = job.params
                     size = {'16:9': '2048x1152', '9:16': '1152x2048', '1:1': '1024x1024',
-                            '4:3': '1792x1344', '3:4': '1344x1792'}.get(p.get('aspect_ratio'), p.get('size') or '2048x1152')
-                    payload = {'prompt': p['prompt'], 'action': 'edit' if job.action == 'inpaint' else job.action, 'images': images,
+                            '4:3': '1792x1344', '3:4': '1344x1792',
+                            '3:2': '1536x1024', '2:3': '1024x1536'}.get(p.get('aspect_ratio'), p.get('size') or '2048x1152')
+                    effective_action = 'edit' if (job.action in ('edit', 'inpaint') or images or p.get('mask_artifact_id')) else job.action
+                    payload = {'prompt': p['prompt'], 'action': effective_action, 'images': images,
                         'size': size, 'prefer_4k': (p.get('resolution') or '2k').lower() == '4k',
-                        'quality': p.get('quality') or ('high' if job.action == 'generate' else 'auto'),
+                        'quality': p.get('quality') or ('high' if effective_action == 'generate' else 'auto'),
                         'background': p.get('background') or 'auto'}
                     if p.get('instructions') is not None:
                         payload['instructions'] = p['instructions']
@@ -386,7 +400,7 @@ class TaskQueueManager:
                         if hashlib.sha256(data).hexdigest() != mask.sha256:
                             raise ValueError('source_integrity_failed')
                         payload['mask'] = {'mime_type': mask.media_type, 'data': base64.b64encode(data).decode()}
-                self._check_channel_discovery(job.engine, job.action, channel)
+                self._check_channel_discovery(job.engine, effective_action, channel)
                 self.tasks.update_status(job.task_id, 'running', phase='submitting')
                 result = channel.submit(organization, job.task_id, job.task_id,
                     job.params.get('model') or (DEFAULT_IMAGE_MODEL if is_chatgpt else DEFAULT_GEMINI_MODEL),
@@ -561,23 +575,37 @@ class TaskQueueManager:
             "1:1": "1024x1024",
             "4:3": "1792x1344",
             "3:4": "1344x1792",
+            "3:2": "1536x1024",
+            "2:3": "1024x1536",
         }
         size = size_map.get(aspect_ratio, "2048x1152")
 
         source_id = p.get("source_artifact_id")
         ref_ids = list(p.get("reference_artifact_ids") or p.get("reference_images") or [])
+        all_ref_ids = [rid for rid in dict.fromkeys([source_id, *ref_ids]) if rid]
+
+        source_bytes_list: list[bytes] = []
+        for rid in all_ref_ids:
+            rec = self.artifacts.get(rid, job.project_id)
+            source_bytes_list.append(self.artifacts.content_path(rec).read_bytes())
 
         if engine == "gemini":
-            source_bytes_list: list[bytes] = []
-            for rid in dict.fromkeys([source_id, *ref_ids]):
-                if rid:
-                    rec = self.artifacts.get(rid, job.project_id)
-                    source_bytes_list.append(self.artifacts.content_path(rec).read_bytes())
             img_bytes = self.gemini_provider.generate(
                 prompt=prompt,
                 model=model or DEFAULT_GEMINI_MODEL,
                 source_images=source_bytes_list or None,
                 aspect_ratio=aspect_ratio,
+            )
+        elif source_bytes_list:
+            img_bytes = self.codex_provider.edit(
+                prompt=prompt,
+                source_bytes=source_bytes_list if len(source_bytes_list) > 1 else source_bytes_list[0],
+                size=size,
+                prefer_4k=prefer_4k,
+                quality=quality,
+                background=background,
+                model=model or DEFAULT_IMAGE_MODEL,
+                instructions=instructions,
             )
         else:
             img_bytes = self.codex_provider.generate(
@@ -597,11 +625,19 @@ class TaskQueueManager:
             "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
             "prompt": prompt,
             "aspect_ratio": aspect_ratio,
-            "resolution": resolution,
             "quality": quality,
             "background": background,
             "instructions": instructions or "verbatim",
         }
+        if engine != "gemini":
+            meta["resolution"] = resolution
+        try:
+            import io
+            from PIL import Image
+            with Image.open(io.BytesIO(img_bytes)) as pil_img:
+                meta["width"], meta["height"] = pil_img.size
+        except Exception:
+            pass
         if source_id:
             meta["source_artifact_id"] = source_id
         if ref_ids:
@@ -625,7 +661,7 @@ class TaskQueueManager:
         model = p.get("model", "")
         aspect_ratio = p.get("aspect_ratio")
         resolution = p.get("resolution", "2k")
-        prefer_4k = resolution.lower() == "4k"
+        prefer_4k = (resolution or "2k").lower() == "4k"
         if aspect_ratio:
             size_map = {
                 "16:9": "2048x1152",
@@ -633,6 +669,8 @@ class TaskQueueManager:
                 "1:1": "1024x1024",
                 "4:3": "1792x1344",
                 "3:4": "1344x1792",
+                "3:2": "1536x1024",
+                "2:3": "1024x1536",
             }
             size = size_map.get(aspect_ratio, "2048x1152")
             if prefer_4k and hasattr(self.codex_provider, "_resolve_target_size"):
@@ -660,11 +698,12 @@ class TaskQueueManager:
             mask_bytes = self.artifacts.content_path(mask_rec).read_bytes()
 
         if engine == "gemini":
+            if mask_bytes is not None:
+                raise ValueError("unsupported_parameter")
             img_bytes = self.gemini_provider.generate(
                 prompt=prompt,
                 model=model or DEFAULT_GEMINI_MODEL,
                 source_images=source_bytes_list,
-                mask_bytes=mask_bytes,
                 aspect_ratio=aspect_ratio,
             )
         else:

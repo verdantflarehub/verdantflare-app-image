@@ -122,7 +122,6 @@ class TestGeminiProvider(unittest.TestCase):
             img_bytes = provider.generate(
                 prompt="Replace clothing",
                 source_images=[b"\x89PNG\r\n\x1a\n-person", b"\x89PNG\r\n\x1a\n-clothing"],
-                mask_bytes=b"\x89PNG\r\n\x1a\n-mask",
             )
 
         self.assertEqual(img_bytes, b"result-img")
@@ -136,13 +135,19 @@ class TestGeminiProvider(unittest.TestCase):
 
         payload = json.loads(req.data.decode("utf-8"))
         parts = payload["contents"][0]["parts"]
-        # 2 source images + 1 mask + 1 text prompt = 4 parts
-        self.assertEqual(len(parts), 4)
+        # 2 source images + 1 text prompt = 3 parts (mask_bytes is rejected on Gemini)
+        self.assertEqual(len(parts), 3)
         self.assertIn("inlineData", parts[0])
         self.assertIn("inlineData", parts[1])
-        self.assertIn("inlineData", parts[2])
-        self.assertIn("text", parts[3])
+        self.assertIn("text", parts[2])
         self.assertEqual(payload["generationConfig"]["responseModalities"], ["IMAGE", "TEXT"])
+
+        with self.assertRaises(GeminiProviderError):
+            provider.generate(
+                prompt="Inpaint with mask",
+                source_images=[b"\x89PNG\r\n\x1a\n-person"],
+                mask_bytes=b"\x89PNG\r\n\x1a\n-mask",
+            )
 
     def test_generate_google_uses_explicit_proxy(self):
         import io

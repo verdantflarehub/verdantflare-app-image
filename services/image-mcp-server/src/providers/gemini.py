@@ -189,18 +189,6 @@ class GeminiProvider:
                 },
             })
 
-        if mask_bytes:
-            b64_mask = base64.b64encode(mask_bytes).decode("utf-8")
-            mime_mask = _detect_mime_type(mask_bytes)
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": mime_mask,
-                    "data": b64_mask,
-                },
-            })
-
         content.append({"type": "text", "text": prompt})
 
         payload = {
@@ -258,11 +246,6 @@ class GeminiProvider:
             mime = _detect_mime_type(img)
             parts.append({"inlineData": {"mimeType": mime, "data": b64}})
 
-        if mask_bytes:
-            b64_mask = base64.b64encode(mask_bytes).decode("utf-8")
-            mime_mask = _detect_mime_type(mask_bytes)
-            parts.append({"inlineData": {"mimeType": mime_mask, "data": b64_mask}})
-
         parts.append({"text": prompt})
         generation_config: dict[str, Any] = {
             "responseModalities": ["IMAGE", "TEXT"],
@@ -309,6 +292,8 @@ class GeminiProvider:
         aspect_ratio: str | None = None,
         retries: int = 2,
     ) -> bytes:
+        if mask_bytes is not None:
+            raise GeminiProviderError("Gemini does not support mask_bytes / inpainting mask")
         channel = self._ensure_auth()
         api_aspect_ratio, prompt_prefix = _normalize_aspect_ratio(aspect_ratio)
 

@@ -178,6 +178,25 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
         self.assertNotIn('channel', legacy)
         self.assertNotIn('budget_limit_required', legacy)
 
+    def test_generate_with_references_routes_to_edit_action_on_chatgpt_channel(self):
+        source = self.artifacts.create_from_bytes('project-test', 'source.png', self.image, 'image/png')
+        params = self.queue.prepare('codex', 'project-test', {
+            'action': 'generate',
+            'prompt': 'keep subject identity',
+            'source_artifact_id': source.artifact_id,
+            'aspect_ratio': '2:3',
+            'budget_limit': '2',
+        })
+        record = self.tasks.create('project-test', 'gen-with-ref', 'codex', params)
+        self.tasks.claim_task(record.task_id)
+        self.channel.submit.return_value = {'accepted': True, 'state': 'completed', 'call_id': 'call-ref-edit'}
+        self.channel.result.return_value = (self.image, 'image/png')
+        self.queue._execute_channel(TaskJob(record.task_id, 'project-test', 'codex', 'generate', params))
+        payload = self.channel.submit.call_args.args[4]
+        self.assertEqual(payload['action'], 'edit')
+        self.assertEqual(payload['size'], '1024x1536')
+        self.assertEqual(len(payload['images']), 1)
+
 
 class ChannelWorkerFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_failures_preserve_submission_boundary(self):
