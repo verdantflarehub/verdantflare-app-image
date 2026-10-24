@@ -3158,7 +3158,7 @@
           { mark: 'ZI', title: 'Z-Image-Turbo', biz: '图像生成', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 · 0张蒙版 · 0张人脸源', desc: '8 步极速蒸馏文生图与构图预演模型，适合大批量角色与分镜草稿探索。' },
           { mark: 'ID', title: 'InstantID + InsightFace (antelopev2)', biz: '骨相换脸', res: '2048p', duration: '1:1-9:16', fps: 'PNG', maxSize: '50MB', caps: [['FaceSwap', '骨相换脸'], ['R2I', '身份锚定']], refQuota: '1张目标底图 · 最多 4张源人脸参考 · 1张姿态控制图', desc: '真人 IP 专属骨相级人脸身份锁定与高保真换脸管线，含 CodeFormer 细节修复。' },
           { mark: 'SD', title: 'SDXL ControlNet Union', biz: '角色定妆', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '40MB', caps: [['T2I', '文生图'], ['I2I', '线稿/深度控制'], ['INPAINT', '局部重绘']], refQuota: '最多 3张控制参考图 (OpenPose/Depth/Canny) · 1张蒙版', desc: '多条件空间结构控制生成，精确锁定人物站姿、镜头透视与服装轮廓。' },
-          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2048p (≤2MP)', duration: '1:1-16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['LAYOUT', '版式控制'], ['FaceSwap', '骨相锚定']], refQuota: '最多 1张参考图 · 1张骨相人脸源 · 支持最多 32 项 yxyx 版式框', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报、原生 JSON 版式控制与两段式骨相身份锚定生图引擎。' }
+          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2048p (≤2MP)', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '多模态参考'], ['LAYOUT', '版式控制']], refQuota: '最多 1张参考图 · 1张骨相人脸源 · 支持最多 32 项 yxyx 版式框', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
         ]
       },
       {

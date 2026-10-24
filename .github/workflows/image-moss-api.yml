@@ -17,7 +17,7 @@ concurrency:
 
 env:
   SERVICE: image-moss-api
-  VERSION: 0.1.0
+  VERSION: 0.1.1
 
 jobs:
   build:

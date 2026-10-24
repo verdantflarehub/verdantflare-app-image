@@ -499,8 +499,6 @@ class TaskQueueManager:
             self.tasks.update_status(job.task_id, "running", phase="acquiring_gpu")
             self.moss_gpu.ensure_worker_ready(self.moss_provider.health)
             self.tasks.update_status(job.task_id, "running", phase="generating")
-            img_bytes, meta = self.moss_provider.generate(job.params)
-            meta["task_id"] = job.task_id
             face_ref_id = (
                 job.params.get("face_reference_artifact_id")
                 or job.params.get("source_identity_artifact_id")
@@ -508,69 +506,36 @@ class TaskQueueManager:
                 or ((job.params.get("reference_artifact_ids") or [None])[0])
                 or ((job.params.get("reference_images") or [None])[0])
             )
-            extension, media_type = _image_storage_type(img_bytes)
-            filename = f"moss-{job.task_id}{extension}"
-            artifact_id = "art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16]
-
+            gen_params = dict(job.params)
             if face_ref_id:
-                stage1_artifact_id = "art-" + hashlib.sha256(f"{job.task_id}-stage1".encode()).hexdigest()[:16]
-                stage1_record = self.artifacts.create_from_bytes(
-                    project_id=job.project_id,
-                    artifact_id=stage1_artifact_id,
-                    filename=f"moss-stage1-{job.task_id}{extension}",
-                    data=img_bytes,
-                    media_type=media_type,
-                    metadata={**meta, "stage": "moss_t2i_base"},
-                )
-                self.tasks.update_status(job.task_id, "running", phase="fusing_face")
-                from .faceswap import handle_faceswap
+                ref_record = self.artifacts.get(str(face_ref_id), job.project_id)
+                ref_bytes = self.artifacts.content_path(ref_record).read_bytes()
+                gen_params["reference_images_base64"] = [
+                    base64.b64encode(ref_bytes).decode("ascii")
+                ]
 
-                fuse_res = asyncio.run(
-                    handle_faceswap(
-                        artifacts=self.artifacts,
-                        target_artifact_id=stage1_record.artifact_id,
-                        source_identity_artifact_id=str(face_ref_id),
-                        identity_strength=float(job.params.get("identity_strength", 0.95)),
-                        restore_face=bool(job.params.get("restore_face", True)),
-                        restoration_fidelity=float(job.params.get("restoration_fidelity", 0.85)),
-                        project_id=job.project_id,
-                        target_face_index=int(job.params.get("target_face_index", 0)),
-                    )
-                )
-                if fuse_res.get("status") != "completed":
-                    raise RuntimeError(
-                        fuse_res.get("error") or "MOSS-Image 二阶段骨相人脸融合失败"
-                    )
-                fused_art_id = fuse_res["artifact"]["artifact_id"]
-                fused_rec = self.artifacts.get(fused_art_id, job.project_id)
-                fused_bytes = self.artifacts.content_path(fused_rec).read_bytes()
-                fused_ext, fused_media = _image_storage_type(fused_bytes)
+            img_bytes, meta = self.moss_provider.generate(gen_params)
+            meta["task_id"] = job.task_id
+            if face_ref_id:
                 meta.update(
                     {
                         "source_identity_artifact_id": str(face_ref_id),
                         "face_reference_artifact_id": str(face_ref_id),
                         "reference_artifact_ids": [str(face_ref_id)],
-                        "stage1_artifact_id": stage1_record.artifact_id,
-                        "face_fusion_metrics": fuse_res.get("metrics", {}),
+                        "conditioning_mode": "qwen3.5_9b_vision",
                     }
                 )
-                record = self.artifacts.create_from_bytes(
-                    project_id=job.project_id,
-                    artifact_id=artifact_id,
-                    filename=f"moss-{job.task_id}{fused_ext}",
-                    data=fused_bytes,
-                    media_type=fused_media,
-                    metadata=meta,
-                )
-            else:
-                record = self.artifacts.create_from_bytes(
-                    project_id=job.project_id,
-                    artifact_id=artifact_id,
-                    filename=filename,
-                    data=img_bytes,
-                    media_type=media_type,
-                    metadata=meta,
-                )
+            extension, media_type = _image_storage_type(img_bytes)
+            filename = f"moss-{job.task_id}{extension}"
+            artifact_id = "art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16]
+            record = self.artifacts.create_from_bytes(
+                project_id=job.project_id,
+                artifact_id=artifact_id,
+                filename=filename,
+                data=img_bytes,
+                media_type=media_type,
+                metadata=meta,
+            )
             self.tasks.update_status(
                 job.task_id,
                 "running",

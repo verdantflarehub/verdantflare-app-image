@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 from pathlib import Path
 import secrets
@@ -218,9 +219,39 @@ class MossImagePipeline:
             if params["seed"] is not None
             else secrets.randbelow(2_147_483_647)
         )
+        ref_images: list[bytes] = params.get("reference_images") or []
+        has_ref = len(ref_images) > 0
         positive_text, prompt_mode = serialize_moss_prompt(
-            params["prompt"], params["layout"]
+            params["prompt"],
+            params["layout"],
+            has_reference_image=has_ref,
         )
+
+        ref_filename: str | None = None
+        ref_path: Path | None = None
+        if has_ref:
+            ref_filename = f"moss_ref_{uuid.uuid4().hex}.jpg"
+            input_dir = Path(self.settings.comfyui_root) / "input"
+            if not input_dir.parent.exists():
+                input_dir = Path(tempfile.gettempdir()) / "moss-comfy-input"
+            input_dir.mkdir(parents=True, exist_ok=True)
+            ref_path = input_dir / ref_filename
+            ref_bytes = ref_images[0]
+            try:
+                from PIL import Image
+
+                with Image.open(io.BytesIO(ref_bytes)) as im:
+                    im_rgb = im.convert("RGB")
+                    w, h = im_rgb.size
+                    if w >= 256 and h >= 256:
+                        im_rgb = im_rgb.crop((int(w * 0.12), 0, int(w * 0.88), int(h * 0.76)))
+                    out_buf = io.BytesIO()
+                    im_rgb.save(out_buf, format="JPEG", quality=95)
+                    ref_bytes = out_buf.getvalue()
+            except Exception:
+                pass
+            ref_path.write_bytes(ref_bytes)
+
         workflow = build_comfy_workflow(
             positive_text=positive_text,
             negative_text=params["negative_prompt"],
@@ -233,6 +264,7 @@ class MossImagePipeline:
             shift=params["shift"],
             skip_single_layers=params["skip_single_layers"],
             seed=resolved_seed,
+            reference_image_filename=ref_filename,
         )
 
         self._active_and_queued += 1
@@ -258,6 +290,8 @@ class MossImagePipeline:
                 elapsed_ms = int(round((time.perf_counter() - t0) * 1000))
         finally:
             self._active_and_queued -= 1
+            if ref_path is not None:
+                ref_path.unlink(missing_ok=True)
 
         return {
             "status": "ok",

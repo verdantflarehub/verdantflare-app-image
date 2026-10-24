@@ -196,6 +196,33 @@ def test_serialize_moss_prompt_and_workflow_graph() -> None:
     assert wf["9"]["inputs"]["seed"] == 12345
     assert wf["9"]["inputs"]["steps"] == 50
     assert wf["9"]["inputs"]["cfg"] == 3.0
+    assert wf["6"]["class_type"] == "CLIPTextEncode"
+
+    ref_pos_text, ref_mode = serialize_moss_prompt(
+        "晴子度假泳池写真",
+        None,
+        has_reference_image=True,
+    )
+    assert ref_mode == "reference"
+    assert ref_pos_text.startswith("<|vision_start|><|image_pad|><|vision_end|>")
+    ref_wf = build_comfy_workflow(
+        positive_text=ref_pos_text,
+        negative_text="模糊",
+        width=1024,
+        height=1536,
+        steps=50,
+        cfg_scale=3.0,
+        sampler="euler",
+        scheduler="simple",
+        shift=5.0,
+        skip_single_layers="22",
+        seed=12345,
+        reference_image_filename="moss_ref_test.jpg",
+    )
+    assert ref_wf["6"]["class_type"] == "TextEncodeQwenImageEdit"
+    assert ref_wf["6"]["inputs"]["image"] == ["12", 0]
+    assert ref_wf["12"]["class_type"] == "LoadImage"
+    assert ref_wf["12"]["inputs"]["image"] == "moss_ref_test.jpg"
 
 
 def test_fastapi_endpoints_and_queue_overflow(tmp_path: Path) -> None:
@@ -235,6 +262,22 @@ def test_fastapi_endpoints_and_queue_overflow(tmp_path: Path) -> None:
         assert body["prompt_mode"] == "text"
         assert base64.b64decode(body["image_base64"]) == fake_png
         assert isinstance(body["resolved_seed"], int)
+
+        ref_gen_res = client.post(
+            "/v1/generate",
+            json={
+                "prompt": "晴子泳池比基尼竖幅全身人像",
+                "width": 1024,
+                "height": 1536,
+                "reference_images_base64": [base64.b64encode(fake_png * 4).decode("ascii")],
+            },
+        )
+        assert ref_gen_res.status_code == 200
+        ref_body = ref_gen_res.json()
+        assert ref_body["status"] == "ok"
+        assert ref_body["prompt_mode"] == "reference"
+        assert ref_body["width"] == 1024
+        assert ref_body["height"] == 1536
 
         bad_res = client.post(
             "/v1/generate",

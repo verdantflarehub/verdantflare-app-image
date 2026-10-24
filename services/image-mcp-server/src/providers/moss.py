@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import math
 import os
 import re
 from typing import Any
@@ -27,6 +28,8 @@ ASPECT_SIZE_MAP_1K: dict[str, tuple[int, int]] = {
     "9:16": (768, 1344),
     "4:3": (1152, 864),
     "3:4": (864, 1152),
+    "2:3": (832, 1248),
+    "3:2": (1248, 832),
 }
 
 ASPECT_SIZE_MAP_2K: dict[str, tuple[int, int]] = {
@@ -35,6 +38,8 @@ ASPECT_SIZE_MAP_2K: dict[str, tuple[int, int]] = {
     "9:16": (1024, 1792),
     "4:3": (1600, 1200),
     "3:4": (1200, 1600),
+    "2:3": (1024, 1536),
+    "3:2": (1536, 1024),
 }
 
 
@@ -258,6 +263,10 @@ class MossProvider:
             raise ValueError(f"INVALID_DIMENSIONS: total pixels {width * height} exceeds 2097152")
         out["width"] = width
         out["height"] = height
+        g = math.gcd(width, height)
+        derived_aspect = f"{width // g}:{height // g}"
+        if derived_aspect in ASPECT_SIZE_MAP_1K:
+            out["aspect_ratio"] = derived_aspect
 
         steps = out.get("steps")
         if steps is None:
@@ -340,6 +349,8 @@ class MossProvider:
             "seed": params.get("seed"),
             "layout": params.get("layout"),
         }
+        if params.get("reference_images_base64"):
+            payload["reference_images_base64"] = params["reference_images_base64"]
         try:
             if self._client is not None:
                 resp = self._client.post(f"{self.base_url}/v1/generate", json=payload, timeout=self.timeout)

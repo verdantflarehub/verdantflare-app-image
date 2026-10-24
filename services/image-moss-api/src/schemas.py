@@ -1,6 +1,7 @@
 """Request/response schemas and domain validation for image-moss-api."""
 from __future__ import annotations
 
+import base64
 import re
 from typing import Any
 
@@ -68,6 +69,7 @@ class GenerateRequest(BaseModel):
     skip_single_layers: str = Field(default="22")
     seed: int | None = Field(default=None)
     layout: dict[str, Any] | None = Field(default=None)
+    reference_images_base64: list[str] | None = Field(default=None)
 
 
 class GenerateResponse(BaseModel):
@@ -340,6 +342,40 @@ def validate_generate_request(
     if req.layout is not None:
         validated_layout = validate_layout(req.layout, max_items=max_layout_items)
 
+    validated_refs: list[bytes] = []
+    if req.reference_images_base64:
+        if len(req.reference_images_base64) > 3:
+            raise MossApiError(
+                400,
+                "INVALID_ARGUMENT",
+                f"reference_images_base64 supports at most 3 images, got {len(req.reference_images_base64)}",
+            )
+        for idx, raw_b64 in enumerate(req.reference_images_base64):
+            if not isinstance(raw_b64, str) or not raw_b64.strip():
+                raise MossApiError(
+                    400,
+                    "INVALID_ARGUMENT",
+                    f"reference_images_base64[{idx}] must be a non-empty base64 string",
+                )
+            clean_b64 = raw_b64.strip()
+            if "," in clean_b64 and clean_b64.startswith("data:"):
+                clean_b64 = clean_b64.split(",", 1)[1]
+            try:
+                decoded = base64.b64decode(clean_b64, validate=True)
+            except Exception as exc:
+                raise MossApiError(
+                    400,
+                    "INVALID_ARGUMENT",
+                    f"reference_images_base64[{idx}] is not valid base64: {exc}",
+                ) from exc
+            if len(decoded) < 16 or len(decoded) > 20 * 1024 * 1024:
+                raise MossApiError(
+                    400,
+                    "INVALID_ARGUMENT",
+                    f"reference_images_base64[{idx}] decoded size must be between 16B and 20MB",
+                )
+            validated_refs.append(decoded)
+
     return {
         "prompt": prompt,
         "negative_prompt": negative_prompt,
@@ -353,4 +389,5 @@ def validate_generate_request(
         "skip_single_layers": skip_layers,
         "seed": req.seed,
         "layout": validated_layout,
+        "reference_images": validated_refs,
     }
