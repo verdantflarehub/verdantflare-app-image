@@ -15,6 +15,16 @@ UNIVERSAL_CONSTRAINTS = (
 )
 FIX_TEXT = "The image is purely visual artwork with absolutely NO text, labels, words, or letters."
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-image"
+ADVERTISED_GEMINI_MODELS = (
+    "gemini-3-pro-image-preview",
+    "gemini-3.1-flash-image-preview",
+)
+SUPPORTED_GEMINI_MODELS = {
+    DEFAULT_GEMINI_MODEL,
+    "gemini-3.1-flash-image-preview",
+    "gemini-3-pro-image-preview",
+    "gemini-3-pro-image",
+}
 GOOGLE_SUPPORTED_ASPECT_RATIOS = {"1:1", "3:4", "4:3", "9:16", "16:9"}
 ASPECT_RATIO_FALLBACK_MAP: dict[str, tuple[str, str]] = {
     "2:3": ("3:4", "[Vertical Portrait 2:3 / 3:4 Aspect Ratio]"),

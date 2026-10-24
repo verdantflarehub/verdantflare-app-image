@@ -151,6 +151,11 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertIn("M22.282 9.821", html)
         self.assertIn("s.includes('moss')) return '本地'", html)
         self.assertNotIn("return String(ch);", html)
+        self.assertIn("gemini-3-pro-image-preview", html)
+        self.assertIn("gemini-3.1-flash-image-preview", html)
+        self.assertNotIn("Imagen 4 Ultra", html)
+        self.assertNotIn("Gemini 2.5 Flash Image", html)
+        self.assertNotIn("gemini-2.5-flash-image", html)
         self.assertRegex(
             html,
             r'(?s)<div class="output-pane">.*?id="inspOutputMeta".*?id="inspPromptBox".*?</div>\s*<div class="input-pane">\s*<!-- 2\. 参考图',

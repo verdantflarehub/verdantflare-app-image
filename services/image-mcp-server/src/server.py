@@ -82,7 +82,10 @@ IMAGE_TOOLS_SCHEMA = [
             "properties": {
                 "prompt": {"type": "string", "description": "Image description prompt"},
                 "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
-                "model": {"type": "string", "description": "Model identifier, e.g. gpt-image-2.5-sunburst"},
+                "model": {
+                    "type": "string",
+                    "description": "Model identifier, e.g. gpt-image-2.5-sunburst, gemini-3-pro-image-preview, gemini-3.1-flash-image-preview",
+                },
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"], "default": "16:9"},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
@@ -231,7 +234,7 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.30"
+SERVICE_VERSION = "v0.2.31"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -324,7 +327,7 @@ async def image_generate(
     - engine: 默认 "codex" (OpenAI Responses API 驱动)，亦可选 "gemini", "grok", "moss-image"
     - model:
         codex 引擎推荐: "gpt-image-2.5-sunburst" (画质首选，微观细节与皮肤毛孔) 或 "gpt-image-2.5-flare" (极速响应)
-        gemini 引擎: "gemini-3.1-flash-image"
+        gemini 引擎可选: "gemini-3-pro-image-preview" (旗舰多模态生图与参考编辑) 或 "gemini-3.1-flash-image-preview" (极速多模态生图与参考编辑，兼容默认别名 "gemini-3.1-flash-image")
         moss-image 引擎: "moss-image-sft-int8-convrot" (自托管 INT8-ConvRot 文字排版与版式生成)
     - aspect_ratio: "16:9", "9:16", "1:1", "4:3", "3:4"
     - resolution: "2k" (默认), "4k" (对齐 3840x2160 / 2160x3840 官方尺寸约束)
@@ -411,7 +414,7 @@ async def image_generate(
         project_id=project_id,
         idempotency_key=idempotency_key,
         engine=engine,
-        model=resolved_model,
+        model=params.get("model") or resolved_model,
         request_params=params,
     )
 
@@ -574,7 +577,7 @@ async def image_edit(
         project_id=project_id,
         idempotency_key=idempotency_key,
         engine=engine,
-        model=resolved_model,
+        model=params.get("model") or resolved_model,
         request_params=params,
     )
 
@@ -636,7 +639,7 @@ async def image_inpaint(
         project_id=project_id,
         idempotency_key=idempotency_key,
         engine=engine,
-        model=resolved_model,
+        model=params.get("model") or resolved_model,
         request_params=params,
     )
 

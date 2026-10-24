@@ -2404,8 +2404,8 @@
       if (m.includes('seedream')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '50 MB' };
       if (m.includes('fill') || a === 'inpaint') return { maxImages: 1, maxMasks: 2, maxFaces: 0, maxSize: '40 MB' };
       if (m.includes('instantid') || m.includes('insightface') || a === 'faceswap') return { maxImages: 1, maxMasks: 1, maxFaces: 1, maxSize: '50 MB' };
-      if (m.includes('imagen') || m.includes('flare')) return { maxImages: 2, maxMasks: 0, maxFaces: 0, maxSize: '20 MB' };
-      if (m.includes('gemini')) return { maxImages: 6, maxMasks: 1, maxFaces: 0, maxSize: '40 MB' };
+      if (m.includes('flare')) return { maxImages: 2, maxMasks: 0, maxFaces: 0, maxSize: '20 MB' };
+      if (m.includes('gemini')) return { maxImages: 6, maxMasks: 1, maxFaces: 0, maxSize: '50 MB' };
       return { maxImages: 8, maxMasks: 2, maxFaces: 1, maxSize: '50 MB' };
     }
 
@@ -3178,13 +3178,13 @@
       {
         id: 'google',
         name: 'Google',
-        fullName: 'Google Vertex / Gemini',
+        fullName: 'Google Gemini',
         version: 'v0.2.4',
-        kindLabel: 'Google Imagen 4 与 Gemini 原生多模态图像渠道',
+        kindLabel: 'Google AI Studio · Gemini 3 Pro / 3.1 Flash 原生多模态图像渠道',
         billing: '按量计费 (Google Cloud Credits)',
         models: [
-          { mark: 'IM4', title: 'Imagen 4 Ultra', biz: '图像生成', res: '2K', duration: '1:1-16:9', fps: 'PNG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', '风格参考']], refQuota: '最多 2张参考图 · 0张蒙版', desc: 'Google 旗舰光学摄影感文生图模型，擅长自然风光、建筑材质与复杂文字排版。' },
-          { mark: 'GM2', title: 'Gemini 2.5 Flash Image', biz: '图像编辑', res: '2K', duration: '1:1-16:9', fps: 'PNG/WebP', maxSize: '40MB', caps: [['T2I', '文生图'], ['I2I', '多轮修图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 支持自然语言局部修改', desc: '支持多张角色与道具参考图的极速合成与对话式连续局部微调。' }
+          { mark: 'GP3', title: 'gemini-3-pro-image-preview', biz: '旗舰图像生成', res: '2K / 4K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 1张蒙版', desc: 'Google 旗舰光学摄影感多模态生图模型 (Nano Banana Pro)，具备强空间肢体理解与复杂长提示词遵循能力。' },
+          { mark: 'GF3', title: 'gemini-3.1-flash-image-preview', biz: '极速图像生成', res: '2K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 1张蒙版', desc: 'Google 极速多模态生图与参考图编辑底座 (Nano Banana 2)，支持多张参考图融合，高并发低延迟。' }
         ]
       },
       {
@@ -3249,23 +3249,37 @@
           };
           groups.push(grp);
         }
-        const modelTitle = eng.model || eng.engine;
-        const existing = grp.items.find(m => m.title.toLowerCase() === String(modelTitle).toLowerCase());
-        if (existing) {
-          existing.biz = `${existing.biz} · ${statusLabel}`;
-        } else {
-          grp.items.push({
-            mark: String(modelTitle).slice(0, 2).toUpperCase(),
-            title: modelTitle,
-            biz: `图像生成 · ${statusLabel}`,
-            res: '2K / 4K',
-            duration: '1:1 / 9:16 / 16:9',
-            fps: 'PNG',
-            maxSize: '50MB',
-            caps: [['T2I', '文生图'], ['I2I', '图生图']],
-            refQuota: '最多 1张参考底图 · 纯文本提示词驱动',
-            desc: '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。'
-          });
+        const declaredModels = Array.isArray(eng.supported_models) && eng.supported_models.length
+          ? eng.supported_models
+          : [eng.model || eng.engine];
+
+        for (const rawTitle of declaredModels) {
+          if (!rawTitle) continue;
+          const lowerRaw = String(rawTitle).toLowerCase();
+          const modelTitle = lowerRaw === 'gemini-3.1-flash-image'
+            ? 'gemini-3.1-flash-image-preview'
+            : lowerRaw === 'gemini-3-pro-image'
+              ? 'gemini-3-pro-image-preview'
+              : String(rawTitle);
+          const existing = grp.items.find(m => m.title.toLowerCase() === modelTitle.toLowerCase());
+          if (existing) {
+            if (!existing.biz.includes(statusLabel)) {
+              existing.biz = `${existing.biz} · ${statusLabel}`;
+            }
+          } else {
+            grp.items.push({
+              mark: String(modelTitle).slice(0, 3).toUpperCase(),
+              title: modelTitle,
+              biz: `图像生成 · ${statusLabel}`,
+              res: '2K / 4K',
+              duration: '1:1 / 9:16 / 16:9',
+              fps: 'PNG',
+              maxSize: '50MB',
+              caps: [['T2I', '文生图'], ['I2I', '图生图']],
+              refQuota: '最多 6张参考底图 · 纯文本提示词驱动',
+              desc: '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。'
+            });
+          }
         }
       }
 

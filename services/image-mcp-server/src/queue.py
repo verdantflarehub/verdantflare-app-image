@@ -13,7 +13,12 @@ from typing import Any, Callable, Coroutine
 from .artifacts import ArtifactStore
 from .gpu_lease import GpuCoordinator
 from .providers.codex import CodexProvider, DEFAULT_IMAGE_MODEL
-from .providers.gemini import GeminiProvider, DEFAULT_GEMINI_MODEL
+from .providers.gemini import (
+    ADVERTISED_GEMINI_MODELS,
+    DEFAULT_GEMINI_MODEL,
+    GeminiProvider,
+    SUPPORTED_GEMINI_MODELS,
+)
 from .providers.moss import DEFAULT_MOSS_MODEL, MossProvider
 from .tasks import TaskRecord, TaskStore
 from .providers.grok import GrokImageProvider, GrokError
@@ -111,7 +116,7 @@ class TaskQueueManager:
             action = rec.request_params.get("action", "generate")
             await self.enqueue(rec.task_id, rec.project_id, rec.engine, action, rec.request_params)
 
-        print(f"✅ [TaskQueue] 队列调度器启动完毕 (Workers: {self.worker_count})")
+        print(f"[TaskQueue] 队列调度器启动完毕 (Workers: {self.worker_count})")
 
     async def stop(self) -> None:
         self._running = False
@@ -120,7 +125,7 @@ class TaskQueueManager:
         if self._worker_tasks:
             await asyncio.gather(*self._worker_tasks, return_exceptions=True)
         self._worker_tasks.clear()
-        print("🛑 [TaskQueue] 队列调度器已停止")
+        print("[TaskQueue] 队列调度器已停止")
 
     async def enqueue(
         self,
@@ -171,8 +176,11 @@ class TaskQueueManager:
                     raise ValueError('invalid_budget_limit')
             except InvalidOperation:
                 raise ValueError('invalid_budget_limit') from None
-            if engine == 'gemini' and params.get('model') not in (None, '', DEFAULT_GEMINI_MODEL, 'gemini-3.1-flash-image-preview'):
-                raise ValueError('capability_not_supported')
+            if engine == 'gemini':
+                if params.get('model') not in (None, '', *SUPPORTED_GEMINI_MODELS):
+                    raise ValueError('capability_not_supported')
+                if params.get('model') == 'gemini-3-pro-image':
+                    params['model'] = 'gemini-3-pro-image-preview'
             params['channel_authority'] = self.google_authorize(project_id, None)
             params['channel_runtime'] = {'gemini': 'google-channel-v1', 'grok': 'grok-channel-v1', 'codex': 'chatgpt-channel-v1'}[engine]
         elif params.get('channel_account_id') is not None or params.get('budget_limit') is not None:
@@ -197,7 +205,7 @@ class TaskQueueManager:
             grok.update(enabled=True, configured=True, adapter_version='grok-channel-v1')
         engines = [
             {"engine": "codex", "model": DEFAULT_IMAGE_MODEL, "enabled": True},
-            {"engine": "gemini", "model": DEFAULT_GEMINI_MODEL, "enabled": True},
+            {"engine": "gemini", "model": DEFAULT_GEMINI_MODEL, "enabled": True, "supported_models": list(ADVERTISED_GEMINI_MODELS)},
             grok]
         for engine in engines:
             name, channel = {
@@ -274,7 +282,7 @@ class TaskQueueManager:
                         status="completed",
                         duration_seconds=duration,
                     )
-                    print(f"✅ [TaskQueue] 任务成功: {job.task_id} (action: {job.action}, engine: {job.engine}) 耗时: {duration}s", flush=True)
+                    print(f"[TaskQueue] 任务成功: {job.task_id} (action: {job.action}, engine: {job.engine}) 耗时: {duration}s", flush=True)
                 except Exception as exc:
                     duration = round(time.time() - start_time, 2)
                     if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
@@ -301,7 +309,7 @@ class TaskQueueManager:
                                                  error=code, phase=phase if uncertain else "failed")
                         continue
                     err_msg = str(exc)
-                    print(f"❌ [TaskQueue] 任务失败: {job.task_id} (action: {job.action}, engine: {job.engine}, model: {job.params.get('model')}) 耗时: {duration}s, 错误详情: {err_msg}", flush=True)
+                    print(f"[TaskQueue] 任务失败: {job.task_id} (action: {job.action}, engine: {job.engine}, model: {job.params.get('model')}) 耗时: {duration}s, 错误详情: {err_msg}", flush=True)
                     self.tasks.update_status(
                         job.task_id,
                         status="failed",

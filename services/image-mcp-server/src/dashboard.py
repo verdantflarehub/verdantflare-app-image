@@ -581,7 +581,7 @@ async def api_create_task(request: Request) -> Response:
     from .tasks import TaskConflict
     try:
         task = tasks_store.create(project_id=project_id, idempotency_key=idempotency_key,
-                                 engine=engine, model=resolved_model, request_params=params)
+                                 engine=engine, model=params.get("model") or resolved_model, request_params=params)
     except TaskConflict:
         return JSONResponse({"error": "idempotency_conflict"}, status_code=409)
 
