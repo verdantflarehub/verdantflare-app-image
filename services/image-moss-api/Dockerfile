@@ -25,9 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       gcc python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /opt/comfyui
-RUN rm -rf /opt/comfyui/* /opt/comfyui/.[!.]* \
-    && git clone --filter=blob:none --no-checkout https://github.com/Comfy-Org/ComfyUI.git . \
+WORKDIR /opt
+RUN rm -rf /opt/comfyui \
+    && git clone --filter=blob:none --no-checkout https://github.com/Comfy-Org/ComfyUI.git /opt/comfyui \
+    && cd /opt/comfyui \
     && git checkout --detach "${COMFYUI_REVISION}" \
     && test "$(git rev-parse HEAD)" = "${COMFYUI_REVISION}" \
     && test -f LICENSE \
