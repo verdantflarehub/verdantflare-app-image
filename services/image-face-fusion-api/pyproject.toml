@@ -1,6 +1,6 @@
 [project]
 name = "verdantflare-image-face-fusion-api"
-version = "0.2.1"
+version = "0.2.2"
 description = "VerdantFlare image-face-fusion-api service"
 requires-python = ">=3.12"
 dependencies = [

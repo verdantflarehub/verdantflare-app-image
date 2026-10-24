@@ -88,6 +88,15 @@ class TestOfficialBackend(unittest.TestCase):
                                bounding_box=np.array([1,2,30,40]))
         angles = self.backend.pose(face, (480,640,3))
         self.assertTrue(all(abs(x)<0.1 for x in angles), angles)
+        real_landmarks = np.zeros((68,2))
+        real_landmarks[[30,8,36,45,48,54]] = np.array([
+            [361.93, 263.16], [373.93, 308.45], [334.48, 240.17],
+            [390.85, 232.39], [350.98, 280.24], [388.26, 274.64],
+        ])
+        real_face = SimpleNamespace(landmark_set={"68": real_landmarks}, score_set={"landmarker":0.94, "detector":0.8},
+                                    bounding_box=np.array([310,200,415,320]))
+        real_desc = self.backend.describe([real_face], 0, np.zeros((1344,768,3)))
+        self.assertTrue(real_desc["pose_safe"], real_desc)
         other = SimpleNamespace(landmark_set={}, score_set={"landmarker":0})
         result = self.backend.describe([other, face], 1, np.zeros((480,640,3)))
         self.assertTrue(result["pose_safe"])

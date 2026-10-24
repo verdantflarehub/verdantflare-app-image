@@ -155,18 +155,19 @@ class OfficialBackend:
         if face.score_set.get("landmarker", 0) <= self.state.get_item("face_landmarker_score"):
             raise FaceFusionPipelineError("Reliable pose landmarks unavailable", "POSE_UNAVAILABLE", 422)
         points = np.asarray(face.landmark_set["68"], dtype=np.float64)[[30, 8, 36, 45, 48, 54]]
-        model = np.array([[0, 0, 0], [0, 330, -65], [-225, -170, -135],
-                          [225, -170, -135], [-150, 150, -125], [150, 150, -125]], dtype=np.float64)
-        h, w = shape[:2]
-        camera = np.array([[w, 0, w/2], [0, w, h/2], [0, 0, 1]], dtype=np.float64)
+        cx, cy = float(points[0, 0]), float(points[0, 1])
+        focal = float(max(shape[:2]))
+        camera = np.array([[focal, 0, cx], [0, focal, cy], [0, 0, 1]], dtype=np.float64)
         try:
-            ok, rotation, translation = cv2.solvePnP(model, points, camera, np.zeros((4, 1)), flags=cv2.SOLVEPNP_ITERATIVE)
-            if not ok or translation[2, 0] <= 0:
-                raise ValueError("Pose solver failed")
-            angles = tuple(float(v) for v in cv2.RQDecomp3x3(cv2.Rodrigues(rotation)[0])[0])
-            if not np.isfinite(angles).all():
-                raise ValueError("Non-finite pose")
-            return angles
+            for z_sign in (1.0, -1.0):
+                model = np.array([[0, 0, 0], [0, 330, 65 * z_sign], [-225, -170, 135 * z_sign],
+                                  [225, -170, 135 * z_sign], [-150, 150, 125 * z_sign], [150, 150, 125 * z_sign]], dtype=np.float64)
+                ok, rotation, translation = cv2.solvePnP(model, points, camera, np.zeros((4, 1)), flags=cv2.SOLVEPNP_ITERATIVE)
+                if ok and translation[2, 0] > 0:
+                    angles = tuple(float(v) for v in cv2.RQDecomp3x3(cv2.Rodrigues(rotation)[0])[0])
+                    if np.isfinite(angles).all():
+                        return angles
+            raise ValueError("Pose solver failed")
         except Exception as exc:
             raise FaceFusionPipelineError("Pose could not be estimated", "POSE_UNAVAILABLE", 422) from exc
 
