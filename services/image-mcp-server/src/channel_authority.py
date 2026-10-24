@@ -22,7 +22,7 @@ def create_client():
     return httpx.Client(verify=context, trust_env=False, follow_redirects=False)
 
 
-def authorize(client, project_id, authority=None):
+def authorize(client, project_id, authority=None, *, require_write=True):
     actor = authority if authority is not None else CALLER.get()
     if not isinstance(actor, dict) or not all(actor.get(k) for k in ('user_id', 'organization_id')):
         raise ValueError('verified_studio_identity_required')
@@ -36,7 +36,7 @@ def authorize(client, project_id, authority=None):
         response = client.post(url + '/internal/v1/project/open', headers={
             'Authorization': 'Bearer ' + token, 'X-User-Id': actor['user_id'],
             'X-Organization-Id': actor['organization_id'], 'X-Request-Id': str(uuid.UUID(int=value)),
-        }, json={'project_id': project_id, 'require_write': True}, timeout=15, follow_redirects=False)
+        }, json={'project_id': project_id, 'require_write': require_write}, timeout=15, follow_redirects=False)
         if response.status_code in (401, 403, 404):
             raise ValueError('project_access_denied')
         response.raise_for_status()

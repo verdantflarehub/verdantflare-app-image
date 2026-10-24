@@ -209,6 +209,8 @@ IMAGE_TOOLS_SCHEMA = [
 ]
 
 for tool in IMAGE_TOOLS_SCHEMA:
+    if tool['name'] == 'image.result':
+        tool['inputSchema']['properties']['execution_proof_only'] = {'type': 'boolean', 'default': False}
     if tool['name'] in {'image.create', 'image.generate', 'image.edit', 'image.inpaint'}:
         tool['inputSchema']['properties'].update({
             'channel_account_id': {'type': 'string', 'description': 'Channel account for the selected engine; omitted uses explicit default'},
@@ -234,7 +236,7 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.31"
+SERVICE_VERSION = "v0.2.32"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -787,10 +789,14 @@ def image_status(task_id: str) -> types.CallToolResult:
 
 
 @mcp.tool(name="image.result")
-def image_result(task_id: str) -> types.CallToolResult:
+def image_result(task_id: str, execution_proof_only: bool = False) -> types.CallToolResult:
     task = tasks.get(task_id)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    if execution_proof_only:
+        from .execution_proof import proof
+        authorize(authority_client, task.project_id, require_write=False)
+        return _result({'execution_proof': proof(task, artifacts)})
     if task.status != "completed" or not task.artifact_id:
         return _result(
             {
