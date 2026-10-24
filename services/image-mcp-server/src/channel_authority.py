@@ -36,7 +36,7 @@ def authorize(client, project_id, authority=None, *, require_write=True):
         response = client.post(url + '/internal/v1/project/open', headers={
             'Authorization': 'Bearer ' + token, 'X-User-Id': actor['user_id'],
             'X-Organization-Id': actor['organization_id'], 'X-Request-Id': str(uuid.UUID(int=value)),
-        }, json={'project_id': project_id, 'require_write': require_write}, timeout=15, follow_redirects=False)
+        }, json={'project_id': project_id, **({'require_write': True} if require_write else {})}, timeout=15, follow_redirects=False)
         if response.status_code in (401, 403, 404):
             raise ValueError('project_access_denied')
         response.raise_for_status()

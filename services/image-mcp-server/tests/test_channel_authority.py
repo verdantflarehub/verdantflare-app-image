@@ -58,6 +58,23 @@ class ChannelAuthorityTests(unittest.TestCase):
                 finally:
                     CALLER.reset(context)
 
+    def test_read_permission_omits_optional_zero_and_still_denies(self):
+        def handle(request):
+            body = json.loads(request.content)
+            # Project strictjson rejects explicit optional zero values.
+            if 'require_write' in body:
+                return httpx.Response(400)
+            self.assertEqual(body, {'project_id': 'project'})
+            return httpx.Response(status)
+        with patch.dict('os.environ', {'IMAGE_PROJECT_SERVICE_URL': 'http://project', 'IMAGE_PROJECT_SERVICE_TOKEN': 'internal'}):
+            with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+                actor = {'user_id': 'user', 'organization_id': 'org'}
+                status = 200
+                self.assertEqual(authorize(client, 'project', actor, require_write=False), actor)
+                status = 403
+                with self.assertRaisesRegex(ValueError, 'project_access_denied'):
+                    authorize(client, 'project', actor, require_write=False)
+
     def test_no_identity_no_request(self):
         def unexpected(request):
             self.fail('unverified request reached Project')
