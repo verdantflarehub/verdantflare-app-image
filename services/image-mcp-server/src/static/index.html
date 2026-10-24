@@ -2046,7 +2046,7 @@
 
     function channelDisplayName(ch) {
       const s = String(ch || '').toLowerCase();
-      if (!s || s === 'local' || s === '本地' || s.includes('faceswap') || s.includes('comfy')) return '本地';
+      if (!s || s === 'local' || s === '本地' || s.includes('faceswap') || s.includes('comfy') || s.includes('moss')) return '本地';
       if (s.includes('fal')) return 'fal.ai';
       if (s.includes('google') || s.includes('gemini') || s.includes('vertex')) return 'Google';
       if (s.includes('chatgpt') || s.includes('openai') || s.includes('codex')) return 'ChatGPT';
@@ -2145,7 +2145,7 @@
     const filterModel = document.getElementById('filterModel'), filterEngine = document.getElementById('filterEngine'), filterProject = document.getElementById('filterProject');
 
     function updateTaskFilters() {
-      for (const [select, values, label] of [[filterModel, allTasks.map(t => t.model), '全部模型'], [filterEngine, allTasks.map(t => t.engine), '全部渠道'], [filterProject, allTasks.map(t => t.project), '全部项目']]) {
+      for (const [select, values, label] of [[filterModel, allTasks.map(t => t.model), '全部模型'], [filterEngine, allTasks.map(t => t.channelLabel), '全部渠道'], [filterProject, allTasks.map(t => t.project), '全部项目']]) {
         const previous = select.value;
         const options = [...new Set(values.filter(Boolean))].sort();
         if (previous && !options.includes(previous)) options.push(previous);
@@ -2324,6 +2324,7 @@
     function getModelQuotas(modelName, action) {
       const m = String(modelName || '').toLowerCase();
       const a = String(action || '').toLowerCase();
+      if (m.includes('moss')) return { maxImages: 0, maxMasks: 0, maxFaces: 0, maxSize: '纯文本' };
       if (m.includes('qwen')) return { maxImages: 4, maxMasks: 1, maxFaces: 0, maxSize: '50 MB' };
       if (m.includes('seedream')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '50 MB' };
       if (m.includes('fill') || a === 'inpaint') return { maxImages: 1, maxMasks: 2, maxFaces: 0, maxSize: '40 MB' };
@@ -2340,7 +2341,7 @@
       const filtered = allTasks.filter(t => {
         if (currentFilter !== "all" && t.status !== currentFilter) return false;
         if (filterModel.value && t.model !== filterModel.value) return false;
-        if (filterEngine.value && t.engine !== filterEngine.value) return false;
+        if (filterEngine.value && t.channelLabel !== filterEngine.value && t.engine !== filterEngine.value) return false;
         if (filterProject.value && t.project !== filterProject.value) return false;
         if (q && ![t.title, t.prompt, t.id, t.project, t.model, t.channelLabel].some(v => String(v || '').toLowerCase().includes(q))) return false;
         return true;
@@ -2979,7 +2980,8 @@
           { mark: 'QE', title: 'Qwen-Image-Edit-2511', biz: '图像编辑', res: '2048p', duration: '1:1-21:9', fps: 'PNG/WebP', maxSize: '50MB', caps: [['I2I', '图生图'], ['R2I', '多参考编辑'], ['INPAINT', '局部重绘']], refQuota: '最多 4张参考图 · 1张重绘蒙版 · 0张人脸源', desc: '本地语义指令修图与多图融合主力模型，支持中英双语精准局部改字与换装。' },
           { mark: 'ZI', title: 'Z-Image-Turbo', biz: '图像生成', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 · 0张蒙版 · 0张人脸源', desc: '8 步极速蒸馏文生图与构图预演模型，适合大批量角色与分镜草稿探索。' },
           { mark: 'ID', title: 'InstantID + InsightFace (antelopev2)', biz: '骨相换脸', res: '2048p', duration: '1:1-9:16', fps: 'PNG', maxSize: '50MB', caps: [['FaceSwap', '骨相换脸'], ['R2I', '身份锚定']], refQuota: '1张目标底图 · 最多 4张源人脸参考 · 1张姿态控制图', desc: '真人 IP 专属骨相级人脸身份锁定与高保真换脸管线，含 CodeFormer 细节修复。' },
-          { mark: 'SD', title: 'SDXL ControlNet Union', biz: '角色定妆', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '40MB', caps: [['T2I', '文生图'], ['I2I', '线稿/深度控制'], ['INPAINT', '局部重绘']], refQuota: '最多 3张控制参考图 (OpenPose/Depth/Canny) · 1张蒙版', desc: '多条件空间结构控制生成，精确锁定人物站姿、镜头透视与服装轮廓。' }
+          { mark: 'SD', title: 'SDXL ControlNet Union', biz: '角色定妆', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '40MB', caps: [['T2I', '文生图'], ['I2I', '线稿/深度控制'], ['INPAINT', '局部重绘']], refQuota: '最多 3张控制参考图 (OpenPose/Depth/Canny) · 1张蒙版', desc: '多条件空间结构控制生成，精确锁定人物站姿、镜头透视与服装轮廓。' },
+          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2048p (≤2MP)', duration: '1:1-16:9', fps: 'PNG', maxSize: '—', caps: [['T2I', '文生图'], ['LAYOUT', '版式控制']], refQuota: '0张参考图 · 0张蒙版 · 支持最多 32 项 yxyx 版式框', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报与原生 JSON 版式控制文生图引擎。' }
         ]
       },
       {
