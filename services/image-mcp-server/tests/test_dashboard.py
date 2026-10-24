@@ -150,6 +150,7 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertIn('html[data-embedded="true"] #imageBreadcrumb', html)
         self.assertIn("M22.282 9.821", html)
         self.assertIn("s.includes('moss')) return '本地'", html)
+        self.assertNotIn("return String(ch);", html)
         self.assertRegex(
             html,
             r'(?s)<div class="output-pane">.*?id="inspOutputMeta".*?id="inspPromptBox".*?</div>\s*<div class="input-pane">\s*<!-- 2\. 参考图',
