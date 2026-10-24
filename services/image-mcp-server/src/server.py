@@ -22,8 +22,11 @@ from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore
 from .content_rating import ContentRatingError, ContentRatingStore, include_nsfw_from_headers
 from .dashboard import (
     api_create_task,
+    api_delete_task,
     api_list_tasks,
+    api_task_content_rating,
     api_task_stats,
+    api_update_task_title,
     api_upload_artifact,
     dashboard_page,
 )
@@ -80,11 +83,29 @@ IMAGE_TOOLS_SCHEMA = [
                 "prompt": {"type": "string", "description": "Image description prompt"},
                 "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
                 "model": {"type": "string", "description": "Model identifier, e.g. gpt-image-2.5-sunburst"},
-                "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4"], "default": "16:9"},
+                "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"], "default": "16:9"},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
                 "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter"},
+                "source_artifact_id": {"type": "string", "description": "Optional primary reference image artifact ID"},
+                "reference_artifact_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional reference image artifact IDs (up to 6 for Gemini multimodal reference, 1 for MOSS-Image identity fusion)",
+                },
+                "face_reference_artifact_id": {
+                    "type": "string",
+                    "description": "Optional face identity reference artifact ID (e.g. master-v20 for MOSS-Image two-stage Face-Fusion)",
+                },
+                "source_identity_artifact_id": {
+                    "type": "string",
+                    "description": "Alias for face_reference_artifact_id",
+                },
+                "identity_strength": {"type": "number", "default": 0.95, "description": "Face identity fusion strength [0.5, 1.0] (moss-image)"},
+                "restore_face": {"type": "boolean", "default": True, "description": "Enable CodeFormer face enhancement after face fusion (moss-image)"},
+                "restoration_fidelity": {"type": "number", "default": 0.85, "description": "Face restoration fidelity [0.0, 1.0] (moss-image)"},
+                "target_face_index": {"type": "integer", "default": 0, "description": "Target face index sorted by largest area (moss-image)"},
                 "negative_prompt": {"type": "string", "description": "Optional negative prompt (moss-image)"},
                 "width": {"type": "integer", "description": "Pixel width, multiple of 16 (moss-image)"},
                 "height": {"type": "integer", "description": "Pixel height, multiple of 16 (moss-image)"},
@@ -112,6 +133,7 @@ IMAGE_TOOLS_SCHEMA = [
                 "prompt": {"type": "string", "description": "Editing instructions"},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
                 "mask_artifact_id": {"type": "string"},
+                "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]},
                 "resolution": {"type": "string", "description": "Grok editing: 1k or 2k"},
                 "engine": {"type": "string", "default": "codex"},
                 "model": {"type": "string"},
@@ -209,7 +231,7 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.27"
+SERVICE_VERSION = "v0.2.30"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -284,6 +306,14 @@ async def image_generate(
     skip_single_layers: str | None = None,
     seed: int | None = None,
     layout: dict[str, Any] | None = None,
+    source_artifact_id: str | None = None,
+    reference_artifact_ids: list[str] | None = None,
+    face_reference_artifact_id: str | None = None,
+    source_identity_artifact_id: str | None = None,
+    identity_strength: float | None = None,
+    restore_face: bool | None = None,
+    restoration_fidelity: float | None = None,
+    target_face_index: int | None = None,
     reference_images: list[str] | None = None,
     mask: str | None = None,
     prefer_4k: bool | None = None,
@@ -348,8 +378,30 @@ async def image_generate(
         params["seed"] = seed
     if layout is not None:
         params["layout"] = layout
+    if source_artifact_id:
+        params["source_artifact_id"] = source_artifact_id
+    if face_reference_artifact_id:
+        params["face_reference_artifact_id"] = face_reference_artifact_id
+    if source_identity_artifact_id:
+        params["source_identity_artifact_id"] = source_identity_artifact_id
+    if identity_strength is not None:
+        params["identity_strength"] = identity_strength
+    if restore_face is not None:
+        params["restore_face"] = restore_face
+    if restoration_fidelity is not None:
+        params["restoration_fidelity"] = restoration_fidelity
+    if target_face_index is not None:
+        params["target_face_index"] = target_face_index
+    if reference_artifact_ids is not None:
+        params["reference_artifact_ids"] = list(reference_artifact_ids)
     if reference_images is not None:
         params["reference_images"] = reference_images
+        if reference_images:
+            merged_refs = list(params.get("reference_artifact_ids") or [])
+            for item in reference_images:
+                if item and item not in merged_refs:
+                    merged_refs.append(item)
+            params["reference_artifact_ids"] = merged_refs
     if mask is not None:
         params["mask"] = mask
     if prefer_4k is not None:
@@ -407,6 +459,14 @@ async def image_create(
     skip_single_layers: str | None = None,
     seed: int | None = None,
     layout: dict[str, Any] | None = None,
+    source_artifact_id: str | None = None,
+    reference_artifact_ids: list[str] | None = None,
+    face_reference_artifact_id: str | None = None,
+    source_identity_artifact_id: str | None = None,
+    identity_strength: float | None = None,
+    restore_face: bool | None = None,
+    restoration_fidelity: float | None = None,
+    target_face_index: int | None = None,
     reference_images: list[str] | None = None,
     mask: str | None = None,
     prefer_4k: bool | None = None,
@@ -441,6 +501,14 @@ async def image_create(
         skip_single_layers=skip_single_layers,
         seed=seed,
         layout=layout,
+        source_artifact_id=source_artifact_id,
+        reference_artifact_ids=reference_artifact_ids,
+        face_reference_artifact_id=face_reference_artifact_id,
+        source_identity_artifact_id=source_identity_artifact_id,
+        identity_strength=identity_strength,
+        restore_face=restore_face,
+        restoration_fidelity=restoration_fidelity,
+        target_face_index=target_face_index,
         reference_images=reference_images,
         mask=mask,
         prefer_4k=prefer_4k,
@@ -458,6 +526,7 @@ async def image_edit(
     engine: str = "codex",
     model: str = "",
     size: str = "",
+    aspect_ratio: str | None = None,
     resolution: str | None = None,
     quality: str | None = None,
     background: str = "auto",
@@ -477,7 +546,7 @@ async def image_edit(
     """
     resolved_model = model or (
         {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
-         "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
+         "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
     )
     params = {
         "action": "edit",
@@ -491,6 +560,8 @@ async def image_edit(
         "quality": quality,
         "background": background,
     }
+    if aspect_ratio is not None:
+        params["aspect_ratio"] = aspect_ratio
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
@@ -971,6 +1042,14 @@ app = Starlette(
         Route("/image/api/tasks", api_create_task, methods=["POST"]),
         Route("/api/tasks/stats", api_task_stats, methods=["GET"]),
         Route("/image/api/tasks/stats", api_task_stats, methods=["GET"]),
+        Route("/api/tasks/{task_id}/title", api_update_task_title, methods=["POST"]),
+        Route("/image/api/tasks/{task_id}/title", api_update_task_title, methods=["POST"]),
+        Route("/api/tasks/{task_id}/delete", api_delete_task, methods=["POST"]),
+        Route("/image/api/tasks/{task_id}/delete", api_delete_task, methods=["POST"]),
+        Route("/api/tasks/{task_id}", api_delete_task, methods=["DELETE"]),
+        Route("/image/api/tasks/{task_id}", api_delete_task, methods=["DELETE"]),
+        Route("/api/tasks/{task_id}/content-rating", api_task_content_rating, methods=["POST"]),
+        Route("/image/api/tasks/{task_id}/content-rating", api_task_content_rating, methods=["POST"]),
         Route("/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
         Route("/image/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
         Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),

@@ -150,7 +150,12 @@ class MossProvider:
             "enabled": bool(self.base_url),
             "requires_channel_account": False,
             "budget_limit_required": False,
-            "capabilities": ["text_to_image", "layout_to_image", "bilingual_typography"],
+            "capabilities": [
+                "text_to_image",
+                "layout_to_image",
+                "bilingual_typography",
+                "face_identity_reference",
+            ],
             "limits": {
                 "min_dimension": 512,
                 "max_dimension": 2048,
@@ -167,15 +172,50 @@ class MossProvider:
                 "default_shift": 5.0,
                 "default_skip_single_layers": "22",
                 "max_layout_items": 32,
+                "max_reference_images": 1,
+                "max_face_references": 1,
             },
         }
 
     def normalize(self, params: dict[str, Any]) -> dict[str, Any]:
         out = dict(params)
-        if out.get("action", "generate") != "generate":
+        face_ref_id = (
+            out.get("face_reference_artifact_id")
+            or out.get("source_identity_artifact_id")
+            or out.get("source_artifact_id")
+        )
+        ref_list = [
+            str(r).strip()
+            for r in (out.get("reference_artifact_ids") or out.get("reference_images") or [])
+            if r and str(r).strip()
+        ]
+        if not face_ref_id and ref_list:
+            face_ref_id = ref_list[0]
+
+        action = out.get("action", "generate")
+        if action == "edit" and face_ref_id:
+            out["action"] = "generate"
+        elif action != "generate":
             raise ValueError("capability_not_supported")
         if out.get("channel_account_id") is not None or out.get("budget_limit") is not None:
             raise ValueError("channel_parameters_not_supported")
+        if out.get("mask") is not None or out.get("mask_artifact_id") is not None or out.get("prefer_4k"):
+            raise ValueError("INVALID_ARGUMENT: moss-image does not support mask or prefer_4k")
+
+        if face_ref_id:
+            face_ref_id = str(face_ref_id).strip()
+            out["face_reference_artifact_id"] = face_ref_id
+            out["source_identity_artifact_id"] = face_ref_id
+            if face_ref_id not in ref_list:
+                ref_list.insert(0, face_ref_id)
+            out["reference_artifact_ids"] = ref_list[:1]
+            out["identity_strength"] = max(0.5, min(1.0, float(out.get("identity_strength") or 0.95)))
+            out["restore_face"] = True if out.get("restore_face") is None else bool(out.get("restore_face"))
+            out["restoration_fidelity"] = max(
+                0.0,
+                min(1.0, float(0.85 if out.get("restoration_fidelity") is None else out.get("restoration_fidelity"))),
+            )
+            out["target_face_index"] = max(0, int(out.get("target_face_index") or 0))
 
         prompt = str(out.get("prompt") or "").strip()
         if not prompt:

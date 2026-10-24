@@ -296,6 +296,78 @@ class TestImageMcpAndHttpContentRating(unittest.TestCase):
         status_res = json.loads(server_mod.image_status(self.task_moss.task_id).content[0].text)
         self.assertEqual(status_res["status"], "completed")
 
+    def test_task_card_three_dots_actions_title_rating_and_delete(self) -> None:
+        headers = {"Authorization": "Bearer test-secret-token", "X-User-Id": "user-mengsk"}
+        client = TestClient(server_mod.app)
+
+        # Dashboard HTML contains three-dots menu and no static card-action-text 查看
+        dash_resp = client.get("/dashboard")
+        self.assertEqual(dash_resp.status_code, 200)
+        self.assertIn("data-menu-toggle", dash_resp.text)
+        self.assertIn('data-task-action="edit"', dash_resp.text)
+        self.assertIn('data-task-action="toggle-nsfw"', dash_resp.text)
+        self.assertIn('data-task-action="delete"', dash_resp.text)
+        self.assertNotIn('<span class="card-action-text">查看</span>', dash_resp.text)
+
+        # 1. Edit task title
+        title_resp = client.post(
+            f"/api/tasks/{self.task_gen.task_id}/title",
+            json={"title": "重命名后的山景定妆图"},
+            headers=headers,
+        )
+        self.assertEqual(title_resp.status_code, 200)
+        self.assertEqual(title_resp.json()["title"], "重命名后的山景定妆图")
+
+        list_resp = client.get("/api/tasks?project_id=proj-a", headers=headers)
+        gen_item = next(t for t in list_resp.json()["tasks"] if t["task_id"] == self.task_gen.task_id)
+        self.assertEqual(gen_item["title"], "重命名后的山景定妆图")
+        self.assertEqual(gen_item["request_params"]["prompt"], "sunny mountain")
+
+        # 2. Mark task as NSFW via card action endpoint
+        mark_resp = client.post(
+            f"/api/tasks/{self.task_moss.task_id}/content-rating",
+            json={"action": "mark", "reason": "manual_mark_nsfw"},
+            headers=headers,
+        )
+        self.assertEqual(mark_resp.status_code, 200)
+        self.assertEqual(mark_resp.json()["content_rating"]["rating"], "nsfw")
+
+        # Hidden when X-VF-Include-NSFW is not set
+        hidden_resp = client.get("/api/tasks?project_id=proj-a", headers=headers)
+        self.assertEqual(hidden_resp.json()["total"], 1)
+
+        # Visible when X-VF-Include-NSFW: 1
+        shown_resp = client.get(
+            "/api/tasks?project_id=proj-a",
+            headers={**headers, "X-VF-Include-NSFW": "1"},
+        )
+        self.assertEqual(shown_resp.json()["total"], 2)
+
+        # 3. Clear NSFW rating via card action endpoint
+        clear_resp = client.post(
+            f"/api/tasks/{self.task_moss.task_id}/content-rating",
+            json={"action": "clear", "reason": "manual_clear_nsfw"},
+            headers=headers,
+        )
+        self.assertEqual(clear_resp.status_code, 200)
+        self.assertEqual(clear_resp.json()["content_rating"]["rating"], "general")
+
+        after_clear = client.get("/api/tasks?project_id=proj-a", headers=headers)
+        self.assertEqual(after_clear.json()["total"], 2)
+
+        # 4. Delete task via POST /api/tasks/{id}/delete
+        del_resp = client.post(
+            f"/api/tasks/{self.task_moss.task_id}/delete",
+            json={},
+            headers=headers,
+        )
+        self.assertEqual(del_resp.status_code, 200)
+        self.assertTrue(del_resp.json()["deleted"])
+
+        after_del = client.get("/api/tasks?project_id=proj-a", headers=headers)
+        self.assertEqual(after_del.json()["total"], 1)
+        self.assertEqual([t["task_id"] for t in after_del.json()["tasks"]], [self.task_gen.task_id])
+
 
 if __name__ == "__main__":
     unittest.main()

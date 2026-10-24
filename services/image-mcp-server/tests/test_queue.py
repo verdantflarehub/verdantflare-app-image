@@ -112,6 +112,44 @@ class TestTaskQueueManager(unittest.TestCase):
                     self.assertEqual(call_kwargs["size"], "1152x2048")
                     self.assertEqual(call_kwargs["prompt"], "test edit prompt")
 
+                    # 3. 测试 Gemini generate 透传 aspect_ratio 与 reference_artifact_ids
+                    mock_gemini.generate.reset_mock()
+                    t3 = tasks.create(
+                        project_id="proj-q",
+                        idempotency_key="q-3",
+                        engine="gemini",
+                        request_params={
+                            "action": "generate",
+                            "prompt": "gemini portrait with reference",
+                            "aspect_ratio": "9:16",
+                            "reference_artifact_ids": [art_rec.artifact_id],
+                        },
+                    )
+                    await queue_mgr.enqueue(
+                        task_id=t3.task_id,
+                        project_id="proj-q",
+                        engine="gemini",
+                        action="generate",
+                        params={
+                            "action": "generate",
+                            "prompt": "gemini portrait with reference",
+                            "aspect_ratio": "9:16",
+                            "reference_artifact_ids": [art_rec.artifact_id],
+                        },
+                    )
+                    for _ in range(50):
+                        rec3 = tasks.get(t3.task_id)
+                        if rec3.status == "completed":
+                            break
+                        await asyncio.sleep(0.05)
+
+                    final_rec3 = tasks.get(t3.task_id)
+                    self.assertEqual(final_rec3.status, "completed")
+                    mock_gemini.generate.assert_called_once()
+                    g_kwargs = mock_gemini.generate.call_args.kwargs
+                    self.assertEqual(g_kwargs["aspect_ratio"], "9:16")
+                    self.assertEqual(g_kwargs["source_images"], [b"fake-ref-data"])
+
                 finally:
                     await queue_mgr.stop()
 

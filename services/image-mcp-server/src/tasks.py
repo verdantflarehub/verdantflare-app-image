@@ -45,7 +45,10 @@ class TaskRecord:
     phase: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        custom_title = (self.request_params or {}).get("title")
+        data["title"] = str(custom_title).strip() if custom_title else (self.prompt_preview or "")
+        return data
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> TaskRecord:
@@ -405,3 +408,47 @@ class TaskStore:
                 "SELECT * FROM tasks WHERE status = 'queued' ORDER BY created_at ASC"
             )
             return [TaskRecord.from_row(r) for r in cur.fetchall()]
+
+    def rename_task(self, task_id: str, title: str) -> TaskRecord:
+        self.ensure_ready()
+        clean_title = str(title or "").strip()[:120]
+        if not clean_title:
+            raise ValueError("title_required")
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_conn() as conn:
+            cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                raise TaskNotFound(f"任务未找到: {task_id}")
+            try:
+                params = json.loads(row["request_params"] or "{}")
+            except Exception:
+                params = {}
+            params["title"] = clean_title
+            conn.execute(
+                "UPDATE tasks SET request_params = ?, updated_at = ? WHERE task_id = ?",
+                (json.dumps(params, ensure_ascii=False), now, task_id),
+            )
+            conn.commit()
+        return self.get(task_id)
+
+    def delete_task(self, task_id: str) -> None:
+        self.ensure_ready()
+        with self._get_conn() as conn:
+            cur = conn.execute("SELECT task_id, artifact_id FROM tasks WHERE task_id = ?", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                raise TaskNotFound(f"任务未找到: {task_id}")
+            artifact_id = row["artifact_id"]
+            conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+            if artifact_id:
+                conn.execute(
+                    "DELETE FROM content_ratings WHERE task_id = ? OR version_id IN (?, ?)",
+                    (task_id, task_id, artifact_id),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM content_ratings WHERE task_id = ? OR version_id = ?",
+                    (task_id, task_id),
+                )
+            conn.commit()

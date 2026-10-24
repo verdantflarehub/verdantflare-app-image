@@ -80,6 +80,36 @@ class GoogleQueueTests(unittest.TestCase):
             with self.subTest(amount=amount), self.assertRaises(ValueError):
                 self.queue.prepare('gemini', 'project-test', params | {'budget_limit': amount})
 
+    def test_google_channel_forwards_aspect_ratio_and_reference_artifacts(self):
+        ref = self.queue.artifacts.create_from_bytes(
+            project_id='project-test',
+            filename='ref.png',
+            data=b'\x89PNG\r\n\x1a\nref-bytes',
+            media_type='image/png',
+        )
+        params = {
+            'action': 'generate',
+            'prompt': 'vertical portrait with identity reference',
+            'aspect_ratio': '9:16',
+            'reference_artifact_ids': [ref.artifact_id],
+            'channel_runtime': 'google-channel-v1',
+            'channel_authority': {'organization_id': 'org', 'user_id': 'user'},
+            'budget_limit': '1',
+        }
+        rec = self.store.create('project-test', 'op-ref-ar', 'gemini', params)
+        self.store.claim_task(rec.task_id)
+        self.channel.submit.return_value = {'accepted': True, 'state': 'completed', 'call_id': 'call-ref'}
+        self.channel.result.return_value = (b'\x89PNG\r\n\x1a\nout', 'image/png')
+
+        job = TaskJob(rec.task_id, 'project-test', 'gemini', 'generate', params)
+        self.queue._execute_google(job)
+
+        self.channel.submit.assert_called_once()
+        submitted_payload = self.channel.submit.call_args.args[4]
+        self.assertEqual(submitted_payload['aspect_ratio'], '9:16')
+        self.assertEqual(len(submitted_payload['images']), 1)
+        self.assertEqual(submitted_payload['images'][0]['mime_type'], 'image/png')
+
 
 if __name__ == '__main__':
     unittest.main()

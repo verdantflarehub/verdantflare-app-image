@@ -15,10 +15,29 @@ UNIVERSAL_CONSTRAINTS = (
 )
 FIX_TEXT = "The image is purely visual artwork with absolutely NO text, labels, words, or letters."
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-image"
+GOOGLE_SUPPORTED_ASPECT_RATIOS = {"1:1", "3:4", "4:3", "9:16", "16:9"}
+ASPECT_RATIO_FALLBACK_MAP: dict[str, tuple[str, str]] = {
+    "2:3": ("3:4", "[Vertical Portrait 2:3 / 3:4 Aspect Ratio]"),
+    "3:2": ("4:3", "[Horizontal Landscape 3:2 / 4:3 Aspect Ratio]"),
+}
 
 
 class GeminiProviderError(Exception):
     pass
+
+
+def _normalize_aspect_ratio(aspect_ratio: str | None) -> tuple[str | None, str | None]:
+    if not aspect_ratio or not isinstance(aspect_ratio, str):
+        return None, None
+    ratio = aspect_ratio.strip()
+    if not ratio:
+        return None, None
+    if ratio in GOOGLE_SUPPORTED_ASPECT_RATIOS:
+        return ratio, None
+    if ratio in ASPECT_RATIO_FALLBACK_MAP:
+        return ASPECT_RATIO_FALLBACK_MAP[ratio]
+    return None, f"[Aspect Ratio {ratio}]"
+
 
 
 def _detect_mime_type(data: bytes) -> str:
@@ -208,6 +227,7 @@ class GeminiProvider:
         source_images: list[bytes] | None = None,
         source_image_bytes: bytes | None = None,
         mask_bytes: bytes | None = None,
+        aspect_ratio: str | None = None,
         timeout: int = 120,
     ) -> bytes:
         base = self.base_url.rstrip("/")
@@ -234,11 +254,14 @@ class GeminiProvider:
             parts.append({"inlineData": {"mimeType": mime_mask, "data": b64_mask}})
 
         parts.append({"text": prompt})
+        generation_config: dict[str, Any] = {
+            "responseModalities": ["IMAGE", "TEXT"],
+        }
+        if aspect_ratio:
+            generation_config["imageConfig"] = {"aspectRatio": aspect_ratio}
         payload = {
             "contents": [{"parts": parts}],
-            "generationConfig": {
-                "responseModalities": ["IMAGE", "TEXT"],
-            },
+            "generationConfig": generation_config,
             "safetySettings": [
                 {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
                 {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -273,11 +296,19 @@ class GeminiProvider:
         source_images: list[bytes] | None = None,
         source_image_bytes: bytes | None = None,
         mask_bytes: bytes | None = None,
+        aspect_ratio: str | None = None,
         retries: int = 2,
     ) -> bytes:
         channel = self._ensure_auth()
+        api_aspect_ratio, prompt_prefix = _normalize_aspect_ratio(aspect_ratio)
 
         clean_prompt = prompt.strip()
+        if prompt_prefix and prompt_prefix not in clean_prompt:
+            clean_prompt = f"{prompt_prefix} {clean_prompt}"
+        elif channel != "google" and api_aspect_ratio:
+            fallback_prefix = f"[Aspect Ratio {api_aspect_ratio}]"
+            if fallback_prefix not in clean_prompt:
+                clean_prompt = f"{fallback_prefix} {clean_prompt}"
         if "no text" not in clean_prompt.lower() and "no watermarks" not in clean_prompt.lower():
             clean_prompt = f"{clean_prompt}\n\n{UNIVERSAL_CONSTRAINTS}"
 
@@ -292,6 +323,7 @@ class GeminiProvider:
                         source_images=source_images,
                         source_image_bytes=source_image_bytes,
                         mask_bytes=mask_bytes,
+                        aspect_ratio=api_aspect_ratio,
                     )
                 else:
                     return self._generate_anthropic(

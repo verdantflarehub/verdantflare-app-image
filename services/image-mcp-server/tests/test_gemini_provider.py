@@ -177,6 +177,36 @@ class TestGeminiProvider(unittest.TestCase):
         )
         fake_opener.open.assert_called_once()
 
+    def test_generate_google_aspect_ratio_and_2_3_fallback(self):
+        import io
+        import json
+
+        provider = GeminiProvider(api_key="google-key", base_url="https://generativelanguage.googleapis.com")
+        raw_b64 = base64.b64encode(b"portrait-img").decode("utf-8")
+        sent_payloads = []
+
+        def fake_urlopen(req, timeout=120):
+            sent_payloads.append(json.loads(req.data.decode("utf-8")))
+            return io.BytesIO(
+                json.dumps({
+                    "candidates": [
+                        {"content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": raw_b64}}]}}
+                    ]
+                }).encode("utf-8")
+            )
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            provider.generate(prompt="Vertical studio portrait", aspect_ratio="9:16")
+            provider.generate(prompt="Editorial portrait", aspect_ratio="2:3")
+
+        self.assertEqual(len(sent_payloads), 2)
+        self.assertEqual(sent_payloads[0]["generationConfig"]["imageConfig"], {"aspectRatio": "9:16"})
+        self.assertEqual(sent_payloads[1]["generationConfig"]["imageConfig"], {"aspectRatio": "3:4"})
+        self.assertIn(
+            "[Vertical Portrait 2:3 / 3:4 Aspect Ratio]",
+            sent_payloads[1]["contents"][0]["parts"][-1]["text"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -706,3 +706,118 @@ async def api_upload_artifact(request: Request) -> Response:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+def _get_ratings_store(request: Request):
+    tasks_store = request.app.state.tasks
+    ratings_store = getattr(request.app.state, "ratings", None)
+    if ratings_store is None or ratings_store.db_path != tasks_store.db_path:
+        from .content_rating import ContentRatingStore
+        ratings_store = ContentRatingStore(tasks_store.db_path, domain="image")
+        request.app.state.ratings = ratings_store
+    return ratings_store
+
+
+async def api_update_task_title(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    task_id = str(request.path_params.get("task_id", "")).strip()
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    title = str(body.get("title", "")).strip()
+    if not title:
+        return JSONResponse({"error": "title_required"}, status_code=400)
+    try:
+        updated = request.app.state.tasks.rename_task(task_id, title)
+        return JSONResponse({"ok": True, "task_id": updated.task_id, "title": updated.to_dict()["title"], "task": updated.to_dict()})
+    except TaskNotFound:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+async def api_delete_task(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    task_id = str(request.path_params.get("task_id", "")).strip()
+    try:
+        request.app.state.tasks.delete_task(task_id)
+        return JSONResponse({"ok": True, "deleted": True, "task_id": task_id})
+    except TaskNotFound:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+
+
+async def api_task_content_rating(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    task_id = str(request.path_params.get("task_id", "")).strip()
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+    action = str(body.get("action", "")).strip().lower()
+    if action not in ("mark", "clear"):
+        rating_val = str(body.get("rating", "")).strip().lower()
+        if rating_val == "nsfw":
+            action = "mark"
+        elif rating_val == "general":
+            action = "clear"
+        else:
+            return JSONResponse({"error": "invalid_action"}, status_code=400)
+
+    actor_user_id = (
+        request.headers.get("x-user-id", "").strip()
+        or str(body.get("actor_user_id") or body.get("user_id") or "human").strip()
+    )
+    reason = str(body.get("reason") or body.get("note") or "manual_card_action").strip()
+    tasks_store: TaskStore = request.app.state.tasks
+    ratings_store = _get_ratings_store(request)
+    try:
+        task = tasks_store.get(task_id)
+        primary_ver = task.artifact_id or task.task_id
+        candidate_ids = [cid for cid in dict.fromkeys([primary_ver, task.task_id, task.artifact_id]) if cid]
+        res: dict[str, Any] = {}
+        if action == "mark":
+            res = ratings_store.mark_rating(
+                version_id=primary_ver,
+                project_id=task.project_id,
+                actor_user_id=actor_user_id,
+                reason=reason,
+                task_id=task.task_id,
+            )
+            for cid in candidate_ids:
+                if cid != primary_ver:
+                    ratings_store.mark_rating(
+                        version_id=cid,
+                        project_id=task.project_id,
+                        actor_user_id=actor_user_id,
+                        reason=reason,
+                        task_id=task.task_id,
+                    )
+        else:
+            res = ratings_store.clear_rating(
+                version_id=primary_ver,
+                project_id=task.project_id,
+                actor_user_id=actor_user_id,
+                note=reason,
+                task_id=task.task_id,
+            )
+            for cid in candidate_ids:
+                if cid != primary_ver:
+                    ratings_store.clear_rating(
+                        version_id=cid,
+                        project_id=task.project_id,
+                        actor_user_id=actor_user_id,
+                        note=reason,
+                        task_id=task.task_id,
+                    )
+        ui = ratings_store.ui_fields(task.artifact_id, task_id=task.task_id, can_write=True)
+        return JSONResponse({"ok": True, "task_id": task.task_id, **res, **ui})
+    except TaskNotFound:
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    except ContentRatingError as exc:
+        return JSONResponse({"error": exc.error_code, "message": exc.message}, status_code=exc.status_code)
+
+
+

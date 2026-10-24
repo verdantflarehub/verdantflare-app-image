@@ -249,6 +249,109 @@ class TestMossProviderExecution(unittest.TestCase):
             self.assertEqual(art.metadata["elapsed_ms"], 46630)
             moss_gpu.ensure_worker_ready.assert_called_once()
 
+    def test_moss_two_stage_face_reference_pipeline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifacts = ArtifactStore(root / "artifacts")
+            tasks = TaskStore(root / "tasks.db")
+            artifacts.ensure_ready()
+            tasks.ensure_ready()
+
+            png_bytes = _make_png_bytes(128, 128)
+            fused_bytes = _make_png_bytes(128, 128)
+            ref_rec = artifacts.create_from_bytes(
+                project_id="proj-moss",
+                artifact_id="art-01e71e31ecaf4f0d",
+                filename="master-v20.png",
+                data=png_bytes,
+                media_type="image/png",
+            )
+            fused_rec = artifacts.create_from_bytes(
+                project_id="proj-moss",
+                artifact_id="art-aaaaaaaaaaaaaaaa",
+                filename="fused.png",
+                data=fused_bytes,
+                media_type="image/png",
+            )
+
+            moss_provider = MossProvider(base_url="http://image-moss-api:8000")
+            moss_gpu = MagicMock()
+            moss_gpu.hold.return_value.__enter__ = MagicMock(return_value=None)
+            moss_gpu.hold.return_value.__exit__ = MagicMock(return_value=False)
+
+            qm = TaskQueueManager(
+                tasks=tasks,
+                artifacts=artifacts,
+                codex_provider=MagicMock(),
+                gemini_provider=MagicMock(),
+                moss_provider=moss_provider,
+                moss_gpu=moss_gpu,
+            )
+
+            params = qm.prepare(
+                "moss-image",
+                "proj-moss",
+                {
+                    "action": "generate",
+                    "prompt": "晴子度假泳池写真",
+                    "aspect_ratio": "9:16",
+                    "resolution": "1k",
+                    "face_reference_artifact_id": ref_rec.artifact_id,
+                },
+            )
+            self.assertEqual(params["source_identity_artifact_id"], "art-01e71e31ecaf4f0d")
+            self.assertEqual(params["reference_artifact_ids"], ["art-01e71e31ecaf4f0d"])
+
+            task = tasks.create(
+                project_id="proj-moss",
+                idempotency_key="idem-moss-face-1",
+                engine="moss-image",
+                model=DEFAULT_MOSS_MODEL,
+                request_params=params,
+            )
+
+            async def fake_faceswap(**kwargs):
+                return {
+                    "status": "completed",
+                    "artifact": fused_rec.to_dict(),
+                    "metrics": {"arcface_similarity": 0.912},
+                }
+
+            with patch.object(
+                moss_provider,
+                "generate",
+                return_value=(
+                    png_bytes,
+                    {
+                        "engine": "moss-image",
+                        "model": DEFAULT_MOSS_MODEL,
+                        "width": 768,
+                        "height": 1344,
+                        "resolved_seed": 888,
+                        "steps": 50,
+                        "elapsed_ms": 42000,
+                    },
+                ),
+            ), patch("src.faceswap.handle_faceswap", side_effect=fake_faceswap) as mock_fs:
+                qm._execute_moss(
+                    TaskJob(
+                        task_id=task.task_id,
+                        project_id="proj-moss",
+                        engine="moss-image",
+                        action="generate",
+                        params=params,
+                    )
+                )
+                mock_fs.assert_called_once()
+
+            completed = tasks.get(task.task_id)
+            self.assertIsNotNone(completed.artifact_id)
+            art = artifacts.get(completed.artifact_id, "proj-moss")
+            self.assertEqual(art.metadata["source_identity_artifact_id"], "art-01e71e31ecaf4f0d")
+            self.assertEqual(art.metadata["face_reference_artifact_id"], "art-01e71e31ecaf4f0d")
+            self.assertEqual(art.metadata["reference_artifact_ids"], ["art-01e71e31ecaf4f0d"])
+            self.assertIn("stage1_artifact_id", art.metadata)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -341,6 +341,7 @@ class TaskQueueManager:
                 images = []
                 ids = [job.params.get('source_artifact_id')]
                 ids.extend(job.params.get('reference_artifact_ids') or [])
+                ids.extend(job.params.get('reference_images') or [])
                 if not is_chatgpt:
                     ids.append(job.params.get('mask_artifact_id'))
                 for artifact_id in dict.fromkeys(item for item in ids if item):
@@ -353,6 +354,8 @@ class TaskQueueManager:
                     images.append({'mime_type': artifact.media_type,
                                    'data': base64.b64encode(data).decode()})
                 payload = {'prompt': job.params['prompt'], 'images': images}
+                if runtime == 'google-channel-v1' and job.params.get('aspect_ratio'):
+                    payload['aspect_ratio'] = job.params['aspect_ratio']
                 if is_grok:
                     payload = {key: job.params[key] for key in ('prompt', 'action', 'resolution')}
                     if job.action == 'edit':
@@ -490,17 +493,76 @@ class TaskQueueManager:
             self.tasks.update_status(job.task_id, "running", phase="generating")
             img_bytes, meta = self.moss_provider.generate(job.params)
             meta["task_id"] = job.task_id
+            face_ref_id = (
+                job.params.get("face_reference_artifact_id")
+                or job.params.get("source_identity_artifact_id")
+                or job.params.get("source_artifact_id")
+                or ((job.params.get("reference_artifact_ids") or [None])[0])
+                or ((job.params.get("reference_images") or [None])[0])
+            )
             extension, media_type = _image_storage_type(img_bytes)
             filename = f"moss-{job.task_id}{extension}"
             artifact_id = "art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16]
-            record = self.artifacts.create_from_bytes(
-                project_id=job.project_id,
-                artifact_id=artifact_id,
-                filename=filename,
-                data=img_bytes,
-                media_type=media_type,
-                metadata=meta,
-            )
+
+            if face_ref_id:
+                stage1_artifact_id = "art-" + hashlib.sha256(f"{job.task_id}-stage1".encode()).hexdigest()[:16]
+                stage1_record = self.artifacts.create_from_bytes(
+                    project_id=job.project_id,
+                    artifact_id=stage1_artifact_id,
+                    filename=f"moss-stage1-{job.task_id}{extension}",
+                    data=img_bytes,
+                    media_type=media_type,
+                    metadata={**meta, "stage": "moss_t2i_base"},
+                )
+                self.tasks.update_status(job.task_id, "running", phase="fusing_face")
+                from .faceswap import handle_faceswap
+
+                fuse_res = asyncio.run(
+                    handle_faceswap(
+                        artifacts=self.artifacts,
+                        target_artifact_id=stage1_record.artifact_id,
+                        source_identity_artifact_id=str(face_ref_id),
+                        identity_strength=float(job.params.get("identity_strength", 0.95)),
+                        restore_face=bool(job.params.get("restore_face", True)),
+                        restoration_fidelity=float(job.params.get("restoration_fidelity", 0.85)),
+                        project_id=job.project_id,
+                        target_face_index=int(job.params.get("target_face_index", 0)),
+                    )
+                )
+                if fuse_res.get("status") != "completed":
+                    raise RuntimeError(
+                        fuse_res.get("error") or "MOSS-Image 二阶段骨相人脸融合失败"
+                    )
+                fused_art_id = fuse_res["artifact"]["artifact_id"]
+                fused_rec = self.artifacts.get(fused_art_id, job.project_id)
+                fused_bytes = self.artifacts.content_path(fused_rec).read_bytes()
+                fused_ext, fused_media = _image_storage_type(fused_bytes)
+                meta.update(
+                    {
+                        "source_identity_artifact_id": str(face_ref_id),
+                        "face_reference_artifact_id": str(face_ref_id),
+                        "reference_artifact_ids": [str(face_ref_id)],
+                        "stage1_artifact_id": stage1_record.artifact_id,
+                        "face_fusion_metrics": fuse_res.get("metrics", {}),
+                    }
+                )
+                record = self.artifacts.create_from_bytes(
+                    project_id=job.project_id,
+                    artifact_id=artifact_id,
+                    filename=f"moss-{job.task_id}{fused_ext}",
+                    data=fused_bytes,
+                    media_type=fused_media,
+                    metadata=meta,
+                )
+            else:
+                record = self.artifacts.create_from_bytes(
+                    project_id=job.project_id,
+                    artifact_id=artifact_id,
+                    filename=filename,
+                    data=img_bytes,
+                    media_type=media_type,
+                    metadata=meta,
+                )
             self.tasks.update_status(
                 job.task_id,
                 "running",
@@ -529,10 +591,20 @@ class TaskQueueManager:
         }
         size = size_map.get(aspect_ratio, "2048x1152")
 
+        source_id = p.get("source_artifact_id")
+        ref_ids = list(p.get("reference_artifact_ids") or p.get("reference_images") or [])
+
         if engine == "gemini":
+            source_bytes_list: list[bytes] = []
+            for rid in dict.fromkeys([source_id, *ref_ids]):
+                if rid:
+                    rec = self.artifacts.get(rid, job.project_id)
+                    source_bytes_list.append(self.artifacts.content_path(rec).read_bytes())
             img_bytes = self.gemini_provider.generate(
                 prompt=prompt,
                 model=model or DEFAULT_GEMINI_MODEL,
+                source_images=source_bytes_list or None,
+                aspect_ratio=aspect_ratio,
             )
         else:
             img_bytes = self.codex_provider.generate(
@@ -547,21 +619,26 @@ class TaskQueueManager:
 
         extension, media_type = _image_storage_type(img_bytes)
         filename = f"gen-{job.task_id}{extension}"
+        meta: dict[str, Any] = {
+            "engine": engine,
+            "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
+            "prompt": prompt,
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
+            "quality": quality,
+            "background": background,
+            "instructions": instructions or "verbatim",
+        }
+        if source_id:
+            meta["source_artifact_id"] = source_id
+        if ref_ids:
+            meta["reference_artifact_ids"] = ref_ids
         record = self.artifacts.create_from_bytes(
             project_id=job.project_id,
             filename=filename,
             data=img_bytes,
             media_type=media_type,
-            metadata={
-                "engine": engine,
-                "model": model or (DEFAULT_GEMINI_MODEL if engine == "gemini" else DEFAULT_IMAGE_MODEL),
-                "prompt": prompt,
-                "aspect_ratio": aspect_ratio,
-                "resolution": resolution,
-                "quality": quality,
-                "background": background,
-                "instructions": instructions or "verbatim",
-            },
+            metadata=meta,
         )
         self.tasks.update_status(job.task_id, "running", artifact_id=record.artifact_id)
 
@@ -615,6 +692,7 @@ class TaskQueueManager:
                 model=model or DEFAULT_GEMINI_MODEL,
                 source_images=source_bytes_list,
                 mask_bytes=mask_bytes,
+                aspect_ratio=aspect_ratio,
             )
         else:
             img_bytes = self.codex_provider.edit(

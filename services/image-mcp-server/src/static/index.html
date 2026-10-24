@@ -654,7 +654,8 @@
       background: var(--shell-panel);
       border: 0.5px solid var(--line-strong);
       border-radius: var(--radius-md);
-      overflow: hidden;
+      overflow: visible;
+      position: relative;
       display: flex;
       flex-direction: column;
       transition: transform 220ms var(--vf-ease-spring), box-shadow 220ms var(--vf-ease-out), border-color 220ms var(--vf-ease-out);
@@ -672,6 +673,7 @@
       position: relative;
       aspect-ratio: 16 / 10;
       background: var(--card-thumb-bg);
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
       overflow: hidden;
       display: flex;
       align-items: center;
@@ -899,12 +901,85 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .card-action-text {
-      color: var(--accent);
-      font-weight: 600;
-      font-size: 11.5px;
-      white-space: nowrap;
+    .card-more-wrap {
+      position: relative;
       margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .card-more-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 24px;
+      border-radius: 6px;
+      border: 0.5px solid var(--line-strong);
+      background: var(--subtle);
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 1px;
+      cursor: pointer;
+      transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+    }
+
+    .card-more-btn:hover,
+    .card-more-btn[aria-expanded="true"] {
+      background: var(--selected);
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .card-action-menu {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 6px);
+      min-width: 152px;
+      padding: 5px;
+      border-radius: 10px;
+      background: var(--panel);
+      border: 0.5px solid var(--line-strong);
+      box-shadow: var(--vf-shadow-card-hover), 0 12px 28px rgba(0, 0, 0, 0.22);
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .card-action-menu[hidden] {
+      display: none !important;
+    }
+
+    .card-action-item {
+      width: 100%;
+      text-align: left;
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink);
+      background: transparent;
+      border: 0;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 120ms ease, color 120ms ease;
+    }
+
+    .card-action-item:hover {
+      background: var(--subtle);
+      color: var(--accent);
+    }
+
+    .card-action-item.danger {
+      color: var(--danger);
+    }
+
+    .card-action-item.danger:hover {
+      background: rgba(220, 38, 38, 0.1);
+      color: var(--danger);
     }
 
     /* ==========================================================================
@@ -2324,7 +2399,7 @@
     function getModelQuotas(modelName, action) {
       const m = String(modelName || '').toLowerCase();
       const a = String(action || '').toLowerCase();
-      if (m.includes('moss')) return { maxImages: 0, maxMasks: 0, maxFaces: 0, maxSize: '纯文本' };
+      if (m.includes('moss')) return { maxImages: 1, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
       if (m.includes('qwen')) return { maxImages: 4, maxMasks: 1, maxFaces: 0, maxSize: '50 MB' };
       if (m.includes('seedream')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '50 MB' };
       if (m.includes('fill') || a === 'inpaint') return { maxImages: 1, maxMasks: 2, maxFaces: 0, maxSize: '40 MB' };
@@ -2370,14 +2445,24 @@
         return;
       }
       lastTaskStructure = structure;
-      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num" data-output-task="${escapeHtml(t.id)}">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td><button data-open-task="${escapeHtml(t.id)}">查看</button></td></tr>`).join('')}</tbody></table>`;
+      const renderMoreMenu = (taskId, isNsfw) => `
+        <div class="card-more-wrap">
+          <button type="button" class="card-more-btn" data-menu-toggle="${taskId}" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" title="更多操作">···</button>
+          <div class="card-action-menu" data-menu-for="${taskId}" role="menu" hidden>
+            <button type="button" class="card-action-item" role="menuitem" data-task-action="edit" data-task-id="${taskId}">编辑</button>
+            <button type="button" class="card-action-item" role="menuitem" data-task-action="toggle-nsfw" data-task-id="${taskId}">${isNsfw ? '移除 18+ 标记' : '标记为 18+ (NSFW)'}</button>
+            <button type="button" class="card-action-item danger" role="menuitem" data-task-action="delete" data-task-id="${taskId}">删除</button>
+          </div>
+        </div>
+      `;
+      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num" data-output-task="${escapeHtml(t.id)}">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}${t.isNsfw ? ' <span class="tag-badge danger" style="margin-left:4px;">18+</span>' : ''}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td>${renderMoreMenu(escapeHtml(t.id), Boolean(t.isNsfw))}</td></tr>`).join('')}</tbody></table>`;
       if (tableMarkup !== lastTableMarkup) { taskTableContainer.innerHTML = tableMarkup; lastTableMarkup = tableMarkup; }
       if (empty) { galleryContainer.replaceChildren(); lastGalleryMarkup = ''; return; }
       const markup = filtered.map(task => {
         const t = Object.fromEntries(Object.entries(task).map(([k,v]) => [k, typeof v === 'string' ? escapeHtml(v) : v]));
         const chLogo = channelLogo(task.engine || task.channelLabel);
         return `
-        <article class="task-card" data-task-id="${t.id}" data-open-task="${t.id}" role="button" tabindex="0" aria-label="查看任务：${t.title}">
+        <article class="task-card" data-task-id="${t.id}" data-open-task="${t.id}" role="button" tabindex="0" aria-label="任务：${t.title}">
           <div class="card-thumb">
             ${t.img ? `
               <img src="${t.img}" alt="${t.title}" loading="lazy"/>
@@ -2399,8 +2484,11 @@
             `}
             <div class="card-top-badges">
               <span class="service" title="模型 × 渠道：${t.modelShort} × ${t.channelLabel}">${t.modelShort} × ${chLogo}${t.channelLabel}</span>
-              <span class="tag-badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : (t.status === 'failed' ? 'danger' : ''))}">
-                ${t.phase === 'submission_unknown' ? '待核对' : t.phase === 'collect_retry' ? '回收中' : t.status === 'succeeded' ? '已完成' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
+              <span style="display:inline-flex;align-items:center;gap:6px;">
+                ${t.isNsfw ? '<span class="tag-badge danger" title="18+ 分级标记">18+</span>' : ''}
+                <span class="tag-badge ${t.status === 'succeeded' ? 'accent' : (t.status === 'running' ? 'amber' : (t.status === 'failed' ? 'danger' : ''))}">
+                  ${t.phase === 'submission_unknown' ? '待核对' : t.phase === 'collect_retry' ? '回收中' : t.status === 'succeeded' ? '已完成' : (t.status === 'running' ? '生成中' : (t.status === 'failed' ? '已失败' : '排队中'))}
+                </span>
               </span>
             </div>
             <div class="card-time-row">
@@ -2422,7 +2510,7 @@
                 <span title="实际像素尺寸">${t.resShort}</span>
                 <span title="原图文件大小">${t.sizeLabel}</span>
               </div>
-              <span class="card-action-text">查看</span>
+              ${renderMoreMenu(t.id, Boolean(t.isNsfw))}
             </div>
           </div>
         </article>
@@ -2446,8 +2534,97 @@
       }
     }
 
+    function closeAllCardMenus() {
+      document.querySelectorAll('.card-action-menu:not([hidden])').forEach(menu => {
+        menu.hidden = true;
+      });
+      document.querySelectorAll('.card-more-btn[aria-expanded="true"]').forEach(btn => {
+        btn.setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    async function handleTaskCardAction(action, taskId) {
+      const task = allTasks.find(t => t.id === taskId);
+      if (!task) return;
+      try {
+        if (action === 'edit') {
+          const nextTitle = window.prompt('编辑任务标题：', task.title || '');
+          if (nextTitle === null) return;
+          const trimmed = nextTitle.trim();
+          if (!trimmed || trimmed === task.title) return;
+          await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/title`, {
+            method: 'POST',
+            body: { title: trimmed }
+          });
+          task.title = trimmed;
+          lastTaskStructure = '';
+          renderGallery();
+          void syncBackendTasks();
+        } else if (action === 'toggle-nsfw') {
+          const nextAction = task.isNsfw ? 'clear' : 'mark';
+          await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/content-rating`, {
+            method: 'POST',
+            body: { action: nextAction, reason: nextAction === 'mark' ? 'manual_mark_nsfw' : 'manual_clear_nsfw' }
+          });
+          task.isNsfw = nextAction === 'mark';
+          task.contentRating = task.isNsfw ? 'nsfw' : 'general';
+          lastTaskStructure = '';
+          renderGallery();
+          void syncBackendTasks();
+        } else if (action === 'delete') {
+          if (!window.confirm(`确认删除任务 "${task.title || taskId}"？此操作不可恢复。`)) return;
+          await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/delete`, {
+            method: 'POST',
+            body: {}
+          });
+          allTasks = allTasks.filter(t => t.id !== taskId);
+          taskTotal = Math.max(0, taskTotal - 1);
+          lastTaskStructure = '';
+          renderGallery();
+          void syncBackendTasks();
+        }
+      } catch (err) {
+        window.alert(`操作失败：${err.message || err}`);
+      }
+    }
+
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.card-more-wrap')) {
+        closeAllCardMenus();
+      }
+    });
+
     for (const container of [galleryContainer, taskTableContainer]) {
-      container.addEventListener('click', e => { const card = e.target.closest('[data-open-task]'); if (card) openInspector(card.dataset.openTask); });
+      container.addEventListener('click', e => {
+        const menuToggle = e.target.closest('[data-menu-toggle]');
+        if (menuToggle) {
+          e.stopPropagation();
+          e.preventDefault();
+          const taskId = menuToggle.dataset.menuToggle;
+          const wrap = menuToggle.closest('.card-more-wrap');
+          const menu = wrap?.querySelector('.card-action-menu');
+          const wasOpen = menu && !menu.hidden;
+          closeAllCardMenus();
+          if (menu && !wasOpen) {
+            menu.hidden = false;
+            menuToggle.setAttribute('aria-expanded', 'true');
+          }
+          return;
+        }
+        const actionBtn = e.target.closest('[data-task-action]');
+        if (actionBtn) {
+          e.stopPropagation();
+          e.preventDefault();
+          const action = actionBtn.dataset.taskAction;
+          const taskId = actionBtn.dataset.taskId;
+          closeAllCardMenus();
+          void handleTaskCardAction(action, taskId);
+          return;
+        }
+        if (e.target.closest('.card-more-wrap')) return;
+        const card = e.target.closest('[data-open-task]');
+        if (card) openInspector(card.dataset.openTask);
+      });
       container.addEventListener('keydown', e => { if (e.target.matches('article[data-open-task]') && ['Enter', ' '].includes(e.key)) { e.preventDefault(); openInspector(e.target.dataset.openTask); } });
     }
     for (const select of [filterModel, filterEngine, filterProject]) select.addEventListener('change', renderGallery);
@@ -2981,7 +3158,7 @@
           { mark: 'ZI', title: 'Z-Image-Turbo', biz: '图像生成', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '20MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 · 0张蒙版 · 0张人脸源', desc: '8 步极速蒸馏文生图与构图预演模型，适合大批量角色与分镜草稿探索。' },
           { mark: 'ID', title: 'InstantID + InsightFace (antelopev2)', biz: '骨相换脸', res: '2048p', duration: '1:1-9:16', fps: 'PNG', maxSize: '50MB', caps: [['FaceSwap', '骨相换脸'], ['R2I', '身份锚定']], refQuota: '1张目标底图 · 最多 4张源人脸参考 · 1张姿态控制图', desc: '真人 IP 专属骨相级人脸身份锁定与高保真换脸管线，含 CodeFormer 细节修复。' },
           { mark: 'SD', title: 'SDXL ControlNet Union', biz: '角色定妆', res: '1536p', duration: '1:1-16:9', fps: 'PNG', maxSize: '40MB', caps: [['T2I', '文生图'], ['I2I', '线稿/深度控制'], ['INPAINT', '局部重绘']], refQuota: '最多 3张控制参考图 (OpenPose/Depth/Canny) · 1张蒙版', desc: '多条件空间结构控制生成，精确锁定人物站姿、镜头透视与服装轮廓。' },
-          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2048p (≤2MP)', duration: '1:1-16:9', fps: 'PNG', maxSize: '—', caps: [['T2I', '文生图'], ['LAYOUT', '版式控制']], refQuota: '0张参考图 · 0张蒙版 · 支持最多 32 项 yxyx 版式框', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报与原生 JSON 版式控制文生图引擎。' }
+          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2048p (≤2MP)', duration: '1:1-16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['LAYOUT', '版式控制'], ['FaceSwap', '骨相锚定']], refQuota: '最多 1张参考图 · 1张骨相人脸源 · 支持最多 32 项 yxyx 版式框', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报、原生 JSON 版式控制与两段式骨相身份锚定生图引擎。' }
         ]
       },
       {
@@ -3217,9 +3394,9 @@
             const action = req.action || 't2i';
             const sourceArtifactId = req.source_artifact_id || req.target_artifact_id || '';
             const maskArtifactId = req.mask_artifact_id || '';
-            const sourceIdentityArtifactId = req.source_identity_artifact_id || '';
             const extraRefs = Array.isArray(req.reference_artifact_ids) ? req.reference_artifact_ids.filter(Boolean) : [];
             const refImageIds = [...new Set([...(sourceArtifactId ? [sourceArtifactId] : []), ...extraRefs])];
+            const sourceIdentityArtifactId = req.source_identity_artifact_id || req.face_reference_artifact_id || ((t.engine === 'moss-image' && refImageIds.length > 0) ? refImageIds[0] : '');
             const modeCode = actionModeCode(action, extraRefs.length > 0);
             const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : '文生图'));
             const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
@@ -3228,12 +3405,19 @@
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
             const imgUrl = artifactBlobMap.get(artifactId) || '';
+            const customTitle = String(req.title || t.title || '').trim();
+            const defaultTitle = (t.prompt_preview || req.prompt || '图像任务').slice(0, 24) + '…';
+            const ratingObj = t.content_rating && typeof t.content_rating === 'object' ? t.content_rating : null;
+            const contentRating = ratingObj ? (ratingObj.rating || 'general') : (typeof t.content_rating === 'string' ? t.content_rating : 'general');
+            const isNsfw = contentRating === 'nsfw';
 
             return {
               id: t.task_id,
-              title: (t.prompt_preview || req.prompt || '图像任务').slice(0, 24) + '…',
+              title: customTitle || defaultTitle,
               prompt: req.prompt || t.prompt_preview || '',
               negativePrompt: req.negative_prompt || '',
+              contentRating,
+              isNsfw,
               type: action,
               modeCode,
               typeName,
