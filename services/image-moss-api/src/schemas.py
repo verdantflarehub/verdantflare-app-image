@@ -75,7 +75,8 @@ class GenerateRequest(BaseModel):
     # Experimental Edit mode (Moss-Image-Edit LoRA + reference latents); references keep request order
     edit: bool = Field(default=False)
     edit_lora_strength: float = Field(default=1.0)
-    reference_max_edge: int = Field(default=512)
+    # None follows the output long edge: the Edit LoRA needs references at the output scale, smaller ones tile
+    reference_max_edge: int | None = Field(default=None)
 
 
 class GenerateResponse(BaseModel):
@@ -362,11 +363,12 @@ def validate_generate_request(
                 "INVALID_SAMPLING_PARAMS",
                 f"edit_lora_strength must be between 0.0 and 2.0, got {req.edit_lora_strength}",
             )
-        if not (256 <= req.reference_max_edge <= 1024) or req.reference_max_edge % 16 != 0:
+        max_edge = req.reference_max_edge
+        if max_edge is not None and (not (256 <= max_edge <= 2048) or max_edge % 16 != 0):
             raise MossApiError(
                 400,
                 "INVALID_ARGUMENT",
-                f"reference_max_edge must be a multiple of 16 within [256, 1024], got {req.reference_max_edge}",
+                f"reference_max_edge must be a multiple of 16 within [256, 2048], got {max_edge}",
             )
     if req.reference_images_base64:
         if len(req.reference_images_base64) > max_refs:
@@ -417,5 +419,5 @@ def validate_generate_request(
         "reference_images": validated_refs,
         "edit": bool(req.edit),
         "edit_lora_strength": float(req.edit_lora_strength),
-        "reference_max_edge": int(req.reference_max_edge),
+        "reference_max_edge": int(req.reference_max_edge or max(req.width, req.height)),
     }

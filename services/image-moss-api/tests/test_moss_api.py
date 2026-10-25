@@ -458,7 +458,7 @@ def test_validate_edit_request() -> None:
     ref = base64.b64encode(b"\x89PNG\r\n\x1a\n" * 4).decode("ascii")
     out = validate_generate_request(GenerateRequest(prompt="图1的人穿上图2的衣服", edit=True, reference_images_base64=[ref] * 4))
     assert out["edit"] is True and len(out["reference_images"]) == 4
-    assert out["reference_max_edge"] == 512 and out["edit_lora_strength"] == 1.0
+    assert out["reference_max_edge"] == 1024 and out["edit_lora_strength"] == 1.0
     bad_cases = [
         GenerateRequest(prompt="无参考图", edit=True),
         GenerateRequest(prompt="五张图", edit=True, reference_images_base64=[ref] * 5),
@@ -540,8 +540,8 @@ def test_edit_pipeline_scales_references_and_requires_lora(tmp_path: Path) -> No
         pipe = MossImagePipeline(settings=settings, comfy_runner=inspect_runner)
         res = asyncio.run(pipe.generate(req))
         assert res["prompt_mode"] == "edit"
-        # long edge shrunk to 512 and aligned to 16; small images are never enlarged
-        assert captured["sizes"] == [(512, 384), (288, 496)]
+        # long edge follows the 1024 output and aligns to 16; small images are never enlarged
+        assert captured["sizes"] == [(1024, 768), (288, 496)]
         assert captured["wf"]["6"]["class_type"] == "TextEncodeMOSSImageEdit"
         assert pipe.health()["edit_available"] is True
 
