@@ -2166,14 +2166,14 @@
       return raw || 'GPT Image 2.5 Sunburst';
     }
 
-    function actionModeCode(action, hasRefs) {
+    function actionModeCode(action, hasRefs, hasSource = false) {
       const a = String(action || 't2i').toLowerCase();
       if (a === 'faceswap') return 'FaceSwap';
       if (a === 'inpaint') return 'INPAINT';
       if (a === 'outpaint') return 'OUTPAINT';
       if (a === 'upscale') return 'UPSCALE';
-      if (a === 'r2i' || (a === 'edit' && hasRefs)) return 'R2I';
-      if (a === 'edit' || a === 'i2i') return 'I2I';
+      if (a === 'r2i' || hasRefs) return 'R2I';
+      if (a === 'edit' || a === 'i2i' || hasSource) return 'I2I';
       return 'T2I';
     }
 
@@ -2435,7 +2435,7 @@
     function getModelQuotas(modelName, action) {
       const m = String(modelName || '').toLowerCase();
       const a = String(action || '').toLowerCase();
-      if (m.includes('moss')) return { maxImages: 1, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
+      if (m.includes('moss')) return { maxImages: 3, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
       if (m.includes('facefusion') || m.includes('hyperswap') || a === 'faceswap') return { maxImages: 1, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
       if (m.includes('grok')) return { maxImages: 1, maxMasks: 0, maxFaces: 0, maxSize: '10 MB' };
       if (m.includes('flare')) return { maxImages: 2, maxMasks: 0, maxFaces: 0, maxSize: '10 MB' };
@@ -2514,7 +2514,7 @@
                     <span style="font-size: 22px;">⏳</span>
                   `)}
                 </div>
-                <span class="thumb-status-text" title="${escapeHtml(t.error || '')}">${t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物…' : t.status === 'running' ? (t.engine === 'grok' ? 'Grok 远端生成中…' : '图像生成中…') : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…'))}</span>
+                <span class="thumb-status-text" title="${escapeHtml(t.error || '')}">${t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物…' : t.status === 'running' ? (t.engine === 'grok' ? 'Grok 远端生成中…' : '图像生成中…') : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? ((/safety|prohibited/i).test(t.error || '') ? '上游安全策略拦截' : ((/no_image_returned/i).test(t.error || '') ? '上游未返回图像产物' : '任务执行失败')) : '排队调度中…'))}</span>
               </div>
             `}
             <div class="card-top-badges">
@@ -3186,7 +3186,7 @@
         id: 'local',
         name: '本地',
         fullName: '本地',
-        version: 'v0.2.37',
+        version: 'v0.2.38',
         kindLabel: '本地 5090 自托管算力 · MOSS Image 多模态海报与角色参考生图',
         billing: '本地算力队列 · 免外部积分',
         models: [
@@ -3197,7 +3197,7 @@
         id: 'google',
         name: 'Google',
         fullName: 'Google',
-        version: 'v0.1.23',
+        version: 'v0.1.24',
         kindLabel: 'Google AI Studio · Nano Banana 全系列原生多模态图像渠道',
         billing: '按量计费 (Google Cloud Credits · 内置官方价格表结算)',
         models: [
@@ -3260,7 +3260,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.37',
+            version: 'v0.2.38',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3457,8 +3457,8 @@
             const extraRefs = Array.isArray(req.reference_artifact_ids) ? req.reference_artifact_ids.filter(Boolean) : [];
             const refImageIds = [...new Set([...(sourceArtifactId ? [sourceArtifactId] : []), ...extraRefs])];
             const sourceIdentityArtifactId = req.source_identity_artifact_id || req.face_reference_artifact_id || ((t.engine === 'moss-image' && refImageIds.length > 0) ? refImageIds[0] : '');
-            const modeCode = actionModeCode(action, extraRefs.length > 0);
-            const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : '文生图'));
+            const modeCode = actionModeCode(action, extraRefs.length > 0, Boolean(sourceArtifactId));
+            const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : (extraRefs.length > 0 ? '多参考生图' : (sourceArtifactId ? '图生图' : '文生图'))));
             const rawModelCode = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
             const engineRaw = t.engine || req.engine || 'local';
             const modelCode = typeof normalizeModelCode === 'function' ? normalizeModelCode(rawModelCode, engineRaw) : rawModelCode;

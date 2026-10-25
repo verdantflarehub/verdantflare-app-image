@@ -68,6 +68,18 @@ class GoogleQueueTests(unittest.TestCase):
         self.channel.submit.return_value = {'accepted': False, 'state': 'rejected'}
         self.queue._execute_google(self.job)
         self.assertEqual(self.store.get(self.record.task_id).status, 'failed')
+        self.assertEqual(self.store.get(self.record.task_id).error, 'channel_call_failed')
+
+    def test_failed_call_records_reason_code(self):
+        self.channel.submit.return_value = {
+            'accepted': True,
+            'state': 'failed',
+            'reason_code': 'image_safety',
+        }
+        self.queue._execute_google(self.job)
+        rec = self.store.get(self.record.task_id)
+        self.assertEqual(rec.status, 'failed')
+        self.assertEqual(rec.error, 'channel_call_failed: image_safety')
 
     def test_prepare_uses_authorizer_and_rejects_supplied_authority(self):
         params = {'action': 'generate', 'prompt': 'test', 'budget_limit': '1'}

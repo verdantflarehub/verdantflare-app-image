@@ -424,10 +424,11 @@ class TaskQueueManager:
                     images.append({'mime_type': artifact.media_type,
                                    'data': base64.b64encode(data).decode()})
                 payload = {'prompt': job.params['prompt'], 'images': images}
-                effective_action = job.action
+                effective_action = 'edit' if (job.action in ('edit', 'inpaint') or images) else job.action
                 if runtime == 'google-channel-v1' and job.params.get('aspect_ratio'):
                     payload['aspect_ratio'] = job.params['aspect_ratio']
                 if is_grok:
+                    effective_action = job.action
                     payload = {key: job.params[key] for key in ('prompt', 'action', 'resolution')}
                     if job.action == 'edit':
                         payload['image'] = images[0]
