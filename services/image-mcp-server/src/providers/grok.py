@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 from PIL import Image, ImageOps
 
-ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4"]
+ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]
 IMAGE_MODELS = {"grok-imagine-image", "grok-imagine-image-2.0", "grok-imagine-image-quality"}
 ADAPTER_VERSION = "grok-image-v1"
 MAX_IMAGE_BYTES = 32 * 1024 * 1024

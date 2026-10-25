@@ -78,3 +78,11 @@ class GrokChannelQueueTests(unittest.TestCase):
         job=self.job(); self.authorize.return_value={'organization_id':'other'}
         with self.assertRaises(ChannelUnavailable): self.queue._execute_channel(job)
         self.channel.submit.assert_not_called()
+
+    def test_channel_rejection_records_reason_code_in_task_error(self):
+        job=self.job()
+        self.channel.submit.return_value={'accepted':False,'state':'rejected','reason_code':'provider_http_401'}
+        self.queue._execute_channel(job)
+        rec = self.tasks.get(job.task_id)
+        self.assertEqual(rec.status, 'failed')
+        self.assertEqual(rec.error, 'channel_call_failed: provider_http_401')

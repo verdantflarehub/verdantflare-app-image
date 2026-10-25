@@ -71,12 +71,18 @@ class GrokImageTest(unittest.TestCase):
 
     def test_reject_unsupported_and_foreign_project(self):
         provider = self.provider(lambda r: self.fail('Must not submit'))
-        for update in ({'quality':'high'}, {'resolution':'4k'}, {'action':'inpaint'}, {'background':'transparent'}):
+        for update in ({'quality':'high'}, {'resolution':'4k'}, {'action':'inpaint'}, {'background':'transparent'}, {'aspect_ratio':'21:9'}):
             with self.subTest(update=update), self.assertRaises(GrokError):
                 self.params(provider, **update)
         source = self.artifacts.create_from_bytes('other', 'source.png', self.png)
         with self.assertRaises(Exception):
             self.params(provider, action='edit', source_artifact_id=source.artifact_id)
+
+    def test_portrait_aspect_ratios_supported(self):
+        provider = self.provider(lambda r: None)
+        for ratio in ('2:3', '3:2'):
+            p = self.params(provider, aspect_ratio=ratio)
+            self.assertEqual(p['aspect_ratio'], ratio)
 
     def test_timeout_is_unknown_without_retry_or_key_leak(self):
         seen = []
