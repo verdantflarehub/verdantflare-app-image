@@ -271,7 +271,8 @@ def build_edit_workflow(
         },
     }
     wf["4"]["inputs"]["model"] = ["20", 0]
-    images = {f"images.image_{idx}": [str(11 + idx), 0] for idx in range(1, len(reference_image_filenames) + 1)}
+    # this node's Autogrow ports start at image_0 (TextEncodeQwenImage21 starts at image_1)
+    images = {f"images.image_{idx - 1}": [str(11 + idx), 0] for idx in range(1, len(reference_image_filenames) + 1)}
     for node_id, text in (("6", positive_text), ("7", negative_text)):
         wf[node_id] = {
             "class_type": "TextEncodeMOSSImageEdit",
@@ -280,6 +281,8 @@ def build_edit_workflow(
                 "prompt": text,
                 "vae": ["3", 0],
                 "edit_format": EDIT_FORMAT,
+                # required in API format; only affects vision-tower formats, not Moss-Image-Edit
+                "image_strength": 1.0,
                 **images,
             },
         }

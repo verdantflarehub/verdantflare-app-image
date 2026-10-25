@@ -7,7 +7,7 @@ ARG COMFYUI_REVISION=067f853305e74a051dd17f15964d5b0e7887abf5
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.title="VerdantFlare Image MOSS API" \
-      org.opencontainers.image.version="0.1.3" \
+      org.opencontainers.image.version="0.1.4" \
       org.opencontainers.image.source="https://github.com/verdantflarehub/verdantflare-app-image" \
       org.opencontainers.image.revision="${COMFYUI_REVISION}" \
       org.opencontainers.image.licenses="GPL-3.0-only"

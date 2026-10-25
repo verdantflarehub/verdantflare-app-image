@@ -497,8 +497,9 @@ def test_edit_workflow_graph() -> None:
         assert node["class_type"] == "TextEncodeMOSSImageEdit"
         assert node["inputs"]["edit_format"] == "Moss-Image-Edit"
         assert node["inputs"]["vae"] == ["3", 0]
-        assert node["inputs"]["images.image_1"] == ["12", 0]
-        assert node["inputs"]["images.image_2"] == ["13", 0]
+        assert node["inputs"]["images.image_0"] == ["12", 0]
+        assert node["inputs"]["images.image_1"] == ["13", 0]
+        assert node["inputs"]["image_strength"] == 1.0
     assert wf["12"]["inputs"]["image"] == "a.jpg" and wf["13"]["inputs"]["image"] == "b.jpg"
     assert "<|image_pad|>" not in wf["6"]["inputs"]["prompt"]
 
