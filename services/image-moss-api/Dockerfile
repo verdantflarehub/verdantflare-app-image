@@ -18,12 +18,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TRITON_CACHE_DIR=/tmp/triton \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
     MOSS_COMFYUI_ROOT=/opt/comfyui \
     MOSS_IMAGE_MODEL_ROOT=/models/moss-image
 
 # git for the pinned checkout; gcc and python headers for Triton's first-call driver build on Blackwell
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates git gcc libc6-dev libgomp1 \
+      ca-certificates git gcc libc6-dev python3-dev libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
