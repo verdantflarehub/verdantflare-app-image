@@ -1,19 +1,19 @@
-ARG BASE_IMAGE=registry.cn-qingdao.aliyuncs.com/wod/comfyui:0.1.0
+# Official PyTorch CUDA 13 runtime: comfy-kitchen only enables its CUDA kernels (INT8 / ConvRot) on cu130+.
+ARG BASE_IMAGE=pytorch/pytorch:2.14.1-cuda13.0-cudnn9-runtime
 FROM ${BASE_IMAGE}
 
 USER root
 
-ARG COMFYUI_REVISION=067f853305e74a051dd17f15964d5b0e7887abf5
+ARG COMFYUI_REVISION=19ae172bff6c9e4c738e7f2e00fe087f5b5b46ab
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.title="VerdantFlare Image MOSS API" \
-      org.opencontainers.image.version="0.1.4" \
+      org.opencontainers.image.version="0.2.0" \
       org.opencontainers.image.source="https://github.com/verdantflarehub/verdantflare-app-image" \
       org.opencontainers.image.revision="${COMFYUI_REVISION}" \
       org.opencontainers.image.licenses="GPL-3.0-only"
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PATH=/opt/venv/bin:$PATH \
     HOME=/tmp \
     TRITON_CACHE_DIR=/tmp/triton \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -21,23 +21,26 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MOSS_COMFYUI_ROOT=/opt/comfyui \
     MOSS_IMAGE_MODEL_ROOT=/models/moss-image
 
+# git for the pinned checkout; gcc and python headers for Triton's first-call driver build on Blackwell
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      gcc python3-dev \
+      ca-certificates git gcc libc6-dev libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
-RUN rm -rf /opt/comfyui \
-    && git clone --filter=blob:none --no-checkout https://github.com/Comfy-Org/ComfyUI.git /opt/comfyui \
+# Keep the base image's torch stack: constrain ComfyUI's bare torch requirements to the installed versions.
+RUN git clone --filter=blob:none --no-checkout https://github.com/Comfy-Org/ComfyUI.git /opt/comfyui \
     && cd /opt/comfyui \
     && git checkout --detach "${COMFYUI_REVISION}" \
     && test "$(git rev-parse HEAD)" = "${COMFYUI_REVISION}" \
     && test -f LICENSE \
     && rm -rf .git \
-    && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -r requirements.txt
+    && python -m pip freeze | grep -iE '^(torch|torchvision|torchaudio)==' > /tmp/torch-constraints.txt \
+    && python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -c /tmp/torch-constraints.txt -r requirements.txt \
+    && python -c "import torch, sysconfig, os; assert torch.version.cuda.startswith('13'), torch.version.cuda; assert os.path.exists(os.path.join(sysconfig.get_paths()['include'], 'Python.h'))"
 
 WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
-RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" . \
+RUN python -m pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" -c /tmp/torch-constraints.txt . \
     && python -m pip freeze > /app/verdantflare-python-packages.txt
 
 COPY upstream.lock.json /app/upstream.lock.json

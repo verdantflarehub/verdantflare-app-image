@@ -17,7 +17,7 @@ concurrency:
 
 env:
   SERVICE: image-moss-api
-  VERSION: 0.1.4
+  VERSION: 0.2.0
 
 jobs:
   build:
@@ -49,8 +49,6 @@ jobs:
           platforms: linux/amd64
           provenance: false
           sbom: false
-          build-args: |
-            BASE_IMAGE=${{ steps.image.outputs.registry_endpoint }}/wod/comfyui:0.1.0
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
           cache-from: type=gha,scope=${{ env.SERVICE }}
           cache-to: type=gha,mode=max,scope=${{ env.SERVICE }}

@@ -62,8 +62,8 @@ def _setup_mock_models(tmp_path: Path) -> Path:
 
 
 def test_pinned_upstream_and_manifest_constants() -> None:
-    assert COMFYUI_VERSION == "0.42.1+067f853"
-    assert COMFYUI_COMMIT == "067f853305e74a051dd17f15964d5b0e7887abf5"
+    assert COMFYUI_VERSION == "0.42.1+19ae172"
+    assert COMFYUI_COMMIT == "19ae172bff6c9e4c738e7f2e00fe087f5b5b46ab"
     by_key = {str(item["key"]): item for item in MODEL_MANIFEST}
     assert by_key["diffusion_model"]["sha256"] == "b4d1475bc7eeffd7b809e82ea13a1fba1fb85c4e18365af3813722faa5c0fe4f"
     assert by_key["text_encoder"]["sha256"] == "32e3787472f708fa5f83624acbf5ef23f7fc89c439e05065ea57cfe5a97f025a"
@@ -392,7 +392,7 @@ def test_fastapi_endpoints_and_queue_overflow(tmp_path: Path) -> None:
         health_res = client.get("/health")
         assert health_res.status_code == 200
         assert health_res.json()["status"] == "healthy"
-        assert health_res.json()["comfyui_commit"] == "067f853305e74a051dd17f15964d5b0e7887abf5"
+        assert health_res.json()["comfyui_commit"] == "19ae172bff6c9e4c738e7f2e00fe087f5b5b46ab"
 
         gen_res = client.post(
             "/v1/generate",

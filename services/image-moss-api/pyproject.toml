@@ -1,6 +1,6 @@
 [project]
 name = "verdantflare-image-moss-api"
-version = "0.1.4"
+version = "0.2.0"
 description = "VerdantFlare MOSS-Image self-hosted inference API backed by headless ComfyUI"
 requires-python = ">=3.11"
 dependencies = [
