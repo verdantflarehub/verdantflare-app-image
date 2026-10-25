@@ -567,29 +567,41 @@ class TaskQueueManager:
             self.tasks.update_status(job.task_id, "running", phase="acquiring_gpu")
             self.moss_gpu.ensure_worker_ready(self.moss_provider.health)
             self.tasks.update_status(job.task_id, "running", phase="generating")
-            face_ref_id = (
+            primary_ref_id = (
                 job.params.get("face_reference_artifact_id")
                 or job.params.get("source_identity_artifact_id")
                 or job.params.get("source_artifact_id")
-                or ((job.params.get("reference_artifact_ids") or [None])[0])
-                or ((job.params.get("reference_images") or [None])[0])
+            )
+            raw_ref_ids = [
+                primary_ref_id,
+                *(job.params.get("reference_artifact_ids") or []),
+                *(job.params.get("reference_images") or []),
+            ]
+            ref_ids = list(
+                dict.fromkeys(
+                    str(rid).strip()
+                    for rid in raw_ref_ids
+                    if rid and str(rid).strip()
+                )
             )
             gen_params = dict(job.params)
-            if face_ref_id:
-                ref_record = self.artifacts.get(str(face_ref_id), job.project_id)
-                ref_bytes = self.artifacts.content_path(ref_record).read_bytes()
-                gen_params["reference_images_base64"] = [
-                    base64.b64encode(ref_bytes).decode("ascii")
-                ]
+            if ref_ids:
+                ref_b64_list: list[str] = []
+                for rid in ref_ids:
+                    ref_record = self.artifacts.get(rid, job.project_id)
+                    ref_bytes = self.artifacts.content_path(ref_record).read_bytes()
+                    ref_b64_list.append(base64.b64encode(ref_bytes).decode("ascii"))
+                gen_params["reference_images_base64"] = ref_b64_list
 
             img_bytes, meta = self.moss_provider.generate(gen_params)
             meta["task_id"] = job.task_id
-            if face_ref_id:
+            if ref_ids:
+                first_ref = ref_ids[0]
                 meta.update(
                     {
-                        "source_identity_artifact_id": str(face_ref_id),
-                        "face_reference_artifact_id": str(face_ref_id),
-                        "reference_artifact_ids": [str(face_ref_id)],
+                        "source_identity_artifact_id": first_ref,
+                        "face_reference_artifact_id": first_ref,
+                        "reference_artifact_ids": ref_ids,
                         "conditioning_mode": "qwen3.5_9b_vision",
                     }
                 )

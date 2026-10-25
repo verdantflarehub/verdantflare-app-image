@@ -2,17 +2,32 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 DIFFUSION_MODEL_FILE = "moss_image_sft_int8_convrot.safetensors"
 TEXT_ENCODER_FILE = "qwen3.5_9b_int8_convrot.safetensors"
 VAE_FILE = "flux2-vae_small.safetensors"
 
-REFERENCE_CONDITIONING_PREFIX = (
-    "<|vision_start|><|image_pad|><|vision_end|>"
-    "严格保持参考图中人物的面部骨相、精致鹅蛋脸型、中分微卷深棕长发配额前两三缕极细碎发（露出饱满额头，无厚齐刘海）、清澈杏仁眼及微笑时左脸颊（画面右侧）明显的深圆酒窝"
-    "（仅参考人物面部五官与发型神态，完全忽略参考图中的针织毛衣与背景，严格按以下描述的动作姿态与服装场景生成）：\n"
+VISION_TOKEN_SPAN = "<|vision_start|><|image_pad|><|vision_end|>"
+REFERENCE_CONDITIONING_INSTRUCTION = (
+    "保持参考图主体面部身份与核心特征一致，严格按以下描述生成：\n"
 )
+REFERENCE_CONDITIONING_PREFIX = f"{VISION_TOKEN_SPAN}{REFERENCE_CONDITIONING_INSTRUCTION}"
+DEFAULT_REFERENCE_RESOLUTION = 384
+
+_STRAY_VISION_TOKEN_RE = re.compile(
+    r"(?:Picture\s+\d+\s*:\s*)?<\|vision_start\|>\s*(?:<\|image_pad\|>\s*)*<\|vision_end\|>\s*"
+    r"|<\|(?:vision_start|image_pad|vision_end)\|>"
+)
+
+
+def _strip_stray_vision_tokens(text: str) -> str:
+    return _STRAY_VISION_TOKEN_RE.sub("", text).strip()
+
+
+def _build_reference_prefix(reference_image_count: int) -> str:
+    return f"{VISION_TOKEN_SPAN * reference_image_count}{REFERENCE_CONDITIONING_INSTRUCTION}"
 
 
 def serialize_moss_prompt(
@@ -20,22 +35,30 @@ def serialize_moss_prompt(
     layout: dict[str, Any] | None,
     *,
     has_reference_image: bool = False,
+    reference_image_count: int = 0,
 ) -> tuple[str, str]:
-    """Serialize prompt or layout JSON into the exact string expected by CLIPTextEncode / TextEncodeQwenImageEdit.
+    """Serialize prompt or layout JSON into the exact string expected by CLIPTextEncode / TextEncodeQwenImage21.
 
     Matches upstream ComfyUI `MOSSImageLayoutPrompt` (`comfy_extras/nodes_moss_image.py`),
     which formats `{"meta": ..., "items": ...}` via `json.dumps(..., ensure_ascii=False, separators=(",", ":"))`
     before `comfy/text_encoders/moss_image.py` wraps it into the Qwen3.5 user/think template.
-    When `has_reference_image=True`, prepends `<|vision_start|><|image_pad|><|vision_end|>` so
-    `Qwen35ImageTokenizer` + `Qwen35VisionModel` encodes the reference image into the DiT conditioning sequence.
+    When reference images are present, prepends one `<|vision_start|><|image_pad|><|vision_end|>` span
+    per reference image so `MOSSImageTokenizer` + `Qwen35VisionModel` replaces 100% of `<|image_pad|>` (248056)
+    tokens and preserves the trailing `<|im_start|>assistant\n<think>\n` template.
     """
+    effective_ref_count = (
+        int(reference_image_count)
+        if reference_image_count > 0
+        else (1 if has_reference_image else 0)
+    )
+    clean_prompt = _strip_stray_vision_tokens(prompt)
     if layout is None:
-        if has_reference_image:
-            return f"{REFERENCE_CONDITIONING_PREFIX}{prompt}", "reference"
-        return prompt, "text"
-    meta = layout["meta"]
-    if prompt and prompt != meta and prompt not in meta:
-        combined_meta = f"{meta} {prompt}".strip()
+        if effective_ref_count > 0:
+            return f"{_build_reference_prefix(effective_ref_count)}{clean_prompt}", "reference"
+        return clean_prompt, "text"
+    meta = _strip_stray_vision_tokens(str(layout["meta"]))
+    if clean_prompt and clean_prompt != meta and clean_prompt not in meta:
+        combined_meta = f"{meta} {clean_prompt}".strip()
     else:
         combined_meta = meta
     payload = {
@@ -43,15 +66,15 @@ def serialize_moss_prompt(
         "items": [
             {
                 "id": item["id"],
-                "desc": item["desc"],
+                "desc": _strip_stray_vision_tokens(str(item["desc"])),
                 "box_2d": item["box_2d"],
             }
             for item in layout["items"]
         ],
     }
     serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    if has_reference_image:
-        return f"{REFERENCE_CONDITIONING_PREFIX}{serialized}", "reference_layout"
+    if effective_ref_count > 0:
+        return f"{_build_reference_prefix(effective_ref_count)}{serialized}", "reference_layout"
     return serialized, "layout"
 
 
@@ -70,16 +93,29 @@ def build_comfy_workflow(
     seed: int,
     filename_prefix: str = "moss_image",
     reference_image_filename: str | None = None,
+    reference_image_filenames: list[str] | None = None,
+    reference_resolution: int = DEFAULT_REFERENCE_RESOLUTION,
 ) -> dict[str, Any]:
     """Build the fixed ComfyUI API workflow for MOSS-Image (with optional Qwen3.5-9B Vision reference input)."""
-    if reference_image_filename:
+    if reference_image_filenames:
+        ref_files = [str(f) for f in reference_image_filenames if f]
+    elif reference_image_filename:
+        ref_files = [str(reference_image_filename)]
+    else:
+        ref_files = []
+
+    if ref_files:
+        positive_inputs: dict[str, Any] = {
+            "clip": ["2", 0],
+            "prompt": positive_text,
+            "negative_prompt": "",
+            "resolution": int(reference_resolution),
+        }
+        for idx in range(1, len(ref_files) + 1):
+            positive_inputs[f"images.image_{idx}"] = [str(11 + idx), 0]
         positive_node: dict[str, Any] = {
-            "class_type": "TextEncodeQwenImageEdit",
-            "inputs": {
-                "clip": ["2", 0],
-                "prompt": positive_text,
-                "image": ["12", 0],
-            },
+            "class_type": "TextEncodeQwenImage21",
+            "inputs": positive_inputs,
         }
     else:
         positive_node = {
@@ -175,11 +211,11 @@ def build_comfy_workflow(
             },
         },
     }
-    if reference_image_filename:
-        wf["12"] = {
+    for idx, ref_file in enumerate(ref_files, start=1):
+        wf[str(11 + idx)] = {
             "class_type": "LoadImage",
             "inputs": {
-                "image": reference_image_filename,
+                "image": ref_file,
             },
         }
     return wf

@@ -389,6 +389,66 @@ class TestMossProviderExecution(unittest.TestCase):
             self.assertEqual(edit_params["face_reference_artifact_id"], "art-01e71e31ecaf4f0d")
             self.assertEqual(edit_params["reference_artifact_ids"], ["art-01e71e31ecaf4f0d"])
 
+            # Verify multi-reference images (2 artifacts) are preserved without silent truncation
+            pose_rec = artifacts.create_from_bytes(
+                project_id="proj-moss",
+                artifact_id="art-1234567890abcdef",
+                filename="pose-ref.png",
+                data=png_bytes,
+                media_type="image/png",
+            )
+            multi_params = qm.prepare(
+                "moss-image",
+                "proj-moss",
+                {
+                    "action": "generate",
+                    "prompt": "保持主参考图人物面部身份，参考第二张图坐姿",
+                    "reference_artifact_ids": [ref_rec.artifact_id, pose_rec.artifact_id],
+                    "aspect_ratio": "2:3",
+                    "resolution": "2k",
+                },
+            )
+            self.assertEqual(
+                multi_params["reference_artifact_ids"],
+                ["art-01e71e31ecaf4f0d", "art-1234567890abcdef"],
+            )
+            multi_task = tasks.create(
+                project_id="proj-moss",
+                idempotency_key="idem-moss-multi-ref",
+                engine="moss-image",
+                model=DEFAULT_MOSS_MODEL,
+                request_params=multi_params,
+            )
+            captured_multi: dict[str, object] = {}
+
+            def fake_multi_gen(gen_params: dict[str, object]):
+                captured_multi.update(gen_params)
+                return (
+                    png_bytes,
+                    {
+                        "engine": "moss-image",
+                        "model": DEFAULT_MOSS_MODEL,
+                        "width": 1024,
+                        "height": 1536,
+                        "resolved_seed": 999,
+                        "steps": 50,
+                        "prompt_mode": "reference",
+                        "elapsed_ms": 43000,
+                    },
+                )
+
+            with patch.object(moss_provider, "generate", side_effect=fake_multi_gen):
+                qm._execute_moss(
+                    TaskJob(
+                        task_id=multi_task.task_id,
+                        project_id="proj-moss",
+                        engine="moss-image",
+                        action="generate",
+                        params=multi_params,
+                    )
+                )
+            self.assertEqual(len(captured_multi["reference_images_base64"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -178,7 +178,7 @@ class MossProvider:
                 "default_shift": 5.0,
                 "default_skip_single_layers": "22",
                 "max_layout_items": 32,
-                "max_reference_images": 1,
+                "max_reference_images": 3,
                 "max_face_references": 1,
                 "aspect_ratios": list(ASPECT_SIZE_MAP_1K.keys()),
                 "resolutions": ["1k", "2k"],
@@ -217,7 +217,10 @@ class MossProvider:
             out["source_identity_artifact_id"] = face_ref_id
             if face_ref_id not in ref_list:
                 ref_list.insert(0, face_ref_id)
-            out["reference_artifact_ids"] = ref_list[:1]
+            dedup_refs = list(dict.fromkeys(ref_list))
+            if len(dedup_refs) > 3:
+                raise ValueError("INVALID_ARGUMENT: moss-image supports at most 3 reference images")
+            out["reference_artifact_ids"] = dedup_refs
             out["identity_strength"] = max(0.5, min(1.0, float(out.get("identity_strength") or 0.95)))
             out["restore_face"] = True if out.get("restore_face") is None else bool(out.get("restore_face"))
             out["restoration_fidelity"] = max(
