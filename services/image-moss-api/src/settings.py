@@ -25,6 +25,7 @@ class Settings:
     max_queue: int = 2
     verify_sha256_on_boot: bool = False
     auto_start_comfyui: bool = True
+    enable_edit: bool = True
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -41,6 +42,7 @@ class Settings:
             max_queue=int(os.getenv("MOSS_MAX_QUEUE", str(cls.max_queue))),
             verify_sha256_on_boot=os.getenv("MOSS_VERIFY_SHA256_ON_BOOT", "false").lower() in ("1", "true", "yes"),
             auto_start_comfyui=os.getenv("MOSS_AUTO_START_COMFYUI", "true").lower() in ("1", "true", "yes"),
+            enable_edit=os.getenv("MOSS_ENABLE_EDIT", "true").lower() in ("1", "true", "yes"),
         )
 
     def __post_init__(self) -> None:

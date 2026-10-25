@@ -16,10 +16,10 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from src.prepare_models import MODEL_MANIFEST, verify_model_file
+from src.prepare_models import EDIT_LORA_MANIFEST, MODEL_MANIFEST, verify_model_file
 from src.schemas import GenerateRequest, MossApiError, validate_generate_request
 from src.settings import COMFYUI_COMMIT, COMFYUI_VERSION, Settings
-from src.workflow import build_comfy_workflow, serialize_moss_prompt
+from src.workflow import _strip_stray_vision_tokens, build_comfy_workflow, build_edit_workflow, serialize_moss_prompt
 
 
 def _query_gpu_stats() -> dict[str, Any]:
@@ -43,6 +43,18 @@ def _query_gpu_stats() -> dict[str, Any]:
         return {"available": False, "detail": str(exc)}
 
 
+def _scale_reference(im: Any, max_edge: int) -> Any:
+    """Shrink (never enlarge) so the long edge fits max_edge, both sides multiples of 16, aspect kept."""
+    from PIL import Image
+
+    w, h = im.size
+    scale = min(1.0, max_edge / max(w, h))
+    nw, nh = max(16, int(w * scale) // 16 * 16), max(16, int(h * scale) // 16 * 16)
+    if (nw, nh) == (w, h):
+        return im
+    return im.resize((nw, nh), Image.LANCZOS)
+
+
 class MossImagePipeline:
     """Manages model verification, local ComfyUI process, and serialized inference."""
 
@@ -58,6 +70,7 @@ class MossImagePipeline:
         self._extra_paths_file: Path | None = None
         self._models_verified = False
         self._verified_weights: dict[str, str] = {}
+        self._edit_available = False
         self._last_error: str | None = None
         self._lock = asyncio.Lock()
         self._active_and_queued = 0
@@ -76,6 +89,22 @@ class MossImagePipeline:
                 check_sha256=self.settings.verify_sha256_on_boot,
             )
             weights[str(spec["key"])] = str(info["path"])
+        self._edit_available = False
+        if self.settings.enable_edit:
+            for spec in EDIT_LORA_MANIFEST:
+                try:
+                    info = verify_model_file(
+                        root / str(spec["path"]),
+                        str(spec["sha256"]),
+                        int(spec["size"]),
+                        check_sha256=self.settings.verify_sha256_on_boot,
+                    )
+                except (FileNotFoundError, ValueError) as exc:
+                    self._last_error = f"Edit LoRA unavailable: {exc}"
+                    break
+                weights[str(spec["key"])] = str(info["path"])
+            else:
+                self._edit_available = True
         self._models_verified = True
         self._verified_weights = weights
         return weights
@@ -103,6 +132,7 @@ class MossImagePipeline:
                 f"  diffusion_models: diffusion_models\n"
                 f"  text_encoders: text_encoders\n"
                 f"  vae: vae\n"
+                f"  loras: loras\n"
             )
         self._extra_paths_file = Path(tmp_yaml)
 
@@ -187,6 +217,7 @@ class MossImagePipeline:
             "comfyui_version": COMFYUI_VERSION,
             "comfyui_commit": COMFYUI_COMMIT,
             "models_verified": self._models_verified,
+            "edit_available": self._edit_available,
             "comfyui_reachable": reachable,
             "weights": dict(self._verified_weights),
             "gpu": gpu_info,
@@ -221,12 +252,18 @@ class MossImagePipeline:
         )
         ref_images: list[bytes] = params.get("reference_images") or []
         ref_count = len(ref_images)
-        positive_text, prompt_mode = serialize_moss_prompt(
-            params["prompt"],
-            params["layout"],
-            has_reference_image=ref_count > 0,
-            reference_image_count=ref_count,
-        )
+        edit = bool(params.get("edit"))
+        if edit:
+            if not self._edit_available:
+                raise MossApiError(503, "MODEL_NOT_READY", "Edit LoRA is not available on this instance")
+            positive_text, prompt_mode = _strip_stray_vision_tokens(params["prompt"]), "edit"
+        else:
+            positive_text, prompt_mode = serialize_moss_prompt(
+                params["prompt"],
+                params["layout"],
+                has_reference_image=ref_count > 0,
+                reference_image_count=ref_count,
+            )
 
         ref_filenames: list[str] = []
         ref_paths: list[Path] = []
@@ -244,6 +281,8 @@ class MossImagePipeline:
 
                     with Image.open(io.BytesIO(ref_bytes)) as im:
                         im_rgb = ImageOps.exif_transpose(im).convert("RGB")
+                        if edit:
+                            im_rgb = _scale_reference(im_rgb, params["reference_max_edge"])
                         out_buf = io.BytesIO()
                         im_rgb.save(out_buf, format="JPEG", quality=95)
                         normalized_bytes = out_buf.getvalue()
@@ -253,7 +292,7 @@ class MossImagePipeline:
                 ref_filenames.append(ref_filename)
                 ref_paths.append(ref_path)
 
-        workflow = build_comfy_workflow(
+        sampling = dict(
             positive_text=positive_text,
             negative_text=params["negative_prompt"],
             width=params["width"],
@@ -267,6 +306,10 @@ class MossImagePipeline:
             seed=resolved_seed,
             reference_image_filenames=ref_filenames,
         )
+        if edit:
+            workflow = build_edit_workflow(**sampling, lora_strength=params["edit_lora_strength"])
+        else:
+            workflow = build_comfy_workflow(**sampling)
 
         self._active_and_queued += 1
         try:

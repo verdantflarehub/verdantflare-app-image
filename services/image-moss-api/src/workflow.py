@@ -8,6 +8,9 @@ from typing import Any
 DIFFUSION_MODEL_FILE = "moss_image_sft_int8_convrot.safetensors"
 TEXT_ENCODER_FILE = "qwen3.5_9b_int8_convrot.safetensors"
 VAE_FILE = "flux2-vae_small.safetensors"
+EDIT_LORA_FILE = "moss_image_edit.safetensors"
+# TextEncodeMOSSImageEdit layout for chinoll/Moss-Image-Edit: references go to the DiT as latents only
+EDIT_FORMAT = "Moss-Image-Edit"
 
 VISION_TOKEN_SPAN = "<|vision_start|><|image_pad|><|vision_end|>"
 REFERENCE_CONDITIONING_INSTRUCTION = (
@@ -216,6 +219,75 @@ def build_comfy_workflow(
             "class_type": "LoadImage",
             "inputs": {
                 "image": ref_file,
+            },
+        }
+    return wf
+
+
+def build_edit_workflow(
+    *,
+    positive_text: str,
+    negative_text: str,
+    width: int,
+    height: int,
+    steps: int,
+    cfg_scale: float,
+    sampler: str,
+    scheduler: str,
+    shift: float,
+    skip_single_layers: str,
+    seed: int,
+    reference_image_filenames: list[str],
+    lora_strength: float = 1.0,
+    filename_prefix: str = "moss_image_edit",
+) -> dict[str, Any]:
+    """Build the fixed Edit workflow: Moss-Image-Edit LoRA plus core TextEncodeMOSSImageEdit reference latents.
+
+    References must already be scaled by the caller; the node encodes them at the size they come in.
+    The same encode node is used for the negative prompt, as upstream requires.
+    """
+    if not reference_image_filenames:
+        raise ValueError("edit workflow requires at least one reference image")
+    wf = build_comfy_workflow(
+        positive_text=positive_text,
+        negative_text=negative_text,
+        width=width,
+        height=height,
+        steps=steps,
+        cfg_scale=cfg_scale,
+        sampler=sampler,
+        scheduler=scheduler,
+        shift=shift,
+        skip_single_layers=skip_single_layers,
+        seed=seed,
+        filename_prefix=filename_prefix,
+    )
+    wf["20"] = {
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+            "model": ["1", 0],
+            "lora_name": EDIT_LORA_FILE,
+            "strength_model": float(lora_strength),
+        },
+    }
+    wf["4"]["inputs"]["model"] = ["20", 0]
+    images = {f"images.image_{idx}": [str(11 + idx), 0] for idx in range(1, len(reference_image_filenames) + 1)}
+    for node_id, text in (("6", positive_text), ("7", negative_text)):
+        wf[node_id] = {
+            "class_type": "TextEncodeMOSSImageEdit",
+            "inputs": {
+                "clip": ["2", 0],
+                "prompt": text,
+                "vae": ["3", 0],
+                "edit_format": EDIT_FORMAT,
+                **images,
+            },
+        }
+    for idx, ref_file in enumerate(reference_image_filenames, start=1):
+        wf[str(11 + idx)] = {
+            "class_type": "LoadImage",
+            "inputs": {
+                "image": str(ref_file),
             },
         }
     return wf

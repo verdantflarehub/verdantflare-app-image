@@ -47,10 +47,10 @@ except ImportError:
 
 from src import main as moss_main
 from src.pipeline import MossImagePipeline
-from src.prepare_models import MODEL_MANIFEST
+from src.prepare_models import EDIT_LORA_MANIFEST, MODEL_MANIFEST
 from src.schemas import GenerateRequest, MossApiError, validate_generate_request, validate_layout
 from src.settings import COMFYUI_COMMIT, COMFYUI_VERSION, Settings
-from src.workflow import build_comfy_workflow, serialize_moss_prompt
+from src.workflow import EDIT_LORA_FILE, build_comfy_workflow, build_edit_workflow, serialize_moss_prompt
 
 
 def _setup_mock_models(tmp_path: Path) -> Path:
@@ -62,8 +62,8 @@ def _setup_mock_models(tmp_path: Path) -> Path:
 
 
 def test_pinned_upstream_and_manifest_constants() -> None:
-    assert COMFYUI_VERSION == "0.42.0"
-    assert COMFYUI_COMMIT == "355cd6b14c92c19ac3188fe528e47a3f21ef5178"
+    assert COMFYUI_VERSION == "0.42.1+067f853"
+    assert COMFYUI_COMMIT == "067f853305e74a051dd17f15964d5b0e7887abf5"
     by_key = {str(item["key"]): item for item in MODEL_MANIFEST}
     assert by_key["diffusion_model"]["sha256"] == "b4d1475bc7eeffd7b809e82ea13a1fba1fb85c4e18365af3813722faa5c0fe4f"
     assert by_key["text_encoder"]["sha256"] == "32e3787472f708fa5f83624acbf5ef23f7fc89c439e05065ea57cfe5a97f025a"
@@ -392,7 +392,7 @@ def test_fastapi_endpoints_and_queue_overflow(tmp_path: Path) -> None:
         health_res = client.get("/health")
         assert health_res.status_code == 200
         assert health_res.json()["status"] == "healthy"
-        assert health_res.json()["comfyui_commit"] == "355cd6b14c92c19ac3188fe528e47a3f21ef5178"
+        assert health_res.json()["comfyui_commit"] == "067f853305e74a051dd17f15964d5b0e7887abf5"
 
         gen_res = client.post(
             "/v1/generate",
@@ -446,6 +446,112 @@ def test_fastapi_endpoints_and_queue_overflow(tmp_path: Path) -> None:
         assert rate_res.json()["error_code"] == "RATE_LIMITED"
 
 
+def test_edit_lora_manifest_pinned() -> None:
+    (spec,) = EDIT_LORA_MANIFEST
+    assert spec["path"] == f"loras/{EDIT_LORA_FILE}"
+    assert spec["repo"] == "ChenkinLab/Moss-Image-Edit"
+    assert spec["sha256"] == "17a48b8c605dcffdedb92a2b887d18cf316505be90802717669fb6556098dcdf"
+    assert spec["size"] == 297382216
+
+
+def test_validate_edit_request() -> None:
+    ref = base64.b64encode(b"\x89PNG\r\n\x1a\n" * 4).decode("ascii")
+    out = validate_generate_request(GenerateRequest(prompt="图1的人穿上图2的衣服", edit=True, reference_images_base64=[ref] * 4))
+    assert out["edit"] is True and len(out["reference_images"]) == 4
+    assert out["reference_max_edge"] == 512 and out["edit_lora_strength"] == 1.0
+    bad_cases = [
+        GenerateRequest(prompt="无参考图", edit=True),
+        GenerateRequest(prompt="五张图", edit=True, reference_images_base64=[ref] * 5),
+        GenerateRequest(prompt="非编辑四张图", reference_images_base64=[ref] * 4),
+        GenerateRequest(prompt="版式", edit=True, reference_images_base64=[ref], layout={"meta": "m", "items": [{"id": 1, "desc": "d", "box_2d": [0, 0, 10, 10]}]}),
+        GenerateRequest(prompt="强度", edit=True, reference_images_base64=[ref], edit_lora_strength=2.5),
+        GenerateRequest(prompt="边长", edit=True, reference_images_base64=[ref], reference_max_edge=500),
+    ]
+    for req in bad_cases:
+        with pytest.raises(MossApiError) as exc_info:
+            validate_generate_request(req)
+        assert exc_info.value.status_code == 400
+
+
+def test_edit_workflow_graph() -> None:
+    wf = build_edit_workflow(
+        positive_text="图1的人穿上图2的衣服，双手叉腰站立",
+        negative_text="",
+        width=1024,
+        height=1024,
+        steps=30,
+        cfg_scale=4.0,
+        sampler="euler",
+        scheduler="simple",
+        shift=5.0,
+        skip_single_layers="22",
+        seed=7,
+        reference_image_filenames=["a.jpg", "b.jpg"],
+        lora_strength=0.8,
+    )
+    assert wf["20"]["class_type"] == "LoraLoaderModelOnly"
+    assert wf["20"]["inputs"] == {"model": ["1", 0], "lora_name": EDIT_LORA_FILE, "strength_model": 0.8}
+    assert wf["4"]["inputs"]["model"] == ["20", 0]
+    for node_id in ("6", "7"):
+        node = wf[node_id]
+        assert node["class_type"] == "TextEncodeMOSSImageEdit"
+        assert node["inputs"]["edit_format"] == "Moss-Image-Edit"
+        assert node["inputs"]["vae"] == ["3", 0]
+        assert node["inputs"]["images.image_1"] == ["12", 0]
+        assert node["inputs"]["images.image_2"] == ["13", 0]
+    assert wf["12"]["inputs"]["image"] == "a.jpg" and wf["13"]["inputs"]["image"] == "b.jpg"
+    assert "<|image_pad|>" not in wf["6"]["inputs"]["prompt"]
+
+
+def test_edit_pipeline_scales_references_and_requires_lora(tmp_path: Path) -> None:
+    import io
+    from PIL import Image
+
+    _setup_mock_models(tmp_path)
+    comfy_dir = tmp_path / "comfy"
+    (comfy_dir / "input").mkdir(parents=True, exist_ok=True)
+    raw_refs: list[bytes] = []
+    for size in ((1200, 900), (300, 500)):
+        buf = io.BytesIO()
+        Image.new("RGB", size, color=(10, 20, 30)).save(buf, format="JPEG")
+        raw_refs.append(buf.getvalue())
+    captured: dict[str, object] = {"sizes": []}
+
+    def inspect_runner(wf: dict[str, object], timeout_s: float) -> bytes:
+        captured["wf"] = wf
+        for node_id in ("12", "13"):
+            with Image.open(comfy_dir / "input" / wf[node_id]["inputs"]["image"]) as im:
+                captured["sizes"].append(im.size)
+        return b"\x89PNG\r\n\x1a\nmockimage"
+
+    def fake_verify(path: Path, expected_sha256: str, expected_size: int, *, check_sha256: bool = True):
+        return {"path": path.name, "bytes": expected_size, "sha256": expected_sha256}
+
+    req = GenerateRequest(
+        prompt="图1的人穿上图2的衣服",
+        edit=True,
+        steps=30,
+        cfg_scale=4.0,
+        reference_images_base64=[base64.b64encode(b).decode("ascii") for b in raw_refs],
+    )
+    with patch("src.pipeline.verify_model_file", side_effect=fake_verify):
+        settings = Settings(model_root=str(tmp_path), comfyui_root=str(comfy_dir), auto_start_comfyui=False)
+        pipe = MossImagePipeline(settings=settings, comfy_runner=inspect_runner)
+        res = asyncio.run(pipe.generate(req))
+        assert res["prompt_mode"] == "edit"
+        # long edge shrunk to 512 and aligned to 16; small images are never enlarged
+        assert captured["sizes"] == [(512, 384), (288, 496)]
+        assert captured["wf"]["6"]["class_type"] == "TextEncodeMOSSImageEdit"
+        assert pipe.health()["edit_available"] is True
+
+        disabled = Settings(model_root=str(tmp_path), comfyui_root=str(comfy_dir), auto_start_comfyui=False, enable_edit=False)
+        pipe_off = MossImagePipeline(settings=disabled, comfy_runner=inspect_runner)
+        with pytest.raises(MossApiError) as exc_info:
+            asyncio.run(pipe_off.generate(req))
+        assert exc_info.value.status_code == 503
+        assert pipe_off.health()["edit_available"] is False
+
+
 class TestMossApiUnittestSuite(unittest.TestCase):
     def test_all(self) -> None:
         test_pinned_upstream_and_manifest_constants()
@@ -464,6 +570,11 @@ class TestMossApiUnittestSuite(unittest.TestCase):
             test_no_hardcoded_character_or_blind_crop(Path(tmp1))
         with tempfile.TemporaryDirectory() as tmp2:
             test_fastapi_endpoints_and_queue_overflow(Path(tmp2))
+        test_edit_lora_manifest_pinned()
+        test_validate_edit_request()
+        test_edit_workflow_graph()
+        with tempfile.TemporaryDirectory() as tmp3:
+            test_edit_pipeline_scales_references_and_requires_lora(Path(tmp3))
 
 
 if __name__ == "__main__":

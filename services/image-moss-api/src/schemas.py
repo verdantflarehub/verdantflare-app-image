@@ -17,6 +17,8 @@ FORBIDDEN_CONTROL_TOKENS: tuple[str, ...] = (
 
 ALLOWED_SAMPLERS: frozenset[str] = frozenset({"euler", "er_sde"})
 ALLOWED_SCHEDULERS: frozenset[str] = frozenset({"simple"})
+MAX_REFERENCE_IMAGES = 3
+MAX_EDIT_REFERENCE_IMAGES = 4
 
 
 class MossApiError(Exception):
@@ -70,6 +72,10 @@ class GenerateRequest(BaseModel):
     seed: int | None = Field(default=None)
     layout: dict[str, Any] | None = Field(default=None)
     reference_images_base64: list[str] | None = Field(default=None)
+    # Experimental Edit mode (Moss-Image-Edit LoRA + reference latents); references keep request order
+    edit: bool = Field(default=False)
+    edit_lora_strength: float = Field(default=1.0)
+    reference_max_edge: int = Field(default=512)
 
 
 class GenerateResponse(BaseModel):
@@ -95,6 +101,7 @@ class HealthResponse(BaseModel):
     comfyui_version: str
     comfyui_commit: str
     models_verified: bool
+    edit_available: bool = False
     comfyui_reachable: bool
     weights: dict[str, str]
     gpu: dict[str, Any]
@@ -343,12 +350,30 @@ def validate_generate_request(
         validated_layout = validate_layout(req.layout, max_items=max_layout_items)
 
     validated_refs: list[bytes] = []
-    if req.reference_images_base64:
-        if len(req.reference_images_base64) > 3:
+    max_refs = MAX_EDIT_REFERENCE_IMAGES if req.edit else MAX_REFERENCE_IMAGES
+    if req.edit:
+        if not req.reference_images_base64:
+            raise MossApiError(400, "INVALID_ARGUMENT", "edit requires at least 1 reference image")
+        if validated_layout is not None:
+            raise MossApiError(400, "INVALID_ARGUMENT", "edit does not support layout")
+        if not (0.0 <= req.edit_lora_strength <= 2.0):
+            raise MossApiError(
+                400,
+                "INVALID_SAMPLING_PARAMS",
+                f"edit_lora_strength must be between 0.0 and 2.0, got {req.edit_lora_strength}",
+            )
+        if not (256 <= req.reference_max_edge <= 1024) or req.reference_max_edge % 16 != 0:
             raise MossApiError(
                 400,
                 "INVALID_ARGUMENT",
-                f"reference_images_base64 supports at most 3 images, got {len(req.reference_images_base64)}",
+                f"reference_max_edge must be a multiple of 16 within [256, 1024], got {req.reference_max_edge}",
+            )
+    if req.reference_images_base64:
+        if len(req.reference_images_base64) > max_refs:
+            raise MossApiError(
+                400,
+                "INVALID_ARGUMENT",
+                f"reference_images_base64 supports at most {max_refs} images, got {len(req.reference_images_base64)}",
             )
         for idx, raw_b64 in enumerate(req.reference_images_base64):
             if not isinstance(raw_b64, str) or not raw_b64.strip():
@@ -390,4 +415,7 @@ def validate_generate_request(
         "seed": req.seed,
         "layout": validated_layout,
         "reference_images": validated_refs,
+        "edit": bool(req.edit),
+        "edit_lora_strength": float(req.edit_lora_strength),
+        "reference_max_edge": int(req.reference_max_edge),
     }

@@ -40,6 +40,24 @@ MODEL_MANIFEST: tuple[dict[str, object], ...] = (
     },
 )
 
+# Optional Edit LoRA (moss-edit-lora format, read by ComfyUI core LoRA loader). Prepared and
+# served only when MOSS_ENABLE_EDIT is on; T2I / LAYOUT / R2I never depend on it.
+EDIT_LORA_MANIFEST: tuple[dict[str, object], ...] = (
+    {
+        "key": "edit_lora",
+        "path": "loras/moss_image_edit.safetensors",
+        "repo": "ChenkinLab/Moss-Image-Edit",
+        "source_path": "adapter_model.safetensors",
+        "revision": "0d42c24245ddf2d67d74285962c188ab3bee6ffb",
+        "size": 297382216,
+        "sha256": "17a48b8c605dcffdedb92a2b887d18cf316505be90802717669fb6556098dcdf",
+    },
+)
+
+
+def edit_enabled() -> bool:
+    return os.getenv("MOSS_ENABLE_EDIT", "true").lower() in ("1", "true", "yes")
+
 
 def sha256_file(path: Path) -> tuple[str, int]:
     digest = hashlib.sha256()
@@ -107,7 +125,8 @@ def prepare_one(
         }
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    encoded_path = quote(rel_path, safe="")
+    repo = str(item.get("repo", repo))
+    encoded_path = quote(str(item.get("source_path", rel_path)), safe="")
     url = f"https://modelscope.cn/api/v1/models/{repo}/repo?Revision={revision}&FilePath={encoded_path}"
     print(
         json.dumps(
@@ -172,7 +191,8 @@ def prepare_one(
 def prepare_all(model_root: Path | None = None) -> list[dict[str, object]]:
     root = model_root or Path(os.getenv("MOSS_IMAGE_MODEL_ROOT", "/models/moss-image"))
     repo = os.getenv("MOSS_IMAGE_MODELSCOPE_REPO", MODELSCOPE_REPO)
-    results = [prepare_one(root, dict(spec), repo=repo) for spec in MODEL_MANIFEST]
+    specs = MODEL_MANIFEST + (EDIT_LORA_MANIFEST if edit_enabled() else ())
+    results = [prepare_one(root, dict(spec), repo=repo) for spec in specs]
     print(
         json.dumps(
             {
