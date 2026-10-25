@@ -1913,7 +1913,7 @@
             <!-- 4. 骨相人脸身份锚点 -->
             <section class="detail-section-block" aria-label="4. 骨相人脸身份锚点">
               <div class="pane-title">
-                <h3>4. 骨相人脸身份锚点 <small style="font-weight:400;color:var(--muted)">（FaceFusion 3.9.0 / MOSS-Image 源脸参考，不同模型上限不同）</small></h3>
+                <h3>4. 骨相人脸身份锚点 <small style="font-weight:400;color:var(--muted)">（MOSS Image 源脸参考，不同模型上限不同）</small></h3>
                 <span class="quota-badge empty" id="refFacesQuotaBadge">0 / 1 张 · 当前模型上限 1 张</span>
               </div>
               <div id="drawerRefFacesBox"></div>
@@ -2943,7 +2943,7 @@
         maxImages,
         'ref-img',
         '未传入参考图',
-        '不同模型支持上限不同：GPT Image 2.5 Sunburst 最高支持 8 张参考图，Gemini 支持 6 张，Flare 支持 2 张，Grok / MOSS-Image 支持 1 张，纯文生 T2I 为 0 张',
+        '不同模型支持上限不同：GPT Image 2.5 Sunburst 最高支持 8 张参考图，Gemini 支持 6 张，Flare 支持 2 张，Grok / MOSS Image 支持 1 张，纯文生 T2I 为 0 张',
         document.getElementById('refImagesQuotaBadge'),
         document.getElementById('drawerRefImagesBox')
       );
@@ -2961,7 +2961,7 @@
         maxFaces,
         'ref-face',
         '未启用独立骨相人脸替换源',
-        '不同模型支持上限不同：FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer) 与 MOSS-Image 支持 1 张源人脸参考，通用文生图模型为 0 张',
+        '不同模型支持上限不同：MOSS Image 支持 1 张源人脸参考，通用文生图模型为 0 张',
         document.getElementById('refFacesQuotaBadge'),
         document.getElementById('drawerRefFacesBox')
       );
@@ -3143,12 +3143,12 @@
         id: 'local',
         name: '本地',
         fullName: '本地 (Local 5090)',
-        version: 'v0.2.35',
-        kindLabel: '本地计算资源 · INT8 多模态参考生图与 FaceFusion 3.9.0 人脸融合管线',
+        version: 'v0.2.36',
+        kindLabel: '本地计算资源 · MOSS Image (INT8-ConvRot + Qwen3.5-9B Vision) 自托管多模态生图引擎',
         billing: '本地算力 (local_resources)',
         models: [
-          { mark: 'MI', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 1张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 INT8-ConvRot 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' },
-          { mark: 'FF', title: 'FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)', biz: '人脸融合 (image.faceswap)', res: '保持原画幅', duration: '1:1-9:16', fps: 'PNG', maxSize: '50MB', caps: [['FACESWAP', '人脸融合']], refQuota: '1张目标底图 · 1张源人脸参考', desc: '本地 5090 真实运行 FaceFusion 3.9.0 (yolo_face + hyperswap_1a_256 + codeformer) 人脸融合与面部增强微服务，对应工具 image.faceswap。' }
+          { mark: 'MI', title: 'MOSS Image', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 1张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 MOSS Image (moss-image-sft-int8-convrot) 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
+
         ]
       },
       {
@@ -3215,7 +3215,7 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.35',
+            version: 'v0.2.36',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
@@ -3233,7 +3233,7 @@
             ? 'gemini-3.1-flash-image-preview'
             : lowerRaw === 'gemini-3-pro-image'
               ? 'gemini-3-pro-image-preview'
-              : (lowerRaw === 'hyperswap_1a_256' || eName === 'faceswap')
+              : (lowerRaw === 'moss-image-sft-int8-convrot' || lowerRaw === 'moss-image' || lowerRaw === 'moss image' || eName === 'moss-image') ? 'MOSS Image' : (lowerRaw === 'hyperswap_1a_256' || eName === 'faceswap')
                 ? 'FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)'
                 : String(rawTitle);
           const existing = grp.items.find(m => m.title.toLowerCase() === modelTitle.toLowerCase());

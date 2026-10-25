@@ -153,7 +153,7 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertNotIn("return String(ch);", html)
         self.assertIn("gemini-3-pro-image-preview", html)
         self.assertIn("gemini-3.1-flash-image-preview", html)
-        self.assertIn("FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)", html)
+        self.assertIn("MOSS Image", html)
         self.assertIn("moss-image-sft-int8-convrot", html)
         self.assertIn("grok-imagine-image-2.0", html)
         self.assertIn("gpt-image-2.5-sunburst", html)
