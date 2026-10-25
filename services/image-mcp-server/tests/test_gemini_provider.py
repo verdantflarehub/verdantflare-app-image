@@ -128,8 +128,8 @@ class TestGeminiProvider(unittest.TestCase):
         self.assertEqual(len(sent_requests), 1)
         req = sent_requests[0]
 
-        # Verify URL stripped duplicate v1beta
-        self.assertEqual(req.full_url, "https://sub2api.example.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=sk-sub2api-key")
+        # Verify URL stripped duplicate v1beta and used default gemini-nano-banana-2.1
+        self.assertEqual(req.full_url, "https://sub2api.example.com/v1beta/models/gemini-nano-banana-2.1:generateContent?key=sk-sub2api-key")
         self.assertEqual(req.headers.get("X-goog-api-key"), "sk-sub2api-key")
         self.assertEqual(req.headers.get("Authorization"), "Bearer sk-sub2api-key")
 

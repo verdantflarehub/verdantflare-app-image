@@ -151,8 +151,21 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertIn("M22.282 9.821", html)
         self.assertIn("s.includes('moss')) return '本地'", html)
         self.assertNotIn("return String(ch);", html)
-        self.assertIn("gemini-3-pro-image-preview", html)
-        self.assertIn("gemini-3.1-flash-image-preview", html)
+        self.assertIn("model-display-name", html)
+        self.assertIn("model-id-sub", html)
+        self.assertIn("Nano Banana 2.1", html)
+        self.assertIn("gemini-nano-banana-2.1", html)
+        self.assertIn("Nano Banana Pro", html)
+        self.assertIn("gemini-3-pro-image", html)
+        self.assertIn("Nano Banana 2", html)
+        self.assertIn("gemini-3.1-flash-image", html)
+        self.assertIn("Nano Banana 2 Lite", html)
+        self.assertIn("gemini-3.1-flash-lite-image", html)
+        self.assertIn("Nano Banana", html)
+        self.assertIn("gemini-2.5-flash-image", html)
+        self.assertIn("modelDisplayName", html)
+        self.assertIn("normalizeModelCode", html)
+        self.assertIn("最多 6张参考图 · 0张蒙版", html)
         self.assertIn("MOSS Image", html)
         self.assertIn("moss-image-sft-int8-convrot", html)
         self.assertIn("grok-imagine-image-2.0", html)
@@ -160,8 +173,6 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertIn("gpt-image-2.5-flare", html)
         for fake_entry in (
             "Imagen 4 Ultra",
-            "Gemini 2.5 Flash Image",
-            "gemini-2.5-flash-image",
             "fal.ai",
             "Higgsfield",
             "FLUX.1 Kontext",

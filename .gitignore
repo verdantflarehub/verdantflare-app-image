@@ -8,6 +8,7 @@ env/
 venv/
 ENV/
 *.png
+!/services/image-mcp-server/src/static/nano-banana.png
 *.jpg
 *.jpeg
 *.webp

@@ -78,6 +78,14 @@ class ImageChannel:
         return self._status(self._request('GET', '/v1/calls/by-idempotency/' +
                            quote(operation_id, safe=''), organization), task_id)
 
+    def capabilities(self, organization='system-capabilities'):
+        value = self._request('GET', '/v1/capabilities', organization)
+        if (value.get('schema_version') != 1
+                or not isinstance(value.get('channel_id'), str)
+                or not isinstance(value.get('capabilities'), list)):
+            raise ChannelUnavailable('invalid_channel_capabilities')
+        return value
+
     def result(self, organization, task_id, call_id):
         value = self._status(self._request('GET', '/v1/calls/' +
                             quote(call_id, safe='') + '/result', organization), task_id)

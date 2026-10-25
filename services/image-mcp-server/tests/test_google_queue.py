@@ -112,10 +112,13 @@ class GoogleQueueTests(unittest.TestCase):
 
     def test_supported_gemini_models_allowed_and_unsupported_rejected(self):
         valid_models = {
-            'gemini-3-pro-image-preview': 'gemini-3-pro-image-preview',
-            'gemini-3.1-flash-image-preview': 'gemini-3.1-flash-image-preview',
+            'gemini-nano-banana-2.1': 'gemini-nano-banana-2.1',
+            'gemini-3.1-flash-lite-image': 'gemini-3.1-flash-lite-image',
             'gemini-3.1-flash-image': 'gemini-3.1-flash-image',
-            'gemini-3-pro-image': 'gemini-3-pro-image-preview',
+            'gemini-3-pro-image': 'gemini-3-pro-image',
+            'gemini-2.5-flash-image': 'gemini-2.5-flash-image',
+            'gemini-3-pro-image-preview': 'gemini-3-pro-image',
+            'gemini-3.1-flash-image-preview': 'gemini-3.1-flash-image',
         }
         for m, expected in valid_models.items():
             with self.subTest(model=m):
@@ -123,18 +126,57 @@ class GoogleQueueTests(unittest.TestCase):
                 prepared = self.queue.prepare('gemini', 'project-test', params)
                 self.assertEqual(prepared['model'], expected)
 
-        invalid_models = ['imagen-4-ultra', 'imagen-4.0-ultra-generate-001', 'gemini-2.5-flash-image', 'gemini-unknown-model', 'gpt-4o']
+        invalid_models = ['imagen-4-ultra', 'imagen-4.0-ultra-generate-001', 'gemini-unknown-model', 'gpt-4o']
         for m in invalid_models:
             with self.subTest(invalid_model=m), self.assertRaises(ValueError):
                 self.queue.prepare('gemini', 'project-test', {'action': 'generate', 'prompt': 'test', 'budget_limit': '1', 'model': m})
 
-    def test_capabilities_declares_supported_gemini_models(self):
+    def test_capabilities_declares_supported_gemini_models_and_channel_catalog(self):
         caps = self.queue.capabilities()
         gemini_cap = next(e for e in caps['engines'] if e.get('engine') == 'gemini')
+        self.assertEqual(gemini_cap.get('model'), 'gemini-nano-banana-2.1')
         self.assertEqual(
             gemini_cap.get('supported_models'),
-            ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview'],
+            [
+                'gemini-nano-banana-2.1',
+                'gemini-3-pro-image',
+                'gemini-3.1-flash-image',
+                'gemini-3.1-flash-lite-image',
+            ],
         )
+        self.assertEqual(
+            [item['display_name'] for item in gemini_cap.get('model_catalog', [])],
+            ['Nano Banana 2.1', 'Nano Banana Pro', 'Nano Banana 2', 'Nano Banana 2 Lite'],
+        )
+        self.channel.capabilities.return_value = {
+            'schema_version': 1,
+            'channel_id': 'google',
+            'default_model_id': 'gemini-nano-banana-2.1',
+            'capabilities': [
+                {
+                    'capability_id': 'image.generate.nano_banana_2_1',
+                    'type': 'image',
+                    'model_id': 'gemini-nano-banana-2.1',
+                    'display_name': 'Nano Banana 2.1',
+                    'operation': 'image.generate',
+                    'execution_state': 'enabled',
+                    'output_summary': 'PNG 图像 · $0.0336/张',
+                },
+                {
+                    'capability_id': 'image.generate.nano_banana_pro',
+                    'type': 'image',
+                    'model_id': 'gemini-3-pro-image',
+                    'display_name': 'Nano Banana Pro',
+                    'operation': 'image.generate',
+                    'execution_state': 'enabled',
+                    'output_summary': 'PNG 图像 · $0.134/张',
+                },
+            ],
+        }
+        live_caps = self.queue.capabilities()
+        live_gemini = next(e for e in live_caps['engines'] if e.get('engine') == 'gemini')
+        self.assertEqual(live_gemini['supported_models'], ['gemini-nano-banana-2.1', 'gemini-3-pro-image'])
+        self.assertEqual(live_gemini['model_catalog'][0]['output_summary'], 'PNG 图像 · $0.0336/张')
 
     def test_gemini_rejects_mask_and_inpaint(self):
         with self.assertRaises(ValueError):

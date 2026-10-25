@@ -63,6 +63,32 @@ class GoogleChannelTests(unittest.TestCase):
         self.assertIsNone(channel.submit('org', 'task', 'op', 'model', {})['accepted'])
         self.assertEqual(seen, ['http://google:8001/v1/calls'])
 
+    def test_capabilities_reads_mcp_channel_catalog(self):
+        def handle(request):
+            self.assertEqual(request.method, 'GET')
+            self.assertEqual(request.url.path, '/v1/capabilities')
+            self.assertEqual(request.headers['x-caller-id'], 'image-mcp')
+            return httpx.Response(200, json={
+                'schema_version': 1,
+                'channel_id': 'google',
+                'default_model_id': 'gemini-nano-banana-2.1',
+                'capabilities': [
+                    {
+                        'capability_id': 'image.generate.nano_banana_2_1',
+                        'type': 'image',
+                        'model_id': 'gemini-nano-banana-2.1',
+                        'display_name': 'Nano Banana 2.1',
+                        'operation': 'image.generate',
+                        'execution_state': 'enabled',
+                    }
+                ],
+            })
+        channel = self.adapter(handle)
+        res = channel.capabilities('org')
+        self.assertEqual(res['channel_id'], 'google')
+        self.assertEqual(res['default_model_id'], 'gemini-nano-banana-2.1')
+        self.assertEqual(res['capabilities'][0]['display_name'], 'Nano Banana 2.1')
+
 
 if __name__ == '__main__':
     unittest.main()

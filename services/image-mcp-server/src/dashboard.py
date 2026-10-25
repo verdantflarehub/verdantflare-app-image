@@ -512,7 +512,7 @@ async def api_create_task(request: Request) -> Response:
     resolved_model = model or (
         "gpt-image-2.5-sunburst" if engine == "codex"
         else "moss-image-sft-int8-convrot" if engine == "moss-image"
-        else "gemini-3.1-flash-image"
+        else "gemini-nano-banana-2.1"
     )
 
     if engine == "grok":

@@ -1037,7 +1037,7 @@
     .resource-grid,
     .deck-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
       gap: 16px;
     }
 
@@ -2104,7 +2104,7 @@
     // Inline Channel Logos & Display Helpers
     const localChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>`;
     const chatgptChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
-    const googleChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>`;
+    const googleChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M23 12.245c0-.905-.075-1.565-.236-2.25h-10.54v4.083h6.186c-.124 1.014-.797 2.542-2.294 3.569l-.021.136 3.332 2.53.23.022C21.779 18.417 23 15.593 23 12.245z" fill="#4285F4"/><path d="M12.225 23c3.03 0 5.574-.978 7.433-2.665l-3.542-2.688c-.948.648-2.22 1.1-3.891 1.1a6.745 6.745 0 01-6.386-4.572l-.132.011-3.465 2.628-.045.124C4.043 20.531 7.835 23 12.225 23z" fill="#34A853"/><path d="M5.84 14.175A6.65 6.65 0 015.463 12c0-.758.138-1.491.361-2.175l-.006-.147-3.508-2.67-.115.054A10.831 10.831 0 001 12c0 1.772.436 3.447 1.197 4.938l3.642-2.763z" fill="#FBBC05"/><path d="M12.225 5.253c2.108 0 3.529.892 4.34 1.638l3.167-3.031C17.787 2.088 15.255 1 12.225 1 7.834 1 4.043 3.469 2.197 7.062l3.63 2.763a6.77 6.77 0 016.398-4.572z" fill="#EB4335"/></svg>`;
     const grokChannelLogo = `<svg class="channel-logo" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" focusable="false"><path d="M4 20L20 4M8 4h12v12"/></svg>`;
 
     function channelLogo(ch) {
@@ -2122,6 +2122,48 @@
       if (s.includes('chatgpt') || s.includes('openai') || s.includes('codex')) return 'ChatGPT';
       if (s.includes('grok')) return 'Grok';
       return '本地';
+    }
+
+    const PNG_MODEL_LOGOS = { 'nano-banana.png': 'data:image/png;base64,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' };
+    const MODEL_CODE_ALIASES = {
+      'gemini-3-pro-image-preview': 'gemini-3-pro-image',
+      'gemini-3.1-flash-image-preview': 'gemini-3.1-flash-image',
+      'moss-image': 'moss-image-sft-int8-convrot',
+      'moss image': 'moss-image-sft-int8-convrot'
+    };
+
+    const MODEL_DISPLAY_MAP = {
+      'gemini-nano-banana-2.1': 'Nano Banana 2.1',
+      'gemini-3-pro-image': 'Nano Banana Pro',
+      'gemini-3-pro-image-preview': 'Nano Banana Pro',
+      'gemini-3.1-flash-image': 'Nano Banana 2',
+      'gemini-3.1-flash-image-preview': 'Nano Banana 2',
+      'gemini-3.1-flash-lite-image': 'Nano Banana 2 Lite',
+      'gemini-2.5-flash-image': 'Nano Banana',
+      'moss-image': 'MOSS Image',
+      'moss-image-sft-int8-convrot': 'MOSS Image',
+      'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst',
+      'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
+      'grok-imagine-image-2.0': 'Grok Imagine Image 2.0',
+      'hyperswap_1a_256': 'FaceFusion 3.9.0'
+    };
+
+    function normalizeModelCode(rawModel, engine) {
+      const raw = String(rawModel || '').trim();
+      const lower = raw.toLowerCase();
+      if (MODEL_CODE_ALIASES[lower]) return MODEL_CODE_ALIASES[lower];
+      if (!raw && String(engine || '').toLowerCase().includes('gemini')) return 'gemini-nano-banana-2.1';
+      if (!raw && String(engine || '').toLowerCase().includes('moss')) return 'moss-image-sft-int8-convrot';
+      return raw || 'gpt-image-2.5-sunburst';
+    }
+
+    function modelDisplayName(rawModel, engine) {
+      const raw = String(rawModel || '').trim();
+      const lower = raw.toLowerCase();
+      if (MODEL_DISPLAY_MAP[lower]) return MODEL_DISPLAY_MAP[lower];
+      const norm = normalizeModelCode(raw, engine).toLowerCase();
+      if (MODEL_DISPLAY_MAP[norm]) return MODEL_DISPLAY_MAP[norm];
+      return raw || 'GPT Image 2.5 Sunburst';
     }
 
     function actionModeCode(action, hasRefs) {
@@ -2398,7 +2440,7 @@
       if (m.includes('grok')) return { maxImages: 1, maxMasks: 0, maxFaces: 0, maxSize: '10 MB' };
       if (m.includes('flare')) return { maxImages: 2, maxMasks: 0, maxFaces: 0, maxSize: '10 MB' };
       if (m.includes('sunburst') || m.includes('gpt-image')) return { maxImages: 8, maxMasks: 1, maxFaces: 0, maxSize: '10 MB' };
-      if (m.includes('gemini')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '24 MB' };
+      if (m.includes('gemini') || m.includes('nano banana') || m.includes('banana')) return { maxImages: 6, maxMasks: 0, maxFaces: 0, maxSize: '24 MB' };
       return { maxImages: 8, maxMasks: 1, maxFaces: 1, maxSize: '50 MB' };
     }
 
@@ -2472,7 +2514,7 @@
                     <span style="font-size: 22px;">⏳</span>
                   `)}
                 </div>
-                <span class="thumb-status-text">${t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物…' : t.status === 'running' ? (t.engine === 'grok' ? 'Grok 远端生成中…' : '图像生成中…') : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…'))}</span>
+                <span class="thumb-status-text" title="${escapeHtml(t.error || '')}">${t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物…' : t.status === 'running' ? (t.engine === 'grok' ? 'Grok 远端生成中…' : '图像生成中…') : (t.status === 'succeeded' && t.artifactId ? '加载画作中…' : (t.status === 'failed' ? '任务执行失败' : '排队调度中…'))}</span>
               </div>
             `}
             <div class="card-top-badges">
@@ -2970,12 +3012,13 @@
       if (techGrid) {
         techGrid.innerHTML = `
           <span>任务 ID</span><span><code>${escapeHtml(task.id)}</code></span>
-          <span>模型 × 渠道</span><span class="identity-channel">${escapeHtml(task.model)} × ${channelLogo(task.engine || task.channelLabel)}${escapeHtml(task.channelLabel)}</span>
+          <span>模型 × 渠道</span><span class="identity-channel"><strong>${escapeHtml(task.model)}</strong> ${task.modelId && task.modelId !== task.model ? `<code>${escapeHtml(task.modelId)}</code> ` : ''}× ${channelLogo(task.engine || task.channelLabel)}${escapeHtml(task.channelLabel)}</span>
           <span>输出规格</span><span>${escapeHtml(task.modeCode)} · 分辨率 ${escapeHtml(task.resolution)} · 画幅 ${escapeHtml(task.aspectRatio)} · 像素 ${escapeHtml(task.pixels)} · 格式 ${escapeHtml(task.formatLabel)}</span>
           <span>文件大小</span><span>${escapeHtml(task.sizeLabel)}（十进制单位，1 MB = 1,000,000 字节）</span>
           <span>请求参数</span><span>分辨率 ${escapeHtml(task.requestedResolution || '未指定')} · 画幅 ${escapeHtml(task.requestedAspectRatio || '未指定')}（不代表实际输出）</span>
           <span>四要素输入快照</span><span>1. 提示词 1/1（唯一） · 2. 参考图 ${refImgs.length}/${maxImages} 张（全局最大 8 张） · 3. 蒙版与控制图 ${refMasks.length}/${maxMasks} 张 · 4. 骨相人脸源 ${refFaces.length}/${maxFaces} 张</span>
           <span>所属项目与耗时</span><span>${escapeHtml(task.project)} · 创建于 ${escapeHtml(task.time)} · 累计耗时 ${escapeHtml(task.duration)}</span>
+          ${task.error ? `<span>失败原因</span><span style="color:var(--danger);font-family:var(--font-mono, monospace);">${escapeHtml(task.error)}</span>` : ''}
         `;
       }
     }
@@ -3142,48 +3185,50 @@
       {
         id: 'local',
         name: '本地',
-        fullName: '本地 (Local 5090)',
-        version: 'v0.2.36',
-        kindLabel: '本地计算资源 · MOSS Image (INT8-ConvRot + Qwen3.5-9B Vision) 自托管多模态生图引擎',
-        billing: '本地算力 (local_resources)',
+        fullName: '本地',
+        version: 'v0.2.37',
+        kindLabel: '本地 5090 自托管算力 · MOSS Image 多模态海报与角色参考生图',
+        billing: '本地算力队列 · 免外部积分',
         models: [
-          { mark: 'MI', title: 'MOSS Image', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 1张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 MOSS Image (moss-image-sft-int8-convrot) 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
-
+          { mark: 'MI', displayName: 'MOSS Image', modelId: 'moss-image-sft-int8-convrot', officialName: 'MOSS-Image + Qwen3.5-9B Vision', releaseMeta: 'RTX 5090 GPU 租约按需推理', pricingLine: '本地 GPU 算力队列（零外部 API 费用）', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 1张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 MOSS Image (moss-image-sft-int8-convrot) 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
         ]
       },
       {
         id: 'google',
         name: 'Google',
-        fullName: 'Google Gemini',
-        version: 'v0.2.4',
-        kindLabel: 'Google AI Studio · Gemini 3 Pro / 3.1 Flash 原生多模态图像渠道',
-        billing: '按量计费 (Google Cloud Credits)',
+        fullName: 'Google',
+        version: 'v0.1.23',
+        kindLabel: 'Google AI Studio · Nano Banana 全系列原生多模态图像渠道',
+        billing: '按量计费 (Google Cloud Credits · 内置官方价格表结算)',
         models: [
-          { mark: 'GP3', title: 'gemini-3-pro-image-preview', biz: '旗舰图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 旗舰光学摄影感多模态生图模型 (Nano Banana Pro)，具备强空间肢体理解与复杂长提示词遵循能力。' },
-          { mark: 'GF3', title: 'gemini-3.1-flash-image-preview', biz: '极速图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 极速多模态生图与参考图编辑底座 (Nano Banana 2)，支持多张参考图融合，高并发低延迟。' }
+          { mark: 'NB2', displayName: 'Nano Banana 2.1', modelId: 'gemini-nano-banana-2.1', modelLogo: 'nano-banana.png', officialName: 'Gemini Nano Banana 2.1', releaseMeta: '发布 2026-10-06 · 知识截止 2025-01 · New · Paid · 默认', pricingLine: 'Image 输出 $0.0336/张（输入 $1.50/M） · Text 输入 $1.50 / 输出 $7.50', title: 'gemini-nano-banana-2.1', biz: '主力图像生成（默认）', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.0336/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 新一代 Flash 级高保真多模态生图与编辑模型 (Gemini Nano Banana 2.1)，兼具增强事实准确性、高视觉保真度与多轮一致性（$0.0336/张）。' },
+          { mark: 'NBP', displayName: 'Nano Banana Pro', modelId: 'gemini-3-pro-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3 Pro Image', releaseMeta: '发布 2026-05-29 · 知识截止 2025-01 · Paid', pricingLine: 'Image 输出 $0.134/张（输入 $2.00/M） · Text 输入 $2.00 / 输出 $12.00', title: 'gemini-3-pro-image', biz: '旗舰图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.134/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 旗舰光学摄影感多模态生图与编辑模型 (Gemini 3 Pro Image)，具备强空间肢体理解与复杂长提示词遵循能力（$0.134/张）。' },
+          { mark: 'NB2', displayName: 'Nano Banana 2', modelId: 'gemini-3.1-flash-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3.1 Flash Image', releaseMeta: '发布 2026-05-29 · 知识截止 2025-01 · Paid', pricingLine: 'Image 输出 $0.0672/张（输入 $0.50/M） · Text 输入 $0.50 / 输出 $3.00', title: 'gemini-3.1-flash-image', biz: '极速图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.0672/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google Pro 级视觉智能与 Flash 级效率生图底座 (Gemini 3.1 Flash Image)，支持多参考图融合与现实锚定生成（$0.0672/张）。' },
+          { mark: 'NBL', displayName: 'Nano Banana 2 Lite', modelId: 'gemini-3.1-flash-lite-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3.1 Flash Lite Image', releaseMeta: '发布 2026-07-01 · 知识截止 2025-01 · 高性价比', pricingLine: 'Image 输出 $0.0336/张（输入 $0.25/M） · Text 输入 $0.25 / 输出 $1.50', title: 'gemini-3.1-flash-lite-image', biz: '轻量规模生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.0336/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 最具性价比的轻量级图像生成与编辑底座 (Gemini 3.1 Flash Lite Image)，面向大规模高并发草图与分镜出图（$0.0336/张）。' },
+          { mark: 'NB1', displayName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 2.5 Flash Image', releaseMeta: '知识截止 2025-01 · Paid · 经典兼容底座', pricingLine: 'Paid · 按 Google Cloud 账单计费', title: 'gemini-2.5-flash-image', biz: '经典图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 经典原生多模态图像生成与编辑模型 (Gemini 2.5 Flash Image)，支持文生图与多参考图连续微调。' }
         ]
       },
       {
         id: 'chatgpt',
         name: 'ChatGPT',
-        fullName: 'ChatGPT / Codex (OpenAI)',
-        version: 'v0.2.16',
+        fullName: 'ChatGPT',
+        version: 'v0.1.12',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
-          { mark: 'SB', title: 'gpt-image-2.5-sunburst', biz: '图像生成', res: '1K / 2K / 4K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识与复杂空间排版理解能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
-          { mark: 'FL', title: 'gpt-image-2.5-flare', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '快速概念设计与分镜草图生成底座。' }
+          { mark: 'SB', displayName: 'GPT Image 2.5 Sunburst', modelId: 'gpt-image-2.5-sunburst', officialName: 'OpenAI GPT Image 2.5 Sunburst', title: 'gpt-image-2.5-sunburst', biz: '图像生成', res: '1K / 2K / 4K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识与复杂空间排版理解能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
+          { mark: 'FL', displayName: 'GPT Image 2.5 Flare', modelId: 'gpt-image-2.5-flare', officialName: 'OpenAI GPT Image 2.5 Flare', title: 'gpt-image-2.5-flare', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '快速概念设计与分镜草图生成底座。' }
         ]
       },
       {
         id: 'grok',
         name: 'Grok',
-        fullName: 'Grok (xAI)',
-        version: 'v0.2.16',
+        fullName: 'Grok',
+        version: 'v0.1.12',
         kindLabel: 'xAI Grok Imagine · 文生图与单参考图编辑渠道',
         billing: '按张数计费 (USD)',
         models: [
-          { mark: 'GRK', title: 'grok-imagine-image-2.0', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/JPEG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 (I2I)', desc: 'xAI Grok Imagine 2.0 图像生成与单参考图编辑渠道，支持 1K/2K 分辨率与多画幅比例。' }
+          { mark: 'GRK', displayName: 'Grok Imagine Image 2.0', modelId: 'grok-imagine-image-2.0', officialName: 'xAI Grok Imagine 2.0', title: 'grok-imagine-image-2.0', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9 / 2:3 / 3:2', fps: 'PNG/JPEG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 (I2I)', desc: 'xAI Grok Imagine 2.0 图像生成与单参考图编辑渠道，支持 1K/2K 分辨率与多画幅比例。' }
         ]
       }
     ];
@@ -3215,44 +3260,63 @@
             id: targetId,
             name: channelDisplayName(eng.engine),
             fullName: channelDisplayName(eng.engine),
-            version: 'v0.2.36',
+            version: 'v0.2.37',
             kindLabel: '实时声明推理渠道',
             billing: '按渠道规则计费',
             items: []
           };
           groups.push(grp);
         }
+        const catalogByModelId = new Map(
+          Array.isArray(eng.model_catalog)
+            ? eng.model_catalog.filter(item => item && item.model_id).map(item => [normalizeModelCode(item.model_id, eng.engine).toLowerCase(), item])
+            : []
+        );
         const declaredModels = Array.isArray(eng.supported_models) && eng.supported_models.length
           ? eng.supported_models
           : [eng.model || eng.engine];
 
         for (const rawTitle of declaredModels) {
           if (!rawTitle) continue;
-          const lowerRaw = String(rawTitle).toLowerCase();
-          const modelTitle = lowerRaw === 'gemini-3.1-flash-image'
-            ? 'gemini-3.1-flash-image-preview'
-            : lowerRaw === 'gemini-3-pro-image'
-              ? 'gemini-3-pro-image-preview'
-              : (lowerRaw === 'moss-image-sft-int8-convrot' || lowerRaw === 'moss-image' || lowerRaw === 'moss image' || eName === 'moss-image') ? 'MOSS Image' : (lowerRaw === 'hyperswap_1a_256' || eName === 'faceswap')
-                ? 'FaceFusion 3.9.0 (hyperswap_1a_256 + codeformer)'
-                : String(rawTitle);
-          const existing = grp.items.find(m => m.title.toLowerCase() === modelTitle.toLowerCase());
+          const canonicalCode = normalizeModelCode(rawTitle, eng.engine);
+          const lowerCode = canonicalCode.toLowerCase();
+          const catalogItem = catalogByModelId.get(lowerCode);
+          if (catalogItem && catalogItem.display_name) {
+            MODEL_DISPLAY_MAP[lowerCode] = catalogItem.display_name;
+          }
+          const existing = grp.items.find(m =>
+            String(m.modelId || '').toLowerCase() === lowerCode ||
+            String(m.title || '').toLowerCase() === lowerCode ||
+            String(m.displayName || '').toLowerCase() === String(rawTitle).toLowerCase()
+          );
           if (existing) {
+            if (catalogItem) {
+              if (catalogItem.display_name) existing.displayName = catalogItem.display_name;
+              if (catalogItem.official_name) existing.officialName = catalogItem.official_name;
+              if (catalogItem.pricing_line) existing.pricingLine = catalogItem.pricing_line;
+              if (catalogItem.release_meta) existing.releaseMeta = catalogItem.release_meta;
+              if (catalogItem.desc) existing.desc = catalogItem.desc;
+            }
             if (!existing.biz.includes(statusLabel)) {
               existing.biz = `${existing.biz} · ${statusLabel}`;
             }
           } else {
             grp.items.push({
-              mark: String(modelTitle).slice(0, 3).toUpperCase(),
-              title: modelTitle,
-              biz: `图像生成 · ${statusLabel}`,
-              res: '1K / 2K',
-              duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9',
+              mark: (catalogItem && catalogItem.mark) || String(canonicalCode).slice(0, 3).toUpperCase(),
+              displayName: (catalogItem && catalogItem.display_name) || modelDisplayName(canonicalCode, eng.engine),
+              modelId: canonicalCode,
+              officialName: (catalogItem && catalogItem.official_name) || '',
+              pricingLine: (catalogItem && catalogItem.pricing_line) || '',
+              releaseMeta: (catalogItem && catalogItem.release_meta) || '',
+              title: canonicalCode,
+              biz: `${(catalogItem && catalogItem.biz) || '图像生成'} · ${statusLabel}`,
+              res: (catalogItem && catalogItem.output_summary) || '自适应原生尺寸',
+              duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9',
               fps: 'PNG',
-              maxSize: '10MB',
+              maxSize: targetId === 'google' ? '24MB' : '10MB',
               caps: [['T2I', '文生图'], ['I2I', '图生图']],
-              refQuota: '最多 1张参考底图 (I2I)',
-              desc: '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。'
+              refQuota: (catalogItem && catalogItem.input_summary) || (targetId === 'google' ? '最多 6张参考图 · 0张蒙版' : '最多 1张参考底图 (I2I)'),
+              desc: (catalogItem && catalogItem.desc) || '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。'
             });
           }
         }
@@ -3298,17 +3362,23 @@
             </div>
           </div>
           <div class="resource-grid">
-            ${ch.items.map(m => `
-              <article class="resource-card">
+            ${ch.items.map(m => {
+              const disp = m.displayName || modelDisplayName(m.modelId || m.title, ch.id);
+              const code = m.modelId || m.title;
+              return `
+              <article class="resource-card" data-model-id="${escapeHtml(code)}">
                 <div class="resource-card-head">
-                  <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-                    <span class="resource-mark">${escapeHtml(m.mark)}</span>
-                    <strong style="font-size:14px;line-height:1.35;display:block;color:var(--ink);">${escapeHtml(m.title)}</strong>
+                  <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                    ${(m.modelLogo && PNG_MODEL_LOGOS[m.modelLogo]) ? `<img src="${PNG_MODEL_LOGOS[m.modelLogo]}" alt="${escapeHtml(disp)} 模型 Logo" title="通过 PNG 注册的模型 Logo (${escapeHtml(m.modelLogo)})" style="width:32px;height:32px;min-width:32px;border-radius:8px;object-fit:contain;display:block;flex:none;">` : `<span class="resource-mark">${escapeHtml(m.mark)}</span>`}
+                    <div style="min-width:0;display:flex;flex-direction:column;gap:2px;">
+                      <strong class="model-display-name" style="font-size:15.5px;line-height:1.25;display:block;color:var(--ink);white-space:nowrap;">${escapeHtml(disp)}</strong>
+                      <code class="model-id-sub" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.3;display:block;color:var(--muted);white-space:nowrap;">${escapeHtml(code)}</code>
+                    </div>
                   </div>
-                  <span class="physics-pill">${escapeHtml(m.biz)}</span>
+                  <span class="physics-pill" style="white-space:nowrap;flex:none;">${escapeHtml(m.biz)}</span>
                 </div>
                 <div class="model-cap-row" aria-label="支持能力">
-                  ${m.caps.map(([code, label]) => `<span class="cap-pill" title="${escapeHtml(code)} ${escapeHtml(label)}"><strong>${escapeHtml(code)}</strong><small>${escapeHtml(label)}</small></span>`).join('')}
+                  ${m.caps.map(([cCode, label]) => `<span class="cap-pill" title="${escapeHtml(cCode)} ${escapeHtml(label)}"><strong>${escapeHtml(cCode)}</strong><small>${escapeHtml(label)}</small></span>`).join('')}
                 </div>
                 <div class="model-quota-strip" aria-label="参考配额与单任务最大容量">
                   <div>参考配额：<strong>${escapeHtml(m.refQuota)}</strong></div>
@@ -3316,20 +3386,21 @@
                 </div>
                 <p>${escapeHtml(m.desc)}</p>
                 <div class="model-foot">
-                  <div class="tags">
-                    <span title="最大分辨率">${escapeHtml(m.res)}</span>
-                    <span title="支持画幅比例">${escapeHtml(m.duration)}</span>
-                    <span title="输出格式">${escapeHtml(m.fps)}</span>
+                  <div class="tags" style="flex-wrap:wrap;">
+                    <span style="white-space:nowrap;" title="最大分辨率">${escapeHtml(m.res)}</span>
+                    <span style="white-space:nowrap;" title="支持画幅比例">${escapeHtml(m.duration)}</span>
+                    <span style="white-space:nowrap;" title="输出格式">${escapeHtml(m.fps)}</span>
                   </div>
                 </div>
               </article>
-            `).join('')}
+            `;
+            }).join('')}
           </div>
         </section>
       `).join('');
     }
 
-    function loadCapabilities(data) {
+        function loadCapabilities(data) {
       latestRuntimeEngines = Array.isArray(data?.engines) ? data.engines : [];
       renderChannelCatalog();
     }
@@ -3388,8 +3459,10 @@
             const sourceIdentityArtifactId = req.source_identity_artifact_id || req.face_reference_artifact_id || ((t.engine === 'moss-image' && refImageIds.length > 0) ? refImageIds[0] : '');
             const modeCode = actionModeCode(action, extraRefs.length > 0);
             const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : '文生图'));
-            const modelName = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
+            const rawModelCode = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
             const engineRaw = t.engine || req.engine || 'local';
+            const modelCode = typeof normalizeModelCode === 'function' ? normalizeModelCode(rawModelCode, engineRaw) : rawModelCode;
+            const modelName = typeof modelDisplayName === 'function' ? modelDisplayName(rawModelCode, engineRaw) : rawModelCode;
             const channelLabel = channelDisplayName(engineRaw);
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
@@ -3411,12 +3484,14 @@
               modeCode,
               typeName,
               model: modelName,
+              modelId: modelCode,
               modelShort: modelName,
               engine: engineRaw,
               channelLabel,
               phase: t.phase,
               requestedResolution: req.resolution,
               requestedAspectRatio: req.aspect_ratio,
+              error: t.error || '',
               ...outputMediaLabels(artifactMediaMap.get(artifactId)),
               duration: t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物' : dur,
               status: t.status === 'completed' ? 'succeeded' : t.status,

@@ -14,17 +14,95 @@ UNIVERSAL_CONSTRAINTS = (
     "Pure illustrative and cinematic visual artwork."
 )
 FIX_TEXT = "The image is purely visual artwork with absolutely NO text, labels, words, or letters."
-DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-image"
+DEFAULT_GEMINI_MODEL = "gemini-nano-banana-2.1"
 ADVERTISED_GEMINI_MODELS = (
-    "gemini-3-pro-image-preview",
-    "gemini-3.1-flash-image-preview",
+    "gemini-nano-banana-2.1",
+    "gemini-3-pro-image",
+    "gemini-3.1-flash-image",
+    "gemini-3.1-flash-lite-image",
 )
 SUPPORTED_GEMINI_MODELS = {
-    DEFAULT_GEMINI_MODEL,
+    "gemini-nano-banana-2.1",
+    "gemini-3.1-flash-lite-image",
+    "gemini-3.1-flash-image",
     "gemini-3.1-flash-image-preview",
     "gemini-3-pro-image-preview",
     "gemini-3-pro-image",
+    "gemini-2.5-flash-image",
 }
+GEMINI_MODEL_ALIASES = {
+    "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image",
+    "gemini-3-pro-image-preview": "gemini-3-pro-image",
+}
+GEMINI_MODEL_CATALOG = (
+    {
+        "model_id": "gemini-nano-banana-2.1",
+        "display_name": "Nano Banana 2.1",
+        "official_title": "Gemini Nano Banana 2.1",
+        "model_logo": "nano-banana.png",
+        "model_logo_mime": "image/png",
+        "mark": "NB2",
+        "biz": "主力图像生成（默认）",
+        "price_per_image_usd": "0.0336",
+        "pricing_line": "Text: $1.50 / $7.50 · Image: Input $1.50 / Output $0.0336/张",
+        "release_meta": "发布: 2026-10-06 · 知识截止: 2025-01",
+        "desc": "Google 新一代 Flash 级高保真多模态生图与编辑模型 (Gemini Nano Banana 2.1)，兼具增强事实准确性、高视觉保真度与多轮一致性（$0.0336/张）。",
+    },
+    {
+        "model_id": "gemini-3-pro-image",
+        "display_name": "Nano Banana Pro",
+        "official_title": "Gemini 3 Pro Image",
+        "model_logo": "nano-banana.png",
+        "model_logo_mime": "image/png",
+        "mark": "GP3",
+        "biz": "旗舰图像生成",
+        "price_per_image_usd": "0.134",
+        "pricing_line": "Text: $2.00 / $12.00 · Image: Input $2.00 / Output $0.134/张",
+        "release_meta": "发布: 2026-05-29 · 知识截止: 2025-01",
+        "desc": "Google 旗舰光学摄影感多模态生图与编辑模型 (Gemini 3 Pro Image)，具备强空间肢体理解与复杂长提示词遵循能力（$0.134/张）。",
+    },
+    {
+        "model_id": "gemini-3.1-flash-image",
+        "display_name": "Nano Banana 2",
+        "official_title": "Gemini 3.1 Flash Image",
+        "model_logo": "nano-banana.png",
+        "model_logo_mime": "image/png",
+        "mark": "GF3",
+        "biz": "极速图像生成",
+        "price_per_image_usd": "0.0672",
+        "pricing_line": "Text: $0.50 / $3.00 · Image: Input $0.50 / Output $0.0672/张",
+        "release_meta": "发布: 2026-05-29 · 知识截止: 2025-01",
+        "desc": "Google Pro 级视觉智能与 Flash 级效率生图底座 (Gemini 3.1 Flash Image)，支持多参考图融合与现实锚定生成（$0.0672/张）。",
+    },
+    {
+        "model_id": "gemini-3.1-flash-lite-image",
+        "display_name": "Nano Banana 2 Lite",
+        "official_title": "Gemini 3.1 Flash Lite Image",
+        "model_logo": "nano-banana.png",
+        "model_logo_mime": "image/png",
+        "mark": "GFL",
+        "biz": "轻量规模生成",
+        "price_per_image_usd": "0.0336",
+        "pricing_line": "Text: $0.25 / $1.50 · Image: Input $0.25 / Output $0.0336/张",
+        "release_meta": "发布: 2026-07-01 · 知识截止: 2025-01",
+        "desc": "Google 最具性价比的轻量级图像生成与编辑底座 (Gemini 3.1 Flash Lite Image)，面向大规模高并发草图与分镜出图（$0.0336/张）。",
+    },
+)
+GEMINI_COMPAT_MODEL_CATALOG = (
+    {
+        "model_id": "gemini-2.5-flash-image",
+        "display_name": "Nano Banana",
+        "official_title": "Gemini 2.5 Flash Image",
+        "model_logo": "nano-banana.png",
+        "model_logo_mime": "image/png",
+        "mark": "GF2",
+        "biz": "经典图像生成（兼容保留）",
+        "price_per_image_usd": "0.039",
+        "pricing_line": "Paid · 历史任务兼容保留（新任务默认路由 Nano Banana 2.1）",
+        "release_meta": "Gemini 2.5 系列 · 兼容保留",
+        "desc": "Google 初代 Nano Banana 原生多模态生图与编辑模型 (Gemini 2.5 Flash Image)，供存量任务复现与兼容调用。",
+    },
+)
 GOOGLE_SUPPORTED_ASPECT_RATIOS = {"1:1", "3:4", "4:3", "9:16", "16:9"}
 ASPECT_RATIO_FALLBACK_MAP: dict[str, tuple[str, str]] = {
     "2:3": ("3:4", "[Vertical Portrait 2:3 / 3:4 Aspect Ratio]"),

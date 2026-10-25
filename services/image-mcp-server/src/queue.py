@@ -16,6 +16,8 @@ from .providers.codex import CodexProvider, DEFAULT_IMAGE_MODEL
 from .providers.gemini import (
     ADVERTISED_GEMINI_MODELS,
     DEFAULT_GEMINI_MODEL,
+    GEMINI_MODEL_ALIASES,
+    GEMINI_MODEL_CATALOG,
     GeminiProvider,
     SUPPORTED_GEMINI_MODELS,
 )
@@ -161,8 +163,8 @@ class TaskQueueManager:
                 raise ValueError('unsupported_parameter')
             if params.get('model') not in (None, '', *SUPPORTED_GEMINI_MODELS):
                 raise ValueError('capability_not_supported')
-            if params.get('model') == 'gemini-3-pro-image':
-                params['model'] = 'gemini-3-pro-image-preview'
+            if params.get('model') in GEMINI_MODEL_ALIASES:
+                params['model'] = GEMINI_MODEL_ALIASES[params['model']]
         channel = {'gemini': self.google_channel, 'grok': self.grok_channel, 'codex': self.chatgpt_channel}.get(engine)
         if self.channel_directory is not None and channel is None:
             raise ValueError('channel_not_configured')
@@ -214,7 +216,13 @@ class TaskQueueManager:
             grok.update(enabled=True, configured=True, adapter_version='grok-channel-v1')
         engines = [
             {"engine": "codex", "model": DEFAULT_IMAGE_MODEL, "enabled": True},
-            {"engine": "gemini", "model": DEFAULT_GEMINI_MODEL, "enabled": True, "supported_models": list(ADVERTISED_GEMINI_MODELS)},
+            {
+                "engine": "gemini",
+                "model": DEFAULT_GEMINI_MODEL,
+                "enabled": True,
+                "supported_models": list(ADVERTISED_GEMINI_MODELS),
+                "model_catalog": [dict(item) for item in GEMINI_MODEL_CATALOG],
+            },
             grok]
         for engine in engines:
             name, channel = {
@@ -230,6 +238,49 @@ class TaskQueueManager:
                     budget_limit_required=True, budget_currency='USD',
                     budget_limit_kind='reservation_ceiling',
                     project_write_authorization_required=True)
+                if engine['engine'] == 'gemini' and callable(getattr(channel, 'capabilities', None)):
+                    try:
+                        remote = channel.capabilities()
+                        if (isinstance(remote, dict)
+                                and remote.get('schema_version') == 1
+                                and remote.get('channel_id') == 'google'
+                                and isinstance(remote.get('capabilities'), list)):
+                            base_map = {item['model_id']: dict(item) for item in GEMINI_MODEL_CATALOG}
+                            merged_by_model: dict[str, dict[str, Any]] = {}
+                            seen_models = []
+                            for cap in remote['capabilities']:
+                                if not isinstance(cap, dict) or cap.get('type') != 'image':
+                                    continue
+                                mid = cap.get('model_id')
+                                if mid not in SUPPORTED_GEMINI_MODELS:
+                                    continue
+                                if mid not in merged_by_model:
+                                    seen_models.append(mid)
+                                    base_entry = dict(base_map.get(mid, {
+                                        'model_id': mid,
+                                        'display_name': cap.get('display_name') or cap.get('card_title') or mid,
+                                        'mark': str(mid)[:3].upper(),
+                                        'biz': '图像生成',
+                                    }))
+                                    base_entry['operations'] = []
+                                    merged_by_model[mid] = base_entry
+                                entry = merged_by_model[mid]
+                                op = cap.get('operation')
+                                if isinstance(op, str) and op and op not in entry['operations']:
+                                    entry['operations'].append(op)
+                                if isinstance(cap.get('display_name'), str) and cap['display_name'].strip():
+                                    entry['display_name'] = cap['display_name'].strip()
+                                for opt_key in ('card_group', 'card_title', 'official_title', 'model_logo', 'model_logo_mime', 'pricing_line', 'release_meta', 'output_summary', 'execution_state'):
+                                    if cap.get(opt_key) is not None:
+                                        entry[opt_key] = cap[opt_key]
+                                cap_input = cap.get('input_summary')
+                                if isinstance(cap_input, str) and len(cap_input) > len(str(entry.get('input_summary') or '')):
+                                    entry['input_summary'] = cap_input
+                            if merged_by_model:
+                                engine['model_catalog'] = [merged_by_model[m] for m in seen_models]
+                                engine['supported_models'] = seen_models
+                    except Exception:
+                        pass
                 if self.channel_directory is not None:
                     engine['enabled'] = self.channel_directory.resolve(name, 'image.generate') == channel.endpoint
         engines.append(self.moss_provider.capability())
@@ -407,8 +458,10 @@ class TaskQueueManager:
                     payload,
                     job.params.get('channel_account_id'), job.params.get('budget_limit'))
             if result['accepted'] is False or result.get('state') == 'failed':
+                reason = result.get('reason_code') or result.get('error') or ''
+                err = f"channel_call_failed: {reason}" if reason else 'channel_call_failed'
                 self.tasks.update_status(job.task_id, 'failed',
-                    error='channel_call_failed', phase='failed')
+                    error=err, phase='failed')
             elif result.get('state') == 'completed' and result['accepted'] is True:
                 self.tasks.update_status(job.task_id, 'running', phase='collecting')
                 data, media_type = channel.result(organization, job.task_id, result['call_id'])
