@@ -31,6 +31,7 @@ from .dashboard import (
     dashboard_page,
 )
 from .faceswap import handle_faceswap
+from .imports import LIMITS as IMPORT_LIMITS, ImportStore
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
 from .providers.moss import DEFAULT_MOSS_MODEL
@@ -236,7 +237,31 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
-SERVICE_VERSION = "v0.2.39"
+_IMPORT_TOOLS = [
+    ("image.import", "Import one PNG/JPEG/WebP of up to 3 MiB as a native project image artifact; never fetches URLs.",
+     {"project_id": {"type": "string"}, "filename": {"type": "string"},
+      "expected_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+      "content_base64": {"type": "string", "maxLength": 4194304}},
+     ["project_id", "filename", "expected_sha256", "content_base64"]),
+    ("image.import_prepare", "Prepare a resumable image import of up to 20 MiB. A claimed ContentRef is provenance only and grants no central read permission.",
+     {"project_id": {"type": "string"}, "idempotency_key": {"type": "string"}, "filename": {"type": "string"},
+      "size": {"type": "integer"}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+      "purpose": {"type": "string"},
+      "source_content_ref": {"anyOf": [{"type": "object", "additionalProperties": {"type": "string"}}, {"type": "null"}]}},
+     ["project_id", "idempotency_key", "filename", "size", "sha256", "purpose"]),
+    ("image.import_chunk", "Append up to 512 KiB at the confirmed offset; identical repeated bytes are safe.",
+     {"project_id": {"type": "string"}, "import_id": {"type": "string"}, "offset": {"type": "integer"},
+      "content_base64": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}},
+     ["project_id", "import_id", "offset", "content_base64", "sha256"]),
+    ("image.import_status", "Read the durable offset and final immutable identity after an interrupted image import.",
+     {"project_id": {"type": "string"}, "import_id": {"type": "string"}}, ["project_id", "import_id"]),
+    ("image.import_commit", "Verify all bytes and fully decode the image before publishing a native project image artifact.",
+     {"project_id": {"type": "string"}, "import_id": {"type": "string"}}, ["project_id", "import_id"]),
+]
+for _name, _description, _properties, _required in _IMPORT_TOOLS:
+    IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
+                               "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
+SERVICE_VERSION = "v0.2.40"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -275,14 +300,72 @@ def artifact_import(
 
 @mcp.tool(name="image.capabilities")
 def image_capabilities() -> types.CallToolResult:
-    return _result({**queue_manager.capabilities(), "service_version": SERVICE_VERSION})
+    return _result({**queue_manager.capabilities(), "import": IMPORT_LIMITS, "service_version": SERVICE_VERSION})
+
+
+imports = ImportStore(artifacts)
+# Stable error codes only; validator text never carries storage paths.
+_IMPORT_ERRORS = {
+    "project_access_denied": ("PERMISSION_DENIED", False),
+    "verified_studio_identity_required": ("PERMISSION_DENIED", False),
+    "project_authorization_unavailable": ("project_authorization_unavailable", True),
+    "project_authorization_not_configured": ("project_authorization_unavailable", False),
+    "import_incomplete": ("import_incomplete", True),
+}
+
+
+def _import_call(project_id: str, operation) -> types.CallToolResult:
+    try:
+        authorize(authority_client, project_id)
+        return _result(operation())
+    except (ValueError, ArtifactError) as exc:
+        raw = str(exc)
+        code, retryable = _IMPORT_ERRORS.get(raw, (raw if raw.isidentifier() and raw.islower() else "import_validation_failed", False))
+        result = _result({"error": {"code": code, "retryable": retryable}})
+        result.is_error = True
+        return result
+
+
+@mcp.tool(name="image.import")
+def image_import(project_id: str, filename: str, expected_sha256: str, content_base64: str) -> types.CallToolResult:
+    """Import one PNG/JPEG/WebP of up to 3 MiB as a native project image artifact; never fetches URLs."""
+    return _import_call(project_id, lambda: imports.import_single(
+        project_id=project_id, filename=filename, expected_sha256=expected_sha256, content_base64=content_base64))
+
+
+@mcp.tool(name="image.import_prepare")
+def image_import_prepare(project_id: str, idempotency_key: str, filename: str, size: int, sha256: str,
+                         purpose: str, source_content_ref: dict[str, str] | None = None) -> types.CallToolResult:
+    """Prepare a resumable image import of up to 20 MiB. A claimed ContentRef grants no central read permission."""
+    return _import_call(project_id, lambda: imports.prepare(
+        project_id=project_id, idempotency_key=idempotency_key, filename=filename, size=size, sha256=sha256,
+        purpose=purpose, source_content_ref=source_content_ref))
+
+
+@mcp.tool(name="image.import_chunk")
+def image_import_chunk(project_id: str, import_id: str, offset: int, content_base64: str, sha256: str) -> types.CallToolResult:
+    """Append up to 512 KiB at the confirmed offset; identical repeated bytes are safe."""
+    return _import_call(project_id, lambda: imports.chunk(
+        project_id=project_id, import_id=import_id, offset=offset, content_base64=content_base64, sha256=sha256))
+
+
+@mcp.tool(name="image.import_status")
+def image_import_status(project_id: str, import_id: str) -> types.CallToolResult:
+    """Read the durable offset and final immutable identity after an interrupted image import."""
+    return _import_call(project_id, lambda: imports.status(project_id=project_id, import_id=import_id))
+
+
+@mcp.tool(name="image.import_commit")
+def image_import_commit(project_id: str, import_id: str) -> types.CallToolResult:
+    """Verify all bytes and fully decode the image before publishing a native project image artifact."""
+    return _import_call(project_id, lambda: imports.commit(project_id=project_id, import_id=import_id))
 
 
 async def api_capabilities(request: Request) -> JSONResponse:
     from .dashboard import check_auth
     if not check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return JSONResponse({**queue_manager.capabilities(), "service_version": SERVICE_VERSION})
+    return JSONResponse({**queue_manager.capabilities(), "import": IMPORT_LIMITS, "service_version": SERVICE_VERSION})
 
 
 @mcp.tool(name="image.generate")

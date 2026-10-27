@@ -109,6 +109,29 @@ class TestServer(unittest.TestCase):
             self.assertEqual(resp_data["artifact"]["filename"], "test.png")
 
 
+    def test_image_import_requires_project_write_and_registers_tools(self):
+        import base64, hashlib, io, json
+        from unittest import mock
+        from PIL import Image
+        from src import server
+        buffer = io.BytesIO()
+        Image.new("RGB", (8, 8)).save(buffer, format="PNG")
+        data = buffer.getvalue()
+        args = dict(project_id="import-test-project", filename="a.png",
+                    expected_sha256=hashlib.sha256(data).hexdigest(), content_base64=base64.b64encode(data).decode())
+        with mock.patch.object(server, "authorize", side_effect=ValueError("project_access_denied")):
+            denied = server.image_import(**args)
+        self.assertTrue(denied.is_error)
+        self.assertEqual(json.loads(denied.content[0].text)["error"]["code"], "PERMISSION_DENIED")
+        with mock.patch.object(server, "authorize", return_value={}):
+            ok = json.loads(server.image_import(**args).content[0].text)
+        self.assertEqual(ok["artifact"]["sha256"], hashlib.sha256(data).hexdigest())
+        names = {tool["name"] for tool in server.IMAGE_TOOLS_SCHEMA}
+        self.assertTrue({"image.import", "image.import_prepare", "image.import_chunk",
+                         "image.import_status", "image.import_commit"} <= names)
+        caps = json.loads(server.image_capabilities().content[0].text)
+        self.assertEqual(caps["import"]["max_image_bytes"], 20 * 1024 * 1024)
+
 if __name__ == "__main__":
     unittest.main()
 
