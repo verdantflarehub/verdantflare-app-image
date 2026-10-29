@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 from pathlib import Path
 from typing import Any
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
-from .artifacts import ArtifactNotFound, ArtifactStore
+from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore, etag_matches
 from .content_rating import ContentRatingError, include_nsfw_from_headers
 from .tasks import TaskNotFound, TaskStore
 
@@ -422,6 +423,50 @@ async def dashboard_page(request: Request) -> Response:
     return HTMLResponse(DASHBOARD_HTML, headers=headers)
 
 
+def _enrich_task_dict(record: Any, artifacts_store: ArtifactStore, ratings_store: Any) -> dict[str, Any]:
+    value = record.to_dict()
+    if record.artifact_id:
+        try:
+            art = artifacts_store.get(record.artifact_id, record.project_id)
+            metadata = art.metadata or {}
+            media_info: dict[str, Any] = {
+                k: metadata[k]
+                for k in ("width", "height", "format")
+                if k in metadata and metadata[k] is not None and metadata[k] != ""
+            }
+            if art.size_bytes and art.size_bytes > 0:
+                media_info["size_bytes"] = art.size_bytes
+                media_info["sizeBytes"] = art.size_bytes
+            if art.media_type:
+                media_info["media_type"] = art.media_type
+            if art.sha256:
+                media_info["sha256"] = art.sha256
+            value["media"] = media_info
+            if "width" in media_info:
+                value["outputWidth"] = media_info["width"]
+            if "height" in media_info:
+                value["outputHeight"] = media_info["height"]
+            if "format" in media_info:
+                value["outputFormat"] = media_info["format"]
+            if "size_bytes" in media_info:
+                value["outputSizeBytes"] = media_info["size_bytes"]
+            if art.media_type:
+                value["outputMediaType"] = art.media_type
+            if art.sha256:
+                value["outputSha256"] = art.sha256
+        except (OSError, ValueError, KeyError, ArtifactNotFound):
+            pass
+    if ratings_store is not None:
+        value.update(
+            ratings_store.ui_fields(
+                record.artifact_id,
+                task_id=record.task_id,
+                can_write=True,
+            )
+        )
+    return value
+
+
 async def api_list_tasks(request: Request) -> Response:
     if not check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -447,24 +492,8 @@ async def api_list_tasks(request: Request) -> Response:
         offset=offset,
         include_nsfw=include_nsfw,
     )
-    values = []
-    for record in records:
-        value = record.to_dict()
-        if record.artifact_id:
-            try:
-                metadata = request.app.state.artifacts.get(record.artifact_id, record.project_id).metadata
-                value["media"] = {k: metadata[k] for k in ("width", "height") if k in metadata}
-            except (OSError, ValueError, KeyError, ArtifactNotFound):
-                pass
-        if ratings_store is not None:
-            value.update(
-                ratings_store.ui_fields(
-                    record.artifact_id,
-                    task_id=record.task_id,
-                    can_write=True,
-                )
-            )
-        values.append(value)
+    artifacts_store = request.app.state.artifacts
+    values = [_enrich_task_dict(record, artifacts_store, ratings_store) for record in records]
     return JSONResponse({
         "tasks": values,
         "capabilities": request.app.state.queue_manager.capabilities(),
@@ -472,6 +501,24 @@ async def api_list_tasks(request: Request) -> Response:
         "limit": limit,
         "offset": offset,
     })
+
+
+async def api_get_task(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    task_id = str(request.path_params.get("task_id", "")).strip()
+    tasks_store = request.app.state.tasks
+    ratings_store = _get_ratings_store(request)
+    include_nsfw = include_nsfw_from_headers(request.headers)
+    try:
+        record = tasks_store.get(task_id)
+        if not include_nsfw and ratings_store is not None:
+            if ratings_store.is_nsfw(record.artifact_id or record.task_id, task_id=record.task_id):
+                return JSONResponse({"error": "not_found"}, status_code=404)
+        value = _enrich_task_dict(record, request.app.state.artifacts, ratings_store)
+        return JSONResponse(value)
+    except TaskNotFound:
+        return JSONResponse({"error": "not_found"}, status_code=404)
 
 
 async def api_task_stats(request: Request) -> Response:
@@ -673,6 +720,73 @@ async def api_mark_content_rating(request: Request) -> Response:
         return JSONResponse({"error_code": "NOT_FOUND", "message": f"Version not found: {version_id}"}, status_code=404)
     except ContentRatingError as exc:
         return JSONResponse({"error_code": exc.error_code, "message": exc.message}, status_code=exc.status_code)
+
+
+async def api_artifact_content(request: Request) -> Response:
+    try:
+        artifact_id = request.path_params.get("artifact_id")
+        if not artifact_id:
+            return JSONResponse({"error": "artifact_not_found"}, status_code=404, headers={"Cache-Control": "no-store"})
+        include_nsfw = include_nsfw_from_headers(request.headers)
+        tasks_store: TaskStore = request.app.state.tasks
+        artifacts_store: ArtifactStore = request.app.state.artifacts
+        ratings_store = _get_ratings_store(request)
+        matched_task = tasks_store.find_by_artifact_or_task(artifact_id)
+        if not include_nsfw and ratings_store is not None:
+            if ratings_store.is_nsfw(artifact_id, task_id=matched_task.task_id if matched_task else None):
+                return JSONResponse({"error": "artifact_not_found"}, status_code=404, headers={"Cache-Control": "no-store"})
+        rec = artifacts_store.get(artifact_id, matched_task.project_id if matched_task else None)
+        etag = f'"{rec.sha256}"'
+        cache_headers = {
+            "Cache-Control": "private, max-age=2592000, immutable",
+            "ETag": etag,
+        }
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=cache_headers)
+        path = artifacts_store.content_path(rec)
+        return FileResponse(path, media_type=rec.media_type, filename=rec.filename, headers=cache_headers)
+    except (ValueError, ArtifactNotFound):
+        return JSONResponse({"error": "artifact_not_found"}, status_code=404, headers={"Cache-Control": "no-store"})
+
+
+async def api_artifact_thumbnail(request: Request) -> Response:
+    raw_edge = request.query_params.get("edge", "320").strip()
+    if raw_edge not in ("320", "640"):
+        return JSONResponse({"error": "invalid_edge"}, status_code=400, headers={"Cache-Control": "no-store"})
+    edge = int(raw_edge)
+    try:
+        artifact_id = request.path_params.get("artifact_id")
+        if not artifact_id:
+            return JSONResponse({"error": "artifact_not_found"}, status_code=404, headers={"Cache-Control": "no-store"})
+        include_nsfw = include_nsfw_from_headers(request.headers)
+        tasks_store: TaskStore = request.app.state.tasks
+        artifacts_store: ArtifactStore = request.app.state.artifacts
+        ratings_store = _get_ratings_store(request)
+        matched_task = tasks_store.find_by_artifact_or_task(artifact_id)
+        if not include_nsfw and ratings_store is not None:
+            if ratings_store.is_nsfw(artifact_id, task_id=matched_task.task_id if matched_task else None):
+                return JSONResponse({"error": "artifact_not_found"}, status_code=404, headers={"Cache-Control": "no-store"})
+        rec = artifacts_store.get(artifact_id, matched_task.project_id if matched_task else None)
+        etag = artifacts_store.thumbnail_etag(rec.sha256, edge)
+        cache_headers = {
+            "Cache-Control": "private, max-age=2592000, immutable",
+            "ETag": etag,
+        }
+        if etag_matches(request.headers.get("if-none-match"), etag):
+            return Response(status_code=304, headers=cache_headers)
+        thumb_path, _ = await asyncio.to_thread(
+            artifacts_store.get_or_create_thumbnail,
+            artifact_id,
+            edge,
+            rec.project_id,
+        )
+        return FileResponse(thumb_path, media_type="image/webp", headers=cache_headers)
+    except ArtifactNotFound:
+        return JSONResponse({"error": "artifact_not_found"}, status_code=404, headers={"Cache-Control": "no-store"})
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"})
+    except ArtifactError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=415, headers={"Cache-Control": "no-store"})
 
 
 async def api_upload_artifact(request: Request) -> Response:

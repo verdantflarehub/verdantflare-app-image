@@ -49,3 +49,85 @@ test('page failure retains tasks and cursor; manual retry succeeds; concurrent r
   assert.equal(calls.length,3); assert.equal(c.allTasks.length,100); assert.equal(c.taskPageError,'');
   c.document.hidden=true; await c.loadMoreTasks(); assert.equal(calls.length,3);
 });
+
+test('syncBackendTasks populates artifactMediaMap from server-measured specs and priority pool limits concurrency to 4 with P0 preemption', async () => {
+  const { context: c, replies } = setup();
+  replies.push({
+    total: 1,
+    tasks: [{
+      task_id: 'task-measured',
+      status: 'completed',
+      artifact_id: 'art-measured',
+      outputWidth: 2048,
+      outputHeight: 1152,
+      outputSizeBytes: 3145728,
+      outputFormat: 'PNG'
+    }]
+  });
+  await c.syncBackendTasks();
+  assert.deepEqual({ ...c.artifactMediaMap.get('art-measured') }, {
+    width: 2048,
+    height: 1152,
+    sizeBytes: 3145728,
+    format: 'PNG'
+  });
+
+  const thumbSource = html.slice(
+    html.indexOf('    let thumbnailLoadInProgress = false;'),
+    html.indexOf('    // DOM Elements')
+  );
+  let active = 0, maxActive = 0;
+  const order = [];
+  const gates = [];
+  const thumbCtx = vm.createContext({
+    disposed: false,
+    allTasks: Array.from({ length: 6 }, (_, i) => ({ id: `t-${i}`, title: `T${i}`, artifactId: `art-${i}` })),
+    artifactBlobMap: new Map(),
+    artifactLoadingMap: new Map(),
+    galleryContainer: null,
+    window: {},
+    console,
+    URL: { createObjectURL: () => 'blob:thumb' },
+    updateCardThumb: () => {},
+    getArtifactBlobUrl: async () => 'blob:fallback',
+    requestApi: async url => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      order.push(url);
+      await new Promise(resolve => gates.push(resolve));
+      active--;
+      return { size: 128 };
+    }
+  });
+  vm.runInContext(thumbSource, thumbCtx);
+
+  // Queue 6 P1 thumbnail loads and 1 P0 reference thumbnail load; also test deduplication
+  const p1Promises = [
+    thumbCtx.getArtifactThumbnailUrl('art-0', 320, 'p1'),
+    thumbCtx.getArtifactThumbnailUrl('art-0', 320, 'p1'), // duplicate in-flight
+    thumbCtx.getArtifactThumbnailUrl('art-1', 320, 'p1'),
+    thumbCtx.getArtifactThumbnailUrl('art-2', 320, 'p1'),
+    thumbCtx.getArtifactThumbnailUrl('art-3', 320, 'p1'),
+    thumbCtx.getArtifactThumbnailUrl('art-4', 320, 'p1'),
+    thumbCtx.getArtifactThumbnailUrl('art-5', 320, 'p1')
+  ];
+  const p0Promise = thumbCtx.getArtifactThumbnailUrl('art-ref', 640, 'p0');
+
+  await new Promise(setImmediate);
+  assert.equal(maxActive, 4, 'concurrency pool must cap in-flight requests at 4');
+  assert.equal(order.length, 4);
+
+  // Release first slot: P0 ('art-ref' edge=640) must preempt queued P1 ('art-4', 'art-5')
+  gates.shift()();
+  await new Promise(setImmediate);
+  assert.equal(order[4], '/artifacts/art-ref/thumbnail?edge=640');
+
+  while (gates.length) {
+    gates.shift()();
+    await new Promise(setImmediate);
+  }
+  const results = await Promise.all([...p1Promises, p0Promise]);
+  assert.ok(results.every(r => r === 'blob:thumb'));
+  assert.equal(maxActive, 4);
+  assert.equal(order.length, 7, 'duplicate art-0 request must share single in-flight promise');
+});

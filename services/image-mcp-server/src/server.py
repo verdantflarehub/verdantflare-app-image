@@ -18,11 +18,14 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 
-from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore
+from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore, etag_matches
 from .content_rating import ContentRatingError, ContentRatingStore, include_nsfw_from_headers
 from .dashboard import (
+    api_artifact_content,
+    api_artifact_thumbnail,
     api_create_task,
     api_delete_task,
+    api_get_task,
     api_list_tasks,
     api_task_content_rating,
     api_task_stats,
@@ -261,7 +264,7 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.40"
+SERVICE_VERSION = "v0.2.41"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -954,19 +957,17 @@ async def health(request: Request) -> JSONResponse:
 
 
 async def artifact_content(request: Request) -> Response:
-    try:
-        artifact_id = request.path_params.get("artifact_id")
-        include_nsfw = include_nsfw_from_headers(request.headers)
-        store = _active_ratings()
-        if not include_nsfw and artifact_id:
-            matched_task = tasks.find_by_artifact_or_task(artifact_id)
-            if store.is_nsfw(artifact_id, task_id=matched_task.task_id if matched_task else None):
-                return JSONResponse({"error": "artifact_not_found"}, status_code=404)
-        rec = artifacts.get(artifact_id)
-        path = artifacts.content_path(rec)
-        return FileResponse(path, media_type=rec.media_type, filename=rec.filename)
-    except (ValueError, ArtifactNotFound):
-        return JSONResponse({"error": "artifact_not_found"}, status_code=404)
+    request.app.state.tasks = tasks
+    request.app.state.artifacts = artifacts
+    request.app.state.ratings = _active_ratings()
+    return await api_artifact_content(request)
+
+
+async def artifact_thumbnail(request: Request) -> Response:
+    request.app.state.tasks = tasks
+    request.app.state.artifacts = artifacts
+    request.app.state.ratings = _active_ratings()
+    return await api_artifact_thumbnail(request)
 
 
 async def internal_clear_rating(request: Request) -> JSONResponse:
@@ -1138,14 +1139,18 @@ app = Starlette(
         Route("/image/api/tasks/{task_id}/title", api_update_task_title, methods=["POST"]),
         Route("/api/tasks/{task_id}/delete", api_delete_task, methods=["POST"]),
         Route("/image/api/tasks/{task_id}/delete", api_delete_task, methods=["POST"]),
+        Route("/api/tasks/{task_id}", api_get_task, methods=["GET"]),
+        Route("/image/api/tasks/{task_id}", api_get_task, methods=["GET"]),
         Route("/api/tasks/{task_id}", api_delete_task, methods=["DELETE"]),
         Route("/image/api/tasks/{task_id}", api_delete_task, methods=["DELETE"]),
         Route("/api/tasks/{task_id}/content-rating", api_task_content_rating, methods=["POST"]),
         Route("/image/api/tasks/{task_id}/content-rating", api_task_content_rating, methods=["POST"]),
         Route("/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
         Route("/image/api/artifacts/upload", api_upload_artifact, methods=["POST"]),
-        Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
-        Route("/image/artifacts/{artifact_id}/content", artifact_content, methods=["GET"]),
+        Route("/artifacts/{artifact_id}/content", artifact_content, methods=["GET", "HEAD"]),
+        Route("/image/artifacts/{artifact_id}/content", artifact_content, methods=["GET", "HEAD"]),
+        Route("/artifacts/{artifact_id}/thumbnail", artifact_thumbnail, methods=["GET", "HEAD"]),
+        Route("/image/artifacts/{artifact_id}/thumbnail", artifact_thumbnail, methods=["GET", "HEAD"]),
         Route("/internal/content-ratings/{version_id}/clear", internal_clear_rating, methods=["POST"]),
         Route("/image/internal/content-ratings/{version_id}/clear", internal_clear_rating, methods=["POST"]),
         Route("/internal/content-ratings/{version_id}/mark", internal_mark_rating, methods=["POST"]),

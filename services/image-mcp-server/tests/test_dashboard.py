@@ -109,8 +109,195 @@ class TestDashboard(unittest.TestCase):
             self.assertEqual(created["project_id"], "test-proj")
             self.assertEqual(created["status"], "queued")
 
+    def test_api_tasks_direct_measured_specs(self):
+        import io
+        from PIL import Image
+        from src.server import artifacts
+
+        buf = io.BytesIO()
+        Image.new("RGB", (1280, 720), color=(100, 150, 200)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        with TestClient(app) as client:
+            art = artifacts.create_from_bytes(
+                project_id="spec-proj",
+                filename="out.png",
+                data=png_bytes,
+                media_type="image/png",
+            )
+            task = tasks.create(
+                project_id="spec-proj",
+                idempotency_key=f"spec-{art.artifact_id}",
+                engine="gemini",
+                model="gemini-nano-banana-2.1",
+                request_params={"prompt": "spec test", "resolution": "2k", "aspect_ratio": "1:1"},
+            )
+            tasks.update_status(task.task_id, "completed", artifact_id=art.artifact_id)
+
+            resp = client.get(
+                "/api/tasks?project_id=spec-proj",
+                headers={"Authorization": "Bearer dash-secret-token"},
+            )
+            self.assertEqual(resp.status_code, 200)
+            items = resp.json()["tasks"]
+            matched = next(t for t in items if t["task_id"] == task.task_id)
+            self.assertEqual(matched["outputWidth"], 1280)
+            self.assertEqual(matched["outputHeight"], 720)
+            self.assertEqual(matched["outputFormat"], "PNG")
+            self.assertEqual(matched["outputSizeBytes"], len(png_bytes))
+            self.assertEqual(matched["outputSha256"], art.sha256)
+            self.assertEqual(matched["media"]["width"], 1280)
+            self.assertEqual(matched["media"]["height"], 720)
+            self.assertEqual(matched["media"]["format"], "PNG")
+            self.assertEqual(matched["media"]["size_bytes"], len(png_bytes))
+
+            detail_resp = client.get(
+                f"/api/tasks/{task.task_id}",
+                headers={"Authorization": "Bearer dash-secret-token"},
+            )
+            self.assertEqual(detail_resp.status_code, 200)
+            detail = detail_resp.json()
+            self.assertEqual(detail["outputWidth"], 1280)
+            self.assertEqual(detail["outputHeight"], 720)
+            self.assertEqual(detail["outputFormat"], "PNG")
+            self.assertEqual(detail["outputSizeBytes"], len(png_bytes))
+
 
 class TestDashboardStaticHtml(unittest.TestCase):
+    def test_enrich_task_dict_without_starlette(self):
+        import io
+        import tempfile
+        from pathlib import Path
+        from PIL import Image
+        from src.artifacts import ArtifactStore
+        from src.tasks import TaskStore
+        from src.dashboard import _enrich_task_dict
+
+        buf = io.BytesIO()
+        Image.new("RGB", (1920, 1080), color=(30, 60, 90)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            art_store = ArtifactStore(root_dir=root / "projects")
+            task_store = TaskStore(db_path=root / "tasks.db")
+            task_store.ensure_ready()
+            art = art_store.create_from_bytes(
+                project_id="unit-proj",
+                filename="test.png",
+                data=png_bytes,
+                media_type="image/png",
+            )
+            task = task_store.create(
+                project_id="unit-proj",
+                idempotency_key="idem-unit-1",
+                engine="gemini",
+                model="gemini-nano-banana-2.1",
+                request_params={"prompt": "test", "resolution": "2k", "aspect_ratio": "1:1"},
+            )
+            task_store.update_status(task.task_id, "completed", artifact_id=art.artifact_id)
+            updated_task = task_store.get(task.task_id)
+            enriched = _enrich_task_dict(updated_task, art_store, None)
+            self.assertEqual(enriched["outputWidth"], 1920)
+            self.assertEqual(enriched["outputHeight"], 1080)
+            self.assertEqual(enriched["outputFormat"], "PNG")
+            self.assertEqual(enriched["outputSizeBytes"], len(png_bytes))
+            self.assertEqual(enriched["outputMediaType"], "image/png")
+            self.assertEqual(enriched["outputSha256"], art.sha256)
+            self.assertEqual(enriched["media"]["width"], 1920)
+            self.assertEqual(enriched["media"]["height"], 1080)
+            self.assertEqual(enriched["media"]["format"], "PNG")
+            self.assertEqual(enriched["media"]["size_bytes"], len(png_bytes))
+
+            from starlette.applications import Starlette
+            from starlette.routing import Route
+            from starlette.testclient import TestClient as DirectTestClient
+            from src.dashboard import (
+                api_artifact_content,
+                api_artifact_thumbnail,
+                api_get_task,
+                api_list_tasks,
+            )
+
+            class _DummyQueue:
+                def capabilities(self):
+                    return {}
+
+            mini_app = Starlette(
+                routes=[
+                    Route("/api/tasks", api_list_tasks, methods=["GET"]),
+                    Route("/api/tasks/{task_id}", api_get_task, methods=["GET"]),
+                    Route("/artifacts/{artifact_id}/content", api_artifact_content, methods=["GET", "HEAD"]),
+                    Route("/artifacts/{artifact_id}/thumbnail", api_artifact_thumbnail, methods=["GET", "HEAD"]),
+                ]
+            )
+            mini_app.state.tasks = task_store
+            mini_app.state.artifacts = art_store
+            mini_app.state.ratings = None
+            mini_app.state.queue_manager = _DummyQueue()
+
+            with DirectTestClient(mini_app) as client:
+                list_resp = client.get(
+                    "/api/tasks?project_id=unit-proj",
+                    headers={"Authorization": "Bearer dash-secret-token"},
+                )
+                self.assertEqual(list_resp.status_code, 200)
+                t_item = list_resp.json()["tasks"][0]
+                self.assertEqual(t_item["outputWidth"], 1920)
+                self.assertEqual(t_item["outputHeight"], 1080)
+                self.assertEqual(t_item["outputFormat"], "PNG")
+                self.assertEqual(t_item["outputSizeBytes"], len(png_bytes))
+                self.assertEqual(t_item["outputSha256"], art.sha256)
+
+                get_resp = client.get(
+                    f"/api/tasks/{task.task_id}",
+                    headers={"Authorization": "Bearer dash-secret-token"},
+                )
+                self.assertEqual(get_resp.status_code, 200)
+                self.assertEqual(get_resp.json()["outputWidth"], 1920)
+                self.assertEqual(get_resp.json()["outputSizeBytes"], len(png_bytes))
+
+                # Thumbnail 320 + immutable cache headers + ETag + 304
+                thumb_resp = client.get(f"/artifacts/{art.artifact_id}/thumbnail?edge=320")
+                self.assertEqual(thumb_resp.status_code, 200)
+                self.assertEqual(thumb_resp.headers.get("content-type"), "image/webp")
+                self.assertEqual(
+                    thumb_resp.headers.get("cache-control"),
+                    "private, max-age=2592000, immutable",
+                )
+                etag = thumb_resp.headers.get("etag")
+                self.assertEqual(etag, f'"{art.sha256}-320-v1"')
+                with Image.open(io.BytesIO(thumb_resp.content)) as t_img:
+                    self.assertEqual(t_img.size, (320, 180))
+
+                # Conditional GET with If-None-Match -> 304
+                not_mod = client.get(
+                    f"/artifacts/{art.artifact_id}/thumbnail?edge=320",
+                    headers={"If-None-Match": etag},
+                )
+                self.assertEqual(not_mod.status_code, 304)
+                self.assertEqual(not_mod.content, b"")
+
+                # Invalid edge -> 400 with no-store
+                bad_edge = client.get(f"/artifacts/{art.artifact_id}/thumbnail?edge=999")
+                self.assertEqual(bad_edge.status_code, 400)
+                self.assertEqual(bad_edge.headers.get("cache-control"), "no-store")
+
+                # Content GET + ETag + 304
+                content_resp = client.get(f"/artifacts/{art.artifact_id}/content")
+                self.assertEqual(content_resp.status_code, 200)
+                self.assertEqual(
+                    content_resp.headers.get("cache-control"),
+                    "private, max-age=2592000, immutable",
+                )
+                c_etag = content_resp.headers.get("etag")
+                self.assertEqual(c_etag, f'"{art.sha256}"')
+                content_304 = client.get(
+                    f"/artifacts/{art.artifact_id}/content",
+                    headers={"If-None-Match": c_etag},
+                )
+                self.assertEqual(content_304.status_code, 304)
+
     def test_static_index_html_v12_contracts(self):
         from pathlib import Path
         html_path = Path(__file__).resolve().parent.parent / "src" / "static" / "index.html"

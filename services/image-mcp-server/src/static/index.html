@@ -2096,7 +2096,7 @@
         headers['Content-Type'] = 'application/json';
         body = JSON.stringify(body);
       }
-      const res = await fetch(path, { ...options, headers, body });
+      const res = await fetch(path, { ...options, cache: options.blob ? 'default' : 'no-store', headers, body });
       if (!res.ok) throw new Error('API ' + res.status);
       return options.blob ? res.blob() : res.json();
     }
@@ -2406,22 +2406,145 @@
     }
 
     let thumbnailLoadInProgress = false;
+    const artifactThumbMap = new Map();
+    const artifactThumbLoadingMap = new Map();
+    const MAX_CONCURRENT_MEDIA_LOADS = 4;
+    let activeMediaLoads = 0;
+    const mediaQueueP0 = [];
+    const mediaQueueP1 = [];
+
+    function pumpMediaQueue() {
+      if (disposed) {
+        mediaQueueP0.length = 0;
+        mediaQueueP1.length = 0;
+        return;
+      }
+      while (activeMediaLoads < MAX_CONCURRENT_MEDIA_LOADS) {
+        let nextJob = mediaQueueP0.shift();
+        if (!nextJob) {
+          if (activeMediaLoads + artifactLoadingMap.size >= MAX_CONCURRENT_MEDIA_LOADS) break;
+          nextJob = mediaQueueP1.shift();
+        }
+        if (!nextJob) break;
+        activeMediaLoads++;
+        Promise.resolve()
+          .then(nextJob.fn)
+          .then(nextJob.resolve, nextJob.reject)
+          .finally(() => {
+            activeMediaLoads = Math.max(0, activeMediaLoads - 1);
+            pumpMediaQueue();
+          });
+      }
+    }
+
+    function scheduleMediaLoad(fn, priority = 'p1') {
+      return new Promise((resolve, reject) => {
+        const job = { fn, resolve, reject };
+        if (priority === 'p0') {
+          mediaQueueP0.push(job);
+        } else {
+          mediaQueueP1.push(job);
+        }
+        pumpMediaQueue();
+      });
+    }
+
+    function getCachedThumbUrl(artifactId, edge = 320) {
+      if (!artifactId) return '';
+      return artifactThumbMap.get(`${artifactId}:${edge}`) || '';
+    }
+
+    async function getArtifactThumbnailUrl(artifactId, edge = 320, priority = 'p1') {
+      if (!artifactId || disposed) return '';
+      const cacheKey = `${artifactId}:${edge}`;
+      if (artifactThumbMap.has(cacheKey)) {
+        return artifactThumbMap.get(cacheKey);
+      }
+      if (edge === 320 && artifactBlobMap.has(artifactId)) {
+        return artifactBlobMap.get(artifactId);
+      }
+      if (artifactThumbLoadingMap.has(cacheKey)) {
+        return artifactThumbLoadingMap.get(cacheKey);
+      }
+
+      const p = scheduleMediaLoad(async () => {
+        if (disposed) return '';
+        if (artifactThumbMap.has(cacheKey)) return artifactThumbMap.get(cacheKey);
+        try {
+          const blob = await requestApi(`/artifacts/${encodeURIComponent(artifactId)}/thumbnail?edge=${edge}`, { blob: true });
+          if (disposed || !blob || !blob.size) return '';
+          const url = URL.createObjectURL(blob);
+          artifactThumbMap.set(cacheKey, url);
+          return url;
+        } catch (err) {
+          console.warn(`Thumbnail ${cacheKey} load failed, falling back to content:`, err);
+          return getArtifactBlobUrl(artifactId);
+        }
+      }, priority).finally(() => {
+        artifactThumbLoadingMap.delete(cacheKey);
+      });
+
+      artifactThumbLoadingMap.set(cacheKey, p);
+      return p;
+    }
+
+    async function loadTaskCardThumbnail(taskId) {
+      if (disposed) return;
+      const t = allTasks.find(item => item.id === taskId);
+      if (!t || !t.artifactId) return;
+      const existing = t.img || getCachedThumbUrl(t.artifactId, 320);
+      if (existing) {
+        updateCardThumb(t.id, existing, t.title);
+        return;
+      }
+      const url = await getArtifactThumbnailUrl(t.artifactId, 320, 'p1');
+      if (url && !disposed) {
+        updateCardThumb(t.id, url, t.title);
+      }
+    }
+
+    const cardThumbObserver = window.IntersectionObserver ? new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        cardThumbObserver.unobserve(entry.target);
+        const taskId = entry.target.dataset?.taskId;
+        if (taskId) void loadTaskCardThumbnail(taskId);
+      }
+    }, { root: null, rootMargin: '240px 0px', threshold: 0.01 }) : null;
+
     async function loadThumbnails() {
+      if (disposed) return;
+      for (const t of allTasks) {
+        if (!t.artifactId) continue;
+        const cached = t.img || getCachedThumbUrl(t.artifactId, 320);
+        if (cached) {
+          updateCardThumb(t.id, cached, t.title);
+        }
+      }
+      if (cardThumbObserver && galleryContainer) {
+        const cards = galleryContainer.querySelectorAll('.task-card[data-task-id]');
+        cards.forEach(card => {
+          const taskId = card.dataset.taskId;
+          const t = allTasks.find(item => item.id === taskId);
+          if (!t || !t.artifactId) return;
+          if (t.img || getCachedThumbUrl(t.artifactId, 320)) {
+            updateCardThumb(t.id, t.img || getCachedThumbUrl(t.artifactId, 320), t.title);
+            return;
+          }
+          if (!card.querySelector('.card-thumb img')) {
+            cardThumbObserver.observe(card);
+          }
+        });
+        return;
+      }
       if (thumbnailLoadInProgress) return;
       thumbnailLoadInProgress = true;
       try {
-        for (const t of allTasks) {
-          if (t.artifactId && !artifactBlobMap.has(t.artifactId)) {
-            const url = await getArtifactBlobUrl(t.artifactId);
-            if (url) {
-              t.img = url;
-              updateCardThumb(t.id, url, t.title);
-              if (activeTask && activeTask.id === t.id) {
-                updateInspectorImages(activeTask);
-              }
-            }
-          }
-        }
+        await Promise.all(
+          allTasks
+            .filter(t => t.artifactId && !t.img && !getCachedThumbUrl(t.artifactId, 320))
+            .map(t => loadTaskCardThumbnail(t.id))
+        );
       } finally {
         thumbnailLoadInProgress = false;
       }
@@ -2476,7 +2599,12 @@
       taskTableContainer.hidden = empty || taskView !== 'table';
       const structure = taskStructureKey(filtered);
       if (structure === lastTaskStructure) {
-        filtered.forEach(updateTaskOutput);
+        filtered.forEach(task => {
+          updateTaskOutput(task);
+          const thumbUrl = task.img || getCachedThumbUrl(task.artifactId, 320);
+          if (thumbUrl) updateCardThumb(task.id, thumbUrl, task.title);
+        });
+        if (!galleryContainer.hidden) void loadThumbnails();
         return;
       }
       lastTaskStructure = structure;
@@ -2495,12 +2623,13 @@
       if (empty) { galleryContainer.replaceChildren(); lastGalleryMarkup = ''; return; }
       const markup = filtered.map(task => {
         const t = Object.fromEntries(Object.entries(task).map(([k,v]) => [k, typeof v === 'string' ? escapeHtml(v) : v]));
+        const cardThumbUrl = t.img || escapeHtml(getCachedThumbUrl(task.artifactId, 320));
         const chLogo = channelLogo(task.engine || task.channelLabel);
         return `
         <article class="task-card" data-task-id="${t.id}" data-open-task="${t.id}" role="button" tabindex="0" aria-label="任务：${t.title}">
           <div class="card-thumb">
-            ${t.img ? `
-              <img src="${t.img}" alt="${t.title}" loading="lazy"/>
+            ${cardThumbUrl ? `
+              <img src="${cardThumbUrl}" alt="${t.title}" loading="lazy"/>
             ` : `
               <div class="card-thumb-placeholder ${t.status === 'running' || (t.status === 'succeeded' && t.artifactId) ? 'pulse' : ''}">
                 <div class="thumb-icon-wrap">
@@ -2565,7 +2694,12 @@
         while (galleryContainer.children.length > desired.length) galleryContainer.lastElementChild.remove();
         galleryTaskKeys = nextKeys;
         lastGalleryMarkup = markup;
-        filtered.forEach(updateTaskOutput);
+        filtered.forEach(task => {
+          updateTaskOutput(task);
+          const thumbUrl = task.img || getCachedThumbUrl(task.artifactId, 320);
+          if (thumbUrl) updateCardThumb(task.id, thumbUrl, task.title);
+        });
+        if (!galleryContainer.hidden) void loadThumbnails();
       }
     }
 
@@ -2869,7 +3003,7 @@
         return;
       }
       boxEl.innerHTML = `<div class="ref-image-grid">${items.map((item, idx) => `
-        <button type="button" class="ref-media-card" id="${prefixId}-${idx}" data-ref-artifact="${escapeHtml(item.artifactId)}" data-zoom-img="${escapeHtml(item.url || '')}" data-zoom-label="${escapeHtml(item.slot)} · ${escapeHtml(item.role)}">
+        <button type="button" class="ref-media-card" id="${prefixId}-${idx}" data-ref-artifact="${escapeHtml(item.artifactId)}" data-zoom-img="${escapeHtml(item.fullUrl ?? item.url ?? '')}" data-zoom-label="${escapeHtml(item.slot)} · ${escapeHtml(item.role)}">
           <span class="ref-slot-tag">${escapeHtml(item.slot)}</span>
           <div class="ref-image-thumb">
             ${item.url ? `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.slot)} ${escapeHtml(item.role)}" loading="lazy">` : `<span class="thumb-status-text">加载参考图中…</span>`}
@@ -2950,19 +3084,22 @@
         slot: `Picture ${idx + 1}`,
         role: idx === 0 && task.sourceArtifactId === aid ? '源参考底图 (Source)' : `参考图像 #${idx + 1}`,
         artifactId: aid,
-        url: artifactBlobMap.get(aid) || ''
+        url: artifactBlobMap.get(aid) || getCachedThumbUrl(aid, 640) || getCachedThumbUrl(aid, 320) || '',
+        fullUrl: artifactBlobMap.get(aid) || ''
       }));
       const refMasks = (task.maskArtifactId ? [task.maskArtifactId] : []).map((aid, idx) => ({
         slot: `Mask ${idx + 1}`,
         role: '局部重绘遮罩 (Inpaint Mask)',
         artifactId: aid,
-        url: artifactBlobMap.get(aid) || ''
+        url: artifactBlobMap.get(aid) || getCachedThumbUrl(aid, 640) || getCachedThumbUrl(aid, 320) || '',
+        fullUrl: artifactBlobMap.get(aid) || ''
       }));
       const refFaces = (task.sourceIdentityArtifactId ? [task.sourceIdentityArtifactId] : []).map((aid, idx) => ({
         slot: `Face ${idx + 1}`,
         role: '骨相人脸身份锚点 (Source Identity)',
         artifactId: aid,
-        url: artifactBlobMap.get(aid) || ''
+        url: artifactBlobMap.get(aid) || getCachedThumbUrl(aid, 640) || getCachedThumbUrl(aid, 320) || '',
+        fullUrl: artifactBlobMap.get(aid) || ''
       }));
 
       const maxImages = Math.max(quotas.maxImages, refImgs.length);
@@ -3077,7 +3214,7 @@
       updateInspectorImages(task);
 
       if (task.artifactId && !task.img) {
-        getArtifactBlobUrl(task.artifactId).then(url => {
+        scheduleMediaLoad(() => getArtifactBlobUrl(task.artifactId), 'p0').then(url => {
           if (url) {
             task.img = url;
             if (activeTask && activeTask.id === task.id) {
@@ -3087,15 +3224,15 @@
           }
         });
       }
-      // Load any reference/mask/face artifacts
+      // Load any reference/mask/face artifacts as 640px thumbnails at P0 priority
       const extraArtifactIds = [
         ...(task.refImageIds || []),
         ...(task.maskArtifactId ? [task.maskArtifactId] : []),
         ...(task.sourceIdentityArtifactId ? [task.sourceIdentityArtifactId] : [])
       ];
       for (const aid of extraArtifactIds) {
-        if (aid && !artifactBlobMap.has(aid)) {
-          getArtifactBlobUrl(aid).then(url => {
+        if (aid && !artifactBlobMap.has(aid) && !getCachedThumbUrl(aid, 640)) {
+          getArtifactThumbnailUrl(aid, 640, 'p0').then(url => {
             if (url && activeTask && activeTask.id === task.id) {
               updateInspectorImages(activeTask);
             }
@@ -3466,6 +3603,21 @@
             const channelLabel = channelDisplayName(engineRaw);
             const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
             const artifactId = t.artifact_id || '';
+            if (artifactId && !artifactMediaMap.has(artifactId)) {
+              const rawMedia = t.media && typeof t.media === 'object' ? t.media : null;
+              const width = Number(t.outputWidth ?? t.output_width ?? rawMedia?.width);
+              const height = Number(t.outputHeight ?? t.output_height ?? rawMedia?.height);
+              const sizeBytes = Number(t.outputSizeBytes ?? t.output_size_bytes ?? rawMedia?.sizeBytes ?? rawMedia?.size_bytes);
+              const format = String(t.outputFormat || t.output_format || rawMedia?.format || '').trim();
+              if ((Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0) || (Number.isSafeInteger(sizeBytes) && sizeBytes >= 0) || format) {
+                artifactMediaMap.set(artifactId, {
+                  width: Number.isSafeInteger(width) && width > 0 ? width : undefined,
+                  height: Number.isSafeInteger(height) && height > 0 ? height : undefined,
+                  sizeBytes: Number.isSafeInteger(sizeBytes) && sizeBytes >= 0 ? sizeBytes : undefined,
+                  format
+                });
+              }
+            }
             const imgUrl = artifactBlobMap.get(artifactId) || '';
             const customTitle = String(req.title || t.title || '').trim();
             const defaultTitle = (t.prompt_preview || req.prompt || '图像任务').slice(0, 24) + '…';
@@ -3549,13 +3701,16 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
     window.addEventListener('pagehide', () => {
       closeHostPreview(); previewFocus.clear(); previewBlobs.clear();
-      disposed = true; taskPageObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
+      disposed = true; taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
       for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
       viewportRequests.clear();
       for (const req of pendingReqs.values()) { clearTimeout(req.timer); req.reject(new Error('页面已关闭')); }
       pendingReqs.clear();
       for (const url of artifactBlobMap.values()) URL.revokeObjectURL(url);
       artifactBlobMap.clear();
+      for (const url of artifactThumbMap.values()) URL.revokeObjectURL(url);
+      artifactThumbMap.clear();
+      artifactThumbLoadingMap.clear();
       artifactMediaMap.clear();
     });
   </script>
