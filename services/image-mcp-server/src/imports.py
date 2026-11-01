@@ -44,6 +44,7 @@ LIMITS = {
     "max_pixels": MAX_PIXELS,
     "stale_import_seconds": STALE_SECONDS,
     "source_url": False,
+    "delete_tool": "image.import_delete",
 }
 
 
@@ -148,6 +149,8 @@ class ImportStore:
         return row
 
     def _public(self, row) -> dict:
+        if row["status"] in ("deleting", "deleted"):
+            return {"import_id": row["id"], "project_id": row["project"], "status": row["status"]}
         metadata = json.loads(row["metadata"])
         result = {"import_id": row["id"], "project_id": row["project"], "status": row["status"],
                   "offset": row["offset"], "chunk_max_bytes": MAX_CHUNK_BYTES, **metadata}
@@ -227,6 +230,8 @@ class ImportStore:
             raise ValueError("import_chunk_size_or_hash_mismatch")
         with self._transaction() as db:
             row = self._read(db, project_id, import_id)
+            if row["status"] in ("deleting", "deleted"):
+                raise ValueError("import_not_active")
             if row["status"] == "committed":
                 return self._public(row)
             meta = json.loads(row["metadata"])
@@ -258,6 +263,8 @@ class ImportStore:
     def commit(self, *, project_id, import_id) -> dict:
         with self._transaction() as db:
             row = self._read(db, project_id, import_id)
+            if row["status"] in ("deleting", "deleted"):
+                raise ValueError("import_not_active")
             if row["status"] == "committed":
                 return self._public(row)
             meta = json.loads(row["metadata"])
@@ -277,4 +284,23 @@ class ImportStore:
                 artifact_id=row["artifact_id"])
             db.execute("UPDATE imports SET status='committed',media=? WHERE id=?", (json.dumps(media), import_id))
             path.unlink(missing_ok=True)
+            return self._public(self._read(db, project_id, import_id))
+
+    def delete(self, *, project_id, import_id) -> dict:
+        # Commit the tombstone before touching files. The original key is retained.
+        with self._transaction() as db:
+            row = self._read(db, project_id, import_id)
+            if row["status"] == "deleted":
+                return self._public(row)
+            metadata = json.loads(row["metadata"])
+            artifact_id = row["artifact_id"]
+            db.execute("UPDATE imports SET status='deleting' WHERE id=?", (import_id,))
+        try:
+            self.artifacts.remove_imported(project_id=project_id, artifact_id=artifact_id, import_id=import_id,
+                                           filename=metadata["filename"], sha256=metadata["sha256"])
+            self._part(import_id).unlink(missing_ok=True)
+        except OSError:
+            raise ValueError("import_cleanup_unavailable") from None
+        with self._transaction() as db:
+            db.execute("UPDATE imports SET status='deleted' WHERE id=? AND project=?", (import_id, project_id))
             return self._public(self._read(db, project_id, import_id))

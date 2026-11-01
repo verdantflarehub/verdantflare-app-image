@@ -260,6 +260,8 @@ _IMPORT_TOOLS = [
      {"project_id": {"type": "string"}, "import_id": {"type": "string"}}, ["project_id", "import_id"]),
     ("image.import_commit", "Verify all bytes and fully decode the image before publishing a native project image artifact.",
      {"project_id": {"type": "string"}, "import_id": {"type": "string"}}, ["project_id", "import_id"]),
+    ("image.import_delete", "Delete a resumable import's native bytes and previews; retain its key so it cannot be revived.",
+     {"project_id": {"type": "string"}, "import_id": {"type": "string"}}, ["project_id", "import_id"]),
 ]
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
@@ -314,6 +316,7 @@ _IMPORT_ERRORS = {
     "project_authorization_unavailable": ("project_authorization_unavailable", True),
     "project_authorization_not_configured": ("project_authorization_unavailable", False),
     "import_incomplete": ("import_incomplete", True),
+    "import_cleanup_unavailable": ("import_cleanup_unavailable", True),
 }
 
 
@@ -362,6 +365,12 @@ def image_import_status(project_id: str, import_id: str) -> types.CallToolResult
 def image_import_commit(project_id: str, import_id: str) -> types.CallToolResult:
     """Verify all bytes and fully decode the image before publishing a native project image artifact."""
     return _import_call(project_id, lambda: imports.commit(project_id=project_id, import_id=import_id))
+
+
+@mcp.tool(name="image.import_delete")
+def image_import_delete(project_id: str, import_id: str) -> types.CallToolResult:
+    """Delete only this project's resumable import; repeat to resume interrupted cleanup."""
+    return _import_call(project_id, lambda: imports.delete(project_id=project_id, import_id=import_id))
 
 
 async def api_capabilities(request: Request) -> JSONResponse:

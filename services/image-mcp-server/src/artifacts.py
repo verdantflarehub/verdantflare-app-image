@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import concurrent.futures
+from contextlib import ExitStack
 import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import threading
 import urllib.parse
@@ -420,6 +422,38 @@ class ArtifactStore:
     def content_path(self, record: ArtifactRecord) -> Path:
         return self._project_dir(record.project_id) / f"{record.artifact_id}-{record.filename}"
 
+    def remove_imported(self, *, project_id: str, artifact_id: str, import_id: str,
+                        filename: str, sha256: str) -> None:
+        """Remove one resumable import and its disposable previews, never task output."""
+        if (not re.fullmatch(r"art-[0-9a-f]{16}", artifact_id)
+                or not re.fullmatch(r"imp_[0-9a-f]{32}", import_id)
+                or not re.fullmatch(r"[0-9a-f]{64}", sha256)
+                or not filename or "/" in filename or "\\" in filename):
+            raise ArtifactError("invalid_import_identity")
+        meta_path = self._meta_path(project_id, artifact_id)
+        content_path = self._project_dir(project_id) / f"{artifact_id}-{filename}"
+        previews = [self.thumbnail_cache_path(sha256, edge) for edge in ALLOWED_THUMBNAIL_EDGES]
+        paths = [meta_path, content_path, *previews]
+        if any(not path.resolve().is_relative_to(self.root_dir.resolve()) for path in paths):
+            raise ArtifactError("invalid_import_path")
+        with ExitStack() as stack:
+            for edge in ALLOWED_THUMBNAIL_EDGES:
+                stack.enter_context(self._get_thumb_lock(f"{sha256}_{edge}"))
+            if meta_path.exists():
+                record = self.get(artifact_id, project_id)
+                if (record.project_id != project_id or record.artifact_id != artifact_id
+                        or record.filename != filename or record.sha256 != sha256
+                        or record.metadata.get("origin") != "user_import"
+                        or record.metadata.get("import_id") != import_id):
+                    raise ArtifactError("not_the_requested_import")
+            # Remove discoverability first; a retry can finish after any unlink.
+            for path in paths:
+                path.unlink(missing_ok=True)
+            with self._index_lock:
+                self._record_cache.pop((project_id, artifact_id), None)
+                if self._project_index.get(artifact_id) == project_id:
+                    self._project_index.pop(artifact_id, None)
+
     def download_path(self, artifact_id: str) -> str:
         return f"/image/artifacts/{artifact_id}/content"
 
@@ -467,6 +501,9 @@ class ArtifactStore:
 
         lock = self._get_thumb_lock(f"{rec.sha256}_{edge}")
         with lock:
+            # A queued preview may have read metadata before import deletion.
+            # Recheck after the shared lock, including partial cleanup failures.
+            rec = self.get(artifact_id, project_id)
             try:
                 if target.is_file() and target.stat().st_size > 0:
                     return target, etag
