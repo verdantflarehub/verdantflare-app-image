@@ -35,6 +35,7 @@ from .dashboard import (
 )
 from .faceswap import handle_faceswap
 from .imports import LIMITS as IMPORT_LIMITS, ImportStore
+from .result_read import read_result
 from .providers.codex import CodexProvider, CodexProviderError, DEFAULT_IMAGE_MODEL
 from .providers.gemini import DEFAULT_GEMINI_MODEL, GeminiProvider, GeminiProviderError
 from .providers.moss import DEFAULT_MOSS_MODEL
@@ -979,6 +980,10 @@ async def artifact_thumbnail(request: Request) -> Response:
     return await api_artifact_thumbnail(request)
 
 
+async def internal_read_result(request: Request) -> JSONResponse:
+    return await read_result(request, artifacts, _active_ratings(), authority_client)
+
+
 async def internal_clear_rating(request: Request) -> JSONResponse:
     version_id = (request.path_params.get("version_id") or "").strip()
     try:
@@ -1079,7 +1084,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         # 放行健康检查、看板页面（前端自适应 Token 输入与存储）、API（内部鉴权）与产物下载
         if (
-            path in ("/health", "/image/health")
+            path in ("/health", "/image/health", "/internal/results/read")
             or "/dashboard" in path
             or path.startswith("/api/")
             or path.startswith("/image/api/")
@@ -1160,6 +1165,7 @@ app = Starlette(
         Route("/image/artifacts/{artifact_id}/content", artifact_content, methods=["GET", "HEAD"]),
         Route("/artifacts/{artifact_id}/thumbnail", artifact_thumbnail, methods=["GET", "HEAD"]),
         Route("/image/artifacts/{artifact_id}/thumbnail", artifact_thumbnail, methods=["GET", "HEAD"]),
+        Route("/internal/results/read", internal_read_result, methods=["POST"]),
         Route("/internal/content-ratings/{version_id}/clear", internal_clear_rating, methods=["POST"]),
         Route("/image/internal/content-ratings/{version_id}/clear", internal_clear_rating, methods=["POST"]),
         Route("/internal/content-ratings/{version_id}/mark", internal_mark_rating, methods=["POST"]),
