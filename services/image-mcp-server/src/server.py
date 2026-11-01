@@ -266,7 +266,7 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.41"
+SERVICE_VERSION = "v0.2.42"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
