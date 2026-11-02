@@ -2735,6 +2735,7 @@
     async function changeTaskRating(task) {
       if (pendingRatingTasks.has(task.id)) return;
       pendingRatingTasks.add(task.id);
+      galleryTaskKeys.delete(task.id);
       lastTaskStructure = '';
       renderGallery();
       const nextAction = task.isNsfw ? 'clear' : 'mark';
@@ -2761,6 +2762,7 @@
         showTaskActionStatus(`分级未确认保存：${err.message || err}。请刷新确认后再重试。`, true);
       } finally {
         pendingRatingTasks.delete(task.id);
+        galleryTaskKeys.delete(task.id);
         lastTaskStructure = '';
         renderGallery();
       }

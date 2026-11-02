@@ -10,7 +10,7 @@ function setup(requestApi) {
   const dialog = {open:false, returnValue:'', addEventListener(_,f){this.closeHandler=f;}, showModal(){this.open=true;}, close(value){this.returnValue=value;this.open=false;this.closeHandler();}};
   const task = {id:'task-1',isNsfw:false};
   const c = vm.createContext({document:{getElementById:id=>id==='ratingClearDialog'?dialog:status},requestApi,
-    allTasks:[task],taskSyncPromise:null,lastTaskStructure:'old',taskLoadState:'ready',renderGallery(){},async syncBackendTasks(){}});
+    galleryTaskKeys:new Map([['task-1','old']]),allTasks:[task],taskSyncPromise:null,lastTaskStructure:'old',taskLoadState:'ready',renderGallery(){},async syncBackendTasks(){}});
   vm.runInContext(source,c);
   return {c,task,status,dialog};
 }
@@ -20,6 +20,7 @@ test('pending write rejects duplicate click and updates only after receipt',asyn
   const first=c.changeTaskRating(task);
   await c.changeTaskRating(task);
   assert.equal(calls,1);assert.equal(task.isNsfw,false);
+  assert.equal(c.galleryTaskKeys.has(task.id),false);
   assert.equal(vm.runInContext('pendingRatingTasks.has("task-1")',c),true);
   finish({ok:true,content_rating:{rating:'nsfw'}});await first;
   assert.equal(task.isNsfw,true);assert.match(status.textContent,/已标记/);
@@ -40,7 +41,8 @@ test('clear uses page dialog and cancellation sends no write',async()=>{
   const cancel=c.changeTaskRating(task);assert.equal(dialog.open,true);dialog.close('cancel');await cancel;
   assert.equal(calls,0);assert.equal(task.isNsfw,true);
   const clear=c.changeTaskRating(task);dialog.close('confirm');await clear;
-  assert.equal(calls,1);assert.equal(task.isNsfw,false);assert.match(status.textContent,/已移除/);
+  assert.equal(calls,1);assert.equal(task.isNsfw,false);
+  assert.equal(c.galleryTaskKeys.has(task.id),false);assert.match(status.textContent,/已移除/);
 });
 test('saved rating survives an older list and refresh failure is distinguished',async()=>{
   const {c,task,status}=setup(async()=>({ok:true,content_rating:{rating:'nsfw'}}));
