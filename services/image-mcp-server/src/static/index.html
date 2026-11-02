@@ -1670,6 +1670,8 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
+    .card-action-item:disabled { opacity: .55; cursor: wait; }
+    #ratingClearDialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 420px; }
   </style>
 </head>
 <body>
@@ -1759,6 +1761,8 @@
         <button class="chip-btn" data-status="failed" aria-pressed="false">已失败 <span class="chip-count" id="countFailed">0</span></button>
         <span class="task-summary" id="taskSummary">正在读取任务…</span>
       </div>
+      <div class="state-panel" id="taskActionStatus" role="status" aria-live="polite" hidden></div>
+      <dialog id="ratingClearDialog"><form method="dialog"><p>移除 18+ 标记后，关闭显示开关时也能看到这张图片。确认移除？</p><button value="cancel" class="btn">取消</button><button value="confirm" class="btn primary">确认移除</button></form></dialog>
       <div class="state-panel" id="taskState" role="status" aria-live="polite" data-state="loading"><h3>正在加载图像任务…</h3></div>
       <div id="taskTableContainer" hidden></div>
 
@@ -2613,7 +2617,7 @@
           <button type="button" class="card-more-btn" data-menu-toggle="${taskId}" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" title="更多操作">···</button>
           <div class="card-action-menu" data-menu-for="${taskId}" role="menu" hidden>
             <button type="button" class="card-action-item" role="menuitem" data-task-action="edit" data-task-id="${taskId}">编辑</button>
-            <button type="button" class="card-action-item" role="menuitem" data-task-action="toggle-nsfw" data-task-id="${taskId}">${isNsfw ? '移除 18+ 标记' : '标记为 18+ (NSFW)'}</button>
+            <button type="button" class="card-action-item" role="menuitem" data-task-action="toggle-nsfw" data-task-id="${taskId}" ${pendingRatingTasks.has(taskId) ? 'disabled aria-busy="true"' : ''}>${pendingRatingTasks.has(taskId) ? '正在保存…' : isNsfw ? '移除 18+ 标记' : '标记为 18+ (NSFW)'}</button>
             <button type="button" class="card-action-item danger" role="menuitem" data-task-action="delete" data-task-id="${taskId}">删除</button>
           </div>
         </div>
@@ -2712,6 +2716,56 @@
       });
     }
 
+    const pendingRatingTasks = new Set();
+    function showTaskActionStatus(message, error = false) {
+      const node = document.getElementById('taskActionStatus');
+      node.textContent = message;
+      node.setAttribute('role', error ? 'alert' : 'status');
+      node.hidden = false;
+    }
+    function confirmRatingClear() {
+      const dialog = document.getElementById('ratingClearDialog');
+      if (dialog.open) return Promise.resolve(false);
+      return new Promise(resolve => {
+        dialog.returnValue = '';
+        dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), {once:true});
+        dialog.showModal();
+      });
+    }
+    async function changeTaskRating(task) {
+      if (pendingRatingTasks.has(task.id)) return;
+      pendingRatingTasks.add(task.id);
+      lastTaskStructure = '';
+      renderGallery();
+      const nextAction = task.isNsfw ? 'clear' : 'mark';
+      try {
+        if (nextAction === 'clear' && !await confirmRatingClear()) return;
+        showTaskActionStatus('正在保存分级…');
+        const result = await requestApi(`/api/tasks/${encodeURIComponent(task.id)}/content-rating`, {
+          method:'POST', body:{action:nextAction, reason:nextAction === 'mark' ? 'manual_mark_nsfw' : 'manual_clear_nsfw'}
+        });
+        const rating = result?.content_rating?.rating;
+        if (result?.ok !== true || rating !== (nextAction === 'mark' ? 'nsfw' : 'general')) {
+          throw new Error('未取得有效保存回执，请刷新后确认状态');
+        }
+        if (taskSyncPromise) await taskSyncPromise;
+        task = allTasks.find(item => item.id === task.id) || task;
+        task.isNsfw = rating === 'nsfw';
+        task.contentRating = rating;
+        lastTaskStructure = '';
+        renderGallery();
+        await syncBackendTasks(false, true);
+        showTaskActionStatus((nextAction === 'mark' ? '已标记为 18+。关闭本机显示开关时，Image 与试装结果会隐藏。' : '已移除 18+ 标记。') +
+          (taskLoadState === 'error' ? '列表刷新失败，请刷新确认显示状态；无需再次提交标记。' : ''), taskLoadState === 'error');
+      } catch (err) {
+        showTaskActionStatus(`分级未确认保存：${err.message || err}。请刷新确认后再重试。`, true);
+      } finally {
+        pendingRatingTasks.delete(task.id);
+        lastTaskStructure = '';
+        renderGallery();
+      }
+    }
+
     async function handleTaskCardAction(action, taskId) {
       const task = allTasks.find(t => t.id === taskId);
       if (!task) return;
@@ -2730,16 +2784,7 @@
           renderGallery();
           void syncBackendTasks();
         } else if (action === 'toggle-nsfw') {
-          const nextAction = task.isNsfw ? 'clear' : 'mark';
-          await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/content-rating`, {
-            method: 'POST',
-            body: { action: nextAction, reason: nextAction === 'mark' ? 'manual_mark_nsfw' : 'manual_clear_nsfw' }
-          });
-          task.isNsfw = nextAction === 'mark';
-          task.contentRating = task.isNsfw ? 'nsfw' : 'general';
-          lastTaskStructure = '';
-          renderGallery();
-          void syncBackendTasks();
+          await changeTaskRating(task);
         } else if (action === 'delete') {
           if (!window.confirm(`确认删除任务 "${task.title || taskId}"？此操作不可恢复。`)) return;
           await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/delete`, {
@@ -2753,7 +2798,7 @@
           void syncBackendTasks();
         }
       } catch (err) {
-        window.alert(`操作失败：${err.message || err}`);
+        showTaskActionStatus(`操作失败：${err.message || err}`, true);
       }
     }
 
@@ -3571,8 +3616,17 @@
     }) : null;
     taskPageObserver?.observe(document.getElementById('taskPagination'));
 
+    // A rating write must wait for older reads, then request a fresh list.
+    let taskSyncPromise = null;
+    function syncBackendTasks(append = false, force = false) {
+      if (taskSyncPromise) {
+        return force ? taskSyncPromise.then(() => syncBackendTasks(false, true)) : Promise.resolve();
+      }
+      taskSyncPromise = performTaskSync(append).finally(() => { taskSyncPromise = null; });
+      return taskSyncPromise;
+    }
     // Live Tasks Sync
-    async function syncBackendTasks(append = false) {
+    async function performTaskSync(append = false) {
       if (syncingTasks || disposed || document.hidden) return;
       syncingTasks = true;
       document.getElementById('btnRefreshTasks').disabled = true;

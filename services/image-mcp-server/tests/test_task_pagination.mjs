@@ -131,3 +131,14 @@ test('syncBackendTasks populates artifactMediaMap from server-measured specs and
   assert.equal(maxActive, 4);
   assert.equal(order.length, 7, 'duplicate art-0 request must share single in-flight promise');
 });
+
+test('forced refresh waits for the in-flight list and then reads new state',async()=>{
+  const {context:c,replies,calls}=setup();
+  let finish; replies.push(new Promise(r=>finish=r));
+  const old=c.syncBackendTasks();
+  replies.push(page(1,1,1));
+  const fresh=c.syncBackendTasks(false,true);
+  assert.equal(calls.length,1);
+  finish(page(0,1,1));await old;await fresh;
+  assert.equal(calls.length,2);assert.equal(c.allTasks[0].id,'task-1');
+});
