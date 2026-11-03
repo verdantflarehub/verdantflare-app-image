@@ -129,8 +129,16 @@ class TaskStore:
             conn.execute("PRAGMA synchronous=NORMAL;")
             conn.executescript(SCHEMA_SQL)
             conn.executescript(CONTENT_RATING_SCHEMA_SQL)
-            if "phase" not in {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}:
-                conn.execute("ALTER TABLE tasks ADD COLUMN phase TEXT")
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+            if not {"phase", "execution_started_at"}.issubset(columns):
+                conn.execute("BEGIN IMMEDIATE")
+                # Recheck after acquiring the lock: another initializer may
+                # have migrated already. Ordinary reads need no write lock.
+                columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+                for column in ("phase", "execution_started_at"):
+                    if column not in columns:
+                        conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+                conn.commit()
         finally:
             conn.close()
 
@@ -212,18 +220,24 @@ class TaskStore:
     def claim_task(self, task_id: str) -> bool:
         """Only one worker may execute a queued task, across every engine."""
         with self._get_conn() as conn:
+            now = datetime.now(timezone.utc).isoformat()
             changed = conn.execute(
                 "UPDATE tasks SET status='running', phase=CASE WHEN engine='grok' "
                 "AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') != 'grok-channel-v1' "
-                "THEN 'submitting' ELSE phase END, updated_at=? "
+                "THEN 'submitting' ELSE phase END, updated_at=?, "
+                "execution_started_at=COALESCE(execution_started_at, ?) "
                 "WHERE task_id=? AND status='queued'",
-                (datetime.now(timezone.utc).isoformat(), task_id),
+                (now, now, task_id),
             )
             return changed.rowcount == 1
 
     def claim_grok(self, task_id: str) -> bool:
         with self._get_conn() as conn:
-            changed = conn.execute("UPDATE tasks SET status='running', phase='submitting', updated_at=? WHERE task_id=? AND status='queued' AND engine='grok'", (datetime.now(timezone.utc).isoformat(), task_id))
+            now = datetime.now(timezone.utc).isoformat()
+            changed = conn.execute(
+                "UPDATE tasks SET status='running', phase='submitting', updated_at=?, "
+                "execution_started_at=COALESCE(execution_started_at, ?) "
+                "WHERE task_id=? AND status='queued' AND engine='grok'", (now, now, task_id))
             return changed.rowcount == 1
 
     def get(self, task_id: str) -> TaskRecord:
@@ -255,8 +269,9 @@ class TaskStore:
         phase: str | None = None,
     ) -> TaskRecord:
         self.ensure_ready()
-        now = datetime.now(timezone.utc).isoformat()
         with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            now = datetime.now(timezone.utc).isoformat()
             cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
             row = cur.fetchone()
             if not row:
@@ -265,6 +280,18 @@ class TaskStore:
             current_art = artifact_id if artifact_id is not None else row["artifact_id"]
             current_err = error if error is not None else row["error"]
             current_dur = duration_seconds if duration_seconds is not None else row["duration_seconds"]
+            terminal = {"completed", "failed", "canceled"}
+            if (duration_seconds is None and status in terminal and row["status"] not in terminal
+                    and not current_dur):
+                # Includes recovery/collection wait, not supplier execution or GPU use.
+                # Never infer a missing start from created_at or mutable updated_at.
+                try:
+                    started = datetime.fromisoformat(row["execution_started_at"])
+                    ended = datetime.fromisoformat(now)
+                    if started.utcoffset() is not None and ended >= started:
+                        current_dur = (ended - started).total_seconds()
+                except (TypeError, ValueError, OverflowError):
+                    pass
 
             conn.execute(
                 """
@@ -347,7 +374,8 @@ class TaskStore:
                     SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
                     SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
                     SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END) as canceled,
-                    AVG(CASE WHEN status = 'completed' THEN duration_seconds ELSE NULL END) as avg_duration
+                    AVG(CASE WHEN status = 'completed' AND duration_seconds > 0
+                        AND duration_seconds < 1e999 THEN duration_seconds ELSE NULL END) as avg_duration
                 FROM tasks
                 {where_clause}
                 """

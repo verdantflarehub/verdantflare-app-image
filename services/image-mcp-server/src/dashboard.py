@@ -600,6 +600,11 @@ async def api_create_task(request: Request) -> Response:
         params["source_artifact_id"] = source_artifact_id
     if ref_ids:
         params["reference_artifact_ids"] = ref_ids
+    mask_artifact_id = body.get("mask_artifact_id")
+    if mask_artifact_id is not None:
+        if not isinstance(mask_artifact_id, str) or not mask_artifact_id.strip():
+            return JSONResponse({"error": "invalid_mask_artifact_id"}, status_code=400)
+        params["mask_artifact_id"] = mask_artifact_id
     instructions = body.get("instructions")
     if instructions:
         params["instructions"] = str(instructions).strip()
