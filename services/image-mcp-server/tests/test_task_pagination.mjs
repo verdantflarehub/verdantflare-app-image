@@ -10,7 +10,7 @@ function setup() {
   const nodes = new Map();
   const context = vm.createContext({
     document: {hidden:false, getElementById: id => {if (!nodes.has(id)) nodes.set(id,{dataset:{},addEventListener(){}}); return nodes.get(id);}},
-    window:{}, allTasks:[], taskLoadState:'loading', taskLoadError:'', taskPageError:'', taskNextOffset:0,
+    window:{}, taskSearchQuery:'', taskQueryEpoch:0, allTasks:[], taskLoadState:'loading', taskLoadError:'', taskPageError:'', taskNextOffset:0,
     taskPageExhausted:false, taskPageSize:50, taskTotal:0, syncingTasks:false, disposed:false,
     pendingDetailId:'', activeTask:null, artifactBlobMap:new Map(), artifactMediaMap:new Map(),
     requestApi:async url => {calls.push(url); const reply=replies.shift(); if(reply instanceof Error) throw reply; return reply;},
@@ -22,20 +22,36 @@ function setup() {
 }
 const page = (start,count,total=123) => ({total,tasks:Array.from({length:count},(_,i)=>({task_id:`task-${start+i}`,status:'completed'}))});
 
-test('continues beyond first page, retains history on refresh, deduplicates and stops at end',async()=>{
-  const {context:c,calls,replies,nodes}=setup();
+test('manual pages deduplicate, while refresh stays bounded to one page',async()=>{
+  const {context:c,calls,replies}=setup();
   replies.push(page(0,50)); await c.syncBackendTasks();
   replies.push(page(49,50)); await c.loadMoreTasks();
   assert.equal(c.allTasks.length,99);
-  assert.equal(c.taskNextOffset,100);
-  replies.push(page(0,100)); await c.syncBackendTasks();
-  assert.equal(c.allTasks.length,100);
-  assert.equal(calls[2],'/api/tasks?limit=100&offset=0');
-  replies.push(page(100,23)); await c.loadMoreTasks();
-  assert.equal(c.allTasks.length,123);
-  assert.equal(calls[3],'/api/tasks?limit=50&offset=100');
+  replies.push(page(0,50)); await c.syncBackendTasks();
+  assert.equal(c.allTasks.length,50);
+  assert.equal(calls[2],'/api/tasks?limit=50&offset=0');
+  replies.push(page(50,23,73)); await c.loadMoreTasks();
+  assert.equal(c.allTasks.length,73);
   await c.loadMoreTasks(); assert.equal(calls.length,4);
-  assert.equal(nodes.get('btnLoadMoreTasks').hidden,true);
+});
+
+test('search is sent to backend; changed query discards stale response',async()=>{
+  const {context:c,calls,replies}=setup();
+  let finish;
+  c.requestApi = url => { calls.push(url); return new Promise(resolve=>{finish=resolve;}); };
+  c.taskSearchQuery='old';
+  const old=c.syncBackendTasks();
+  c.taskSearchQuery='imgtask-target'; c.taskQueryEpoch++;
+  finish(page(0,50)); await old;
+  assert.equal(c.allTasks.length,0);
+  c.requestApi=async url=>{calls.push(url);return page(99,1,1);};
+  await c.syncBackendTasks();
+  assert.equal(calls[1],'/api/tasks?limit=50&offset=0&q=imgtask-target');
+  assert.equal(c.allTasks.length,1);
+  await c.loadMoreTasks(); assert.equal(calls.length,2);
+  c.taskSearchQuery=''; c.taskQueryEpoch++;
+  await c.syncBackendTasks();
+  assert.equal(calls[2],'/api/tasks?limit=50&offset=0');
 });
 
 test('page failure retains tasks and cursor; manual retry succeeds; concurrent requests are blocked',async()=>{
@@ -141,4 +157,36 @@ test('forced refresh waits for the in-flight list and then reads new state',asyn
   assert.equal(calls.length,1);
   finish(page(0,1,1));await old;await fresh;
   assert.equal(calls.length,2);assert.equal(c.allTasks[0].id,'task-1');
+});
+
+
+test('typing debounces, resets query pages, and empty search restores normal browsing', async()=>{
+  const listeners={}, timers=new Map(); let next=0; const calls=[];
+  const c=vm.createContext({inputSearch:{value:'',addEventListener:(name,fn)=>listeners[name]=fn},
+    taskSearchQuery:'',taskQueryEpoch:0,taskSearchTimer:null,allTasks:[{id:'old'}],taskNextOffset:100,taskTotal:100,
+    taskPageExhausted:true,taskPageError:'old',taskLoadState:'ready', renderGallery(){},
+    setTimeout:fn=>{timers.set(++next,fn);return next;},clearTimeout:id=>timers.delete(id),
+    syncBackendTasks:(...args)=>calls.push(args)});
+  const start=html.indexOf('    inputSearch.addEventListener("input", () => {');
+  const end=html.indexOf('    });',start)+7;
+  vm.runInContext(html.slice(start,end),c);
+  c.inputSearch.value='first';listeners.input();
+  c.inputSearch.value='target';listeners.input();
+  assert.equal(timers.size,1); assert.equal(c.allTasks.length,0);assert.equal(c.taskNextOffset,0);
+  assert.equal(c.taskQueryEpoch,2);
+  [...timers.values()][0](); assert.equal(calls.length,1);
+  c.inputSearch.value=''; listeners.input();assert.equal(c.taskSearchQuery,'');
+});
+
+test('search footer visibility never fetches the next page automatically',async()=>{
+  let callback; const calls=[];
+  class Observer {constructor(fn){callback=fn;}observe(){} }
+  const c=vm.createContext({window:{IntersectionObserver:Observer},IntersectionObserver:Observer,
+    taskSearchQuery:'needle',taskPageError:'',loadMoreTasks:()=>calls.push('next'),
+    document:{getElementById:()=>({})}});
+  const start=html.indexOf('    const taskPageObserver =');
+  const end=html.indexOf('    // A rating write',start);
+  vm.runInContext(html.slice(start,end),c);
+  callback([{isIntersecting:true}]); assert.equal(calls.length,0);
+  c.taskSearchQuery='';callback([{isIntersecting:true}]);assert.equal(calls.length,1);
 });

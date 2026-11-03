@@ -314,6 +314,7 @@ class TaskStore:
         limit: int = 50,
         offset: int = 0,
         include_nsfw: bool = False,
+        q: str | None = None,
     ) -> tuple[list[TaskRecord], int]:
         self.ensure_ready()
         conditions: list[str] = []
@@ -328,6 +329,13 @@ class TaskStore:
         if status:
             conditions.append("status = ?")
             params.append(status)
+        if q and q.strip():
+            # instr is a literal substring match, not SQL LIKE wildcard syntax.
+            text_fields = ["task_id", "project_id", "prompt_preview",
+                           "json_extract(CASE WHEN json_valid(request_params) THEN request_params ELSE '{}' END, '$.prompt')",
+                           "json_extract(CASE WHEN json_valid(request_params) THEN request_params ELSE '{}' END, '$.title')"]
+            conditions.append("(" + " OR ".join(f"instr(lower(COALESCE({field}, '')), lower(?)) > 0" for field in text_fields) + ")")
+            params.extend([q.strip()] * len(text_fields))
         if not include_nsfw:
             conditions.append(
                 "NOT EXISTS (SELECT 1 FROM content_ratings cr "

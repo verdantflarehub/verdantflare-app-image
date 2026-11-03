@@ -2229,6 +2229,7 @@
 
     // Real Tasks Store (Driven purely by /api/tasks backend)
     let allTasks = [];
+    let taskSearchQuery = "", taskQueryEpoch = 0, taskSearchTimer;
     let currentFilter = "all";
     let activeTask = null;
     let modelChannelFilter = "all";
@@ -2574,13 +2575,11 @@
     // Render Gallery & Table (Task Cards: top-left 模型 × [Logo] 渠道, bottom-left 模式码 + 分辨率 + 画幅比 + 格式, bottom-right 查看)
     function renderGallery() {
       updateTaskPagination();
-      const q = inputSearch.value.trim().toLowerCase();
       const filtered = allTasks.filter(t => {
         if (currentFilter !== "all" && t.status !== currentFilter) return false;
         if (filterModel.value && t.model !== filterModel.value) return false;
         if (filterEngine.value && t.channelLabel !== filterEngine.value && t.engine !== filterEngine.value) return false;
         if (filterProject.value && t.project !== filterProject.value) return false;
-        if (q && ![t.title, t.prompt, t.id, t.project, t.model, t.channelLabel].some(v => String(v || '').toLowerCase().includes(q))) return false;
         return true;
       });
 
@@ -2598,7 +2597,7 @@
       galleryContainer.setAttribute('aria-busy', taskLoadState === 'loading' ? 'true' : 'false');
       if (state === 'loading') taskState.innerHTML = '<h3>正在加载图像任务…</h3><p>正在读取当前工作区的任务与模型能力。</p>';
       if (state === 'error') taskState.innerHTML = `<h3>任务暂时无法刷新</h3><p>${escapeHtml(taskLoadError)}${allTasks.length ? ' · 下方保留上次读取的任务。' : ''}</p><button class="btn" onclick="syncBackendTasks()">重试</button>`;
-      if (state === 'empty') taskState.innerHTML = `<h3>${allTasks.length ? '没有匹配的任务' : '暂无图像任务'}</h3><p>${allTasks.length ? '请调整状态、模型、渠道或搜索条件。' : '通过 Studio 或 Image MCP 工具提交图像任务后将在此实时显示。'}</p>`;
+      if (state === 'empty') taskState.innerHTML = `<h3>${allTasks.length || taskSearchQuery ? '没有匹配的任务' : '暂无图像任务'}</h3><p>${allTasks.length || taskSearchQuery ? '请调整状态、模型、渠道或搜索条件。' : '通过 Studio 或 Image MCP 工具提交图像任务后将在此实时显示。'}</p>`;
       galleryContainer.hidden = empty || taskView !== 'gallery';
       taskTableContainer.hidden = empty || taskView !== 'table';
       const structure = taskStructureKey(filtered);
@@ -2862,7 +2861,15 @@
       };
     });
 
-    inputSearch.addEventListener("input", renderGallery);
+    inputSearch.addEventListener("input", () => {
+      const query = inputSearch.value.trim();
+      if (query === taskSearchQuery) return;
+      taskSearchQuery = query; taskQueryEpoch++;
+      clearTimeout(taskSearchTimer);
+      allTasks = []; taskNextOffset = 0; taskTotal = 0; taskPageExhausted = false; taskPageError = '';
+      taskLoadState = 'loading'; renderGallery();
+      taskSearchTimer = setTimeout(() => syncBackendTasks(false, true), 300);
+    });
 
     let previewRevision = 0, previewRequestId = 0;
     const previewPending = new Map(), previewFocus = new Map();
@@ -3614,7 +3621,7 @@
     }
     document.getElementById('btnLoadMoreTasks').addEventListener('click', loadMoreTasks);
     const taskPageObserver = window.IntersectionObserver ? new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting) && !taskPageError) void loadMoreTasks();
+      if (!taskSearchQuery && entries.some(entry => entry.isIntersecting) && !taskPageError) void loadMoreTasks();
     }) : null;
     taskPageObserver?.observe(document.getElementById('taskPagination'));
 
@@ -3630,14 +3637,15 @@
     // Live Tasks Sync
     async function performTaskSync(append = false) {
       if (syncingTasks || disposed || document.hidden) return;
+      const queryEpoch = taskQueryEpoch;
       syncingTasks = true;
       document.getElementById('btnRefreshTasks').disabled = true;
       updateTaskPagination();
       try {
         const offset = append ? taskNextOffset : 0;
-        const limit = append ? taskPageSize : Math.max(taskPageSize, taskNextOffset);
-        const tasksRes = await requestApi(`/api/tasks?limit=${limit}&offset=${offset}`);
-        if (disposed) return;
+        const limit = taskPageSize;
+        const tasksRes = await requestApi(`/api/tasks?limit=${limit}&offset=${offset}${taskSearchQuery ? `&q=${encodeURIComponent(taskSearchQuery)}` : ''}`);
+        if (disposed || queryEpoch !== taskQueryEpoch) return;
         if (!Array.isArray(tasksRes?.tasks)) throw new Error('任务响应格式无效');
         loadCapabilities(tasksRes.capabilities);
         if (tasksRes && Array.isArray(tasksRes.tasks)) {
@@ -3732,7 +3740,7 @@
           loadThumbnails();
         }
       } catch (e) {
-        if (disposed) return;
+        if (disposed || queryEpoch !== taskQueryEpoch) return;
         if (append) { taskPageError = e.message || '请重试'; return; }
         taskLoadState = 'error'; taskLoadError = e.message || '连接失败，请重试。';
         document.getElementById('connText').textContent = '连接异常';
@@ -3757,7 +3765,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
     window.addEventListener('pagehide', () => {
       closeHostPreview(); previewFocus.clear(); previewBlobs.clear();
-      disposed = true; taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
+      disposed = true; clearTimeout(taskSearchTimer); taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
       for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
       viewportRequests.clear();
       for (const req of pendingReqs.values()) { clearTimeout(req.timer); req.reject(new Error('页面已关闭')); }

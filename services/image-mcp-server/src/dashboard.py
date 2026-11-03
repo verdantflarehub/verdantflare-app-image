@@ -481,11 +481,18 @@ async def api_list_tasks(request: Request) -> Response:
     project_id = request.query_params.get("project_id")
     engine = request.query_params.get("engine")
     status = request.query_params.get("status")
-    limit = int(request.query_params.get("limit", "50"))
-    offset = int(request.query_params.get("offset", "0"))
+    q = request.query_params.get("q", "").strip()
+    try:
+        limit = int(request.query_params.get("limit", "50"))
+        offset = int(request.query_params.get("offset", "0"))
+        if not 1 <= limit <= 100 or offset < 0 or len(q) > 500:
+            raise ValueError()
+    except ValueError:
+        return JSONResponse({"error": "invalid_query"}, status_code=400)
 
     records, total = tasks_store.list_tasks(
         project_id=project_id,
+        q=q,
         engine=engine,
         status=status,
         limit=limit,
