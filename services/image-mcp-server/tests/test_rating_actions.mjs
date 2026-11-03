@@ -83,3 +83,13 @@ test('a saved NSFW task next submits clear, never another mark',async()=>{
   assert.deepEqual(actions,['mark','clear']);assert.equal(task.isNsfw,false);
   assert.match(html,/isNsfw \? 'SFW' : 'NSFW'/);
 });
+
+
+test('confirmation buttons close dialogs directly without sandbox-blocked form submission',()=>{
+  for(const id of ['ratingClearDialog','taskDeleteDialog']) {
+    const section=html.slice(html.indexOf('<dialog id="'+id+'"'),html.indexOf('</dialog>',html.indexOf('<dialog id="'+id+'"')));
+    assert.ok(!section.includes('<form'));
+    assert.ok(section.includes(".close('cancel')"));
+    assert.ok(section.includes(".close('confirm')"));
+  }
+});

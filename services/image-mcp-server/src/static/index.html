@@ -1763,8 +1763,8 @@
         <span class="task-summary" id="taskSummary">正在读取任务…</span>
       </div>
       <div class="state-panel" id="taskActionStatus" role="status" aria-live="polite" hidden></div>
-      <dialog id="ratingClearDialog"><form method="dialog"><p>设为 SFW？确认后这张图片将作为普通内容显示。</p><button value="cancel" class="btn">取消</button><button value="confirm" class="btn primary">确认</button></form></dialog>
-      <dialog id="taskDeleteDialog" aria-label="删除任务"><form method="dialog"><p>删除这个任务？此操作不可恢复。</p><button value="cancel" class="btn">取消</button><button value="confirm" class="btn primary">确认删除</button></form></dialog>
+      <dialog id="ratingClearDialog"><p>设为 SFW？确认后这张图片将作为普通内容显示。</p><button type="button" onclick="document.getElementById('ratingClearDialog').close('cancel')" class="btn">取消</button><button type="button" onclick="document.getElementById('ratingClearDialog').close('confirm')" class="btn primary">确认</button></dialog>
+      <dialog id="taskDeleteDialog" aria-label="删除任务"><p>删除这个任务？此操作不可恢复。</p><button type="button" onclick="document.getElementById('taskDeleteDialog').close('cancel')" class="btn">取消</button><button type="button" onclick="document.getElementById('taskDeleteDialog').close('confirm')" class="btn primary">确认删除</button></dialog>
       <div class="state-panel" id="taskState" role="status" aria-live="polite" data-state="loading"><h3>正在加载图像任务…</h3></div>
       <div id="taskTableContainer" hidden></div>
 
