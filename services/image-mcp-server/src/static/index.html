@@ -1671,7 +1671,8 @@
       *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
     .card-action-item:disabled { opacity: .55; cursor: wait; }
-    #ratingClearDialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 420px; }
+    #ratingClearDialog, #taskDeleteDialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 420px; }
+    #taskActionStatus { position: fixed; bottom: 20px; right: 20px; z-index: 1000; width: min(400px, calc(100vw - 40px)); padding: 12px 16px; margin: 0; box-shadow: 0 4px 20px #0002; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -1762,7 +1763,8 @@
         <span class="task-summary" id="taskSummary">正在读取任务…</span>
       </div>
       <div class="state-panel" id="taskActionStatus" role="status" aria-live="polite" hidden></div>
-      <dialog id="ratingClearDialog"><form method="dialog"><p>移除 18+ 标记后，关闭显示开关时也能看到这张图片。确认移除？</p><button value="cancel" class="btn">取消</button><button value="confirm" class="btn primary">确认移除</button></form></dialog>
+      <dialog id="ratingClearDialog"><form method="dialog"><p>设为 SFW？确认后这张图片将作为普通内容显示。</p><button value="cancel" class="btn">取消</button><button value="confirm" class="btn primary">确认</button></form></dialog>
+      <dialog id="taskDeleteDialog" aria-label="删除任务"><form method="dialog"><p>删除这个任务？此操作不可恢复。</p><button value="cancel" class="btn">取消</button><button value="confirm" class="btn primary">确认删除</button></form></dialog>
       <div class="state-panel" id="taskState" role="status" aria-live="polite" data-state="loading"><h3>正在加载图像任务…</h3></div>
       <div id="taskTableContainer" hidden></div>
 
@@ -2616,7 +2618,7 @@
           <button type="button" class="card-more-btn" data-menu-toggle="${taskId}" aria-label="更多操作" aria-haspopup="menu" aria-expanded="false" title="更多操作">···</button>
           <div class="card-action-menu" data-menu-for="${taskId}" role="menu" hidden>
             <button type="button" class="card-action-item" role="menuitem" data-task-action="edit" data-task-id="${taskId}">编辑</button>
-            <button type="button" class="card-action-item" role="menuitem" data-task-action="toggle-nsfw" data-task-id="${taskId}" ${pendingRatingTasks.has(taskId) ? 'disabled aria-busy="true"' : ''}>${pendingRatingTasks.has(taskId) ? '正在保存…' : isNsfw ? '移除 18+ 标记' : '标记为 18+ (NSFW)'}</button>
+            <button type="button" class="card-action-item" role="menuitem" data-task-action="toggle-nsfw" data-task-id="${taskId}" ${pendingRatingTasks.has(taskId) ? 'disabled aria-busy="true"' : ''}>${pendingRatingTasks.has(taskId) ? '正在保存…' : isNsfw ? 'SFW' : 'NSFW'}</button>
             <button type="button" class="card-action-item danger" role="menuitem" data-task-action="delete" data-task-id="${taskId}">删除</button>
           </div>
         </div>
@@ -2715,12 +2717,16 @@
       });
     }
 
+    const pendingDeleteTasks = new Set();
     const pendingRatingTasks = new Set();
+    let taskActionStatusTimer;
     function showTaskActionStatus(message, error = false) {
       const node = document.getElementById('taskActionStatus');
       node.textContent = message;
       node.setAttribute('role', error ? 'alert' : 'status');
       node.hidden = false;
+      clearTimeout(taskActionStatusTimer);
+      if (!error) taskActionStatusTimer = setTimeout(() => { node.hidden = true; }, 4000);
     }
     function confirmRatingClear() {
       const dialog = document.getElementById('ratingClearDialog');
@@ -2755,7 +2761,7 @@
         lastTaskStructure = '';
         renderGallery();
         await syncBackendTasks(false, true);
-        showTaskActionStatus((nextAction === 'mark' ? '已标记为 18+。关闭本机显示开关时，Image 与试装结果会隐藏。' : '已移除 18+ 标记。') +
+        showTaskActionStatus((nextAction === 'mark' ? '已设为 NSFW' : '已设为 SFW') +
           (taskLoadState === 'error' ? '列表刷新失败，请刷新确认显示状态；无需再次提交标记。' : ''), taskLoadState === 'error');
       } catch (err) {
         showTaskActionStatus(`分级未确认保存：${err.message || err}。请刷新确认后再重试。`, true);
@@ -2765,6 +2771,33 @@
         lastTaskStructure = '';
         renderGallery();
       }
+    }
+
+    function confirmTaskDelete() {
+      const dialog = document.getElementById('taskDeleteDialog');
+      if (dialog.open) return Promise.resolve(false);
+      return new Promise(resolve => {
+        dialog.returnValue = '';
+        dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), {once:true});
+        dialog.showModal();
+      });
+    }
+    async function deleteTask(taskId) {
+      if (pendingDeleteTasks.has(taskId)) return;
+      pendingDeleteTasks.add(taskId);
+      try {
+        if (!await confirmTaskDelete()) return;
+        const result = await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/delete`, {method:'POST', body:{}});
+        if (result?.ok !== true || result?.deleted !== true || result?.task_id !== taskId) throw new Error('未取得删除回执');
+        if (taskSyncPromise) await taskSyncPromise;
+        allTasks = allTasks.filter(t => t.id !== taskId);
+        taskTotal = Math.max(0, taskTotal - 1);
+        lastTaskStructure = ''; renderGallery();
+        showTaskActionStatus('已删除任务');
+        await syncBackendTasks(false, true);
+        if (taskLoadState === 'error') showTaskActionStatus('任务已删除，列表刷新失败，请重试刷新。', true);
+      } catch (err) { showTaskActionStatus(`删除失败：${err.message || err}`, true); }
+      finally { pendingDeleteTasks.delete(taskId); }
     }
 
     async function handleTaskCardAction(action, taskId) {
@@ -2787,16 +2820,7 @@
         } else if (action === 'toggle-nsfw') {
           await changeTaskRating(task);
         } else if (action === 'delete') {
-          if (!window.confirm(`确认删除任务 "${task.title || taskId}"？此操作不可恢复。`)) return;
-          await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/delete`, {
-            method: 'POST',
-            body: {}
-          });
-          allTasks = allTasks.filter(t => t.id !== taskId);
-          taskTotal = Math.max(0, taskTotal - 1);
-          lastTaskStructure = '';
-          renderGallery();
-          void syncBackendTasks();
+          await deleteTask(taskId);
         }
       } catch (err) {
         showTaskActionStatus(`操作失败：${err.message || err}`, true);
@@ -3765,7 +3789,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
     window.addEventListener('pagehide', () => {
       closeHostPreview(); previewFocus.clear(); previewBlobs.clear();
-      disposed = true; clearTimeout(taskSearchTimer); taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
+      disposed = true; clearTimeout(taskActionStatusTimer); clearTimeout(taskSearchTimer); taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
       for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
       viewportRequests.clear();
       for (const req of pendingReqs.values()) { clearTimeout(req.timer); req.reject(new Error('页面已关闭')); }
