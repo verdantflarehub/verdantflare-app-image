@@ -6,11 +6,11 @@ import {test} from 'node:test';
 const html = await readFile(new URL('../src/static/index.html', import.meta.url), 'utf8');
 const source = html.slice(html.indexOf('    const pendingRatingTasks'), html.indexOf('    async function handleTaskCardAction'));
 function setup(requestApi) {
-  const status = {setAttribute(k,v){this[k]=v;}};
+  const status = {style:{},setAttribute(k,v){this[k]=v;}};
   const dialog = {open:false, returnValue:'', addEventListener(_,f){this.closeHandler=f;}, showModal(){this.open=true;}, close(value){this.returnValue=value;this.open=false;this.closeHandler();}};
   const task = {id:'task-1',isNsfw:false};
   const c = vm.createContext({document:{getElementById:id=>['ratingClearDialog','taskDeleteDialog'].includes(id)?dialog:status},requestApi,
-    setTimeout:()=>1,clearTimeout(){},pendingDeleteTasks:new Set(),taskTotal:1,galleryTaskKeys:new Map([['task-1','old']]),allTasks:[task],taskSyncPromise:null,lastTaskStructure:'old',taskLoadState:'ready',renderGallery(){},async syncBackendTasks(){}});
+    visibleContentTop:async()=>0,isEmbedded:false,setTimeout:()=>1,clearTimeout(){},pendingDeleteTasks:new Set(),taskTotal:1,galleryTaskKeys:new Map([['task-1','old']]),allTasks:[task],taskSyncPromise:null,lastTaskStructure:'old',taskLoadState:'ready',renderGallery(){},async syncBackendTasks(){}});
   vm.runInContext(source,c);
   return {c,task,status,dialog};
 }

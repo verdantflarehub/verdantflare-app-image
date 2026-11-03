@@ -1672,7 +1672,7 @@
     }
     .card-action-item:disabled { opacity: .55; cursor: wait; }
     #ratingClearDialog, #taskDeleteDialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 420px; }
-    #taskActionStatus { position: fixed; bottom: 20px; right: 20px; z-index: 1000; width: min(400px, calc(100vw - 40px)); padding: 12px 16px; margin: 0; box-shadow: 0 4px 20px #0002; pointer-events: none; }
+    #taskActionStatus { position: fixed; top: 16px; right: 20px; z-index: 1000; width: min(400px, calc(100vw - 40px)); padding: 12px 16px; margin: 0; box-shadow: 0 4px 20px #0002; pointer-events: none; }
   </style>
 </head>
 <body>
@@ -2725,6 +2725,9 @@
       node.textContent = message;
       node.setAttribute('role', error ? 'alert' : 'status');
       node.hidden = false;
+      void visibleContentTop().then(top => {
+        if (node.textContent === message && !node.hidden) node.style.top = `${(isEmbedded ? top : 0) + 16}px`;
+      });
       clearTimeout(taskActionStatusTimer);
       if (!error) taskActionStatusTimer = setTimeout(() => { node.hidden = true; }, 4000);
     }
