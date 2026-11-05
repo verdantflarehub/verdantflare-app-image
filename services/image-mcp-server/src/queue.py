@@ -492,6 +492,47 @@ class TaskQueueManager:
                     # Read/collection failure never re-enqueues a generation POST.
                     pass
 
+    def _recover_channel_unknown(self, rec: TaskRecord) -> None:
+        runtime = rec.request_params.get("channel_runtime")
+        channel_name, channel = {
+            "google-channel-v1": ("google", self.google_channel),
+            "grok-channel-v1": ("grok", self.grok_channel),
+            "chatgpt-channel-v1": ("chatgpt", self.chatgpt_channel),
+        }.get(runtime, ("unknown", None))
+        if channel is None:
+            return
+        org = (rec.request_params.get("channel_authority") or {}).get("organization_id")
+        if not org and self.google_authorize is not None:
+            actor = self.google_authorize(rec.project_id, rec.request_params.get("channel_authority"))
+            org = actor.get("organization_id")
+        if not org:
+            return
+        result = channel.recover(org, rec.task_id, rec.task_id)
+        if result.get("state") == "completed" and result.get("accepted") is True:
+            self.tasks.update_status(rec.task_id, "running", phase="collecting")
+            data, media_type = channel.result(org, rec.task_id, result["call_id"])
+            extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[media_type]
+            artifact = self.artifacts.create_from_bytes(
+                project_id=rec.project_id,
+                artifact_id="art-" + hashlib.sha256(rec.task_id.encode()).hexdigest()[:16],
+                filename=rec.task_id + extension,
+                data=data,
+                media_type=media_type,
+                metadata={
+                    "engine": rec.engine,
+                    "channel": channel_name,
+                    "channel_call_id": result["call_id"],
+                    "task_id": rec.task_id,
+                },
+            )
+            self.tasks.update_status(
+                rec.task_id,
+                "completed",
+                artifact_id=artifact.artifact_id,
+                error="",
+                phase="completed",
+            )
+
     def cleanup_tasks(self, *, clean_unknown: bool = True, clean_failed: bool = False) -> dict[str, Any]:
         recovered_ids: list[str] = []
         cleaned_unknown_ids: list[str] = []
@@ -508,16 +549,7 @@ class TaskQueueManager:
                 runtime = rec.request_params.get("channel_runtime")
                 if runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1"}:
                     try:
-                        self._execute_channel(
-                            TaskJob(
-                                rec.task_id,
-                                rec.project_id,
-                                rec.engine,
-                                rec.request_params.get("action", "generate"),
-                                rec.request_params,
-                            ),
-                            True,
-                        )
+                        self._recover_channel_unknown(rec)
                     except Exception:
                         pass
                 elif rec.engine == "grok" and self._grok_journal(rec.task_id).with_suffix(".json").exists():
