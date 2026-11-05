@@ -104,12 +104,10 @@ class TaskQueueManager:
         if recovered > 0:
             print(f"⚠️ [TaskQueue] 保留 {recovered} 个原调用结果未知的任务；未重新提交")
 
-        # 2. 启动 Worker 协程池
+        # 2. 启动 Worker 协程池（移除 15s 后台定时轮询 _collect_grok / _collect_channels，改为手动统一清理）
         for i in range(self.worker_count):
             task = asyncio.create_task(self._worker_loop(i))
             self._worker_tasks.append(task)
-        self._worker_tasks.append(asyncio.create_task(self._collect_grok()))
-        self._worker_tasks.append(asyncio.create_task(self._collect_channels()))
         self._worker_tasks.append(asyncio.create_task(self._idle_moss()))
 
         # 3. 恢复历史未消费的 queued 任务
@@ -493,6 +491,107 @@ class TaskQueueManager:
                 except Exception:
                     # Read/collection failure never re-enqueues a generation POST.
                     pass
+
+    def cleanup_tasks(self, *, clean_unknown: bool = True, clean_failed: bool = False) -> dict[str, Any]:
+        recovered_ids: list[str] = []
+        cleaned_unknown_ids: list[str] = []
+        cleaned_failed_ids: list[str] = []
+
+        if clean_unknown:
+            running_records, _ = self.tasks.list_tasks(status="running", limit=10000, include_nsfw=True)
+            unknown_records = [
+                rec for rec in running_records
+                if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown"
+            ]
+            still_unknown: list[TaskRecord] = []
+            for rec in unknown_records:
+                runtime = rec.request_params.get("channel_runtime")
+                if runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1"}:
+                    try:
+                        self._execute_channel(
+                            TaskJob(
+                                rec.task_id,
+                                rec.project_id,
+                                rec.engine,
+                                rec.request_params.get("action", "generate"),
+                                rec.request_params,
+                            ),
+                            True,
+                        )
+                    except Exception:
+                        pass
+                elif rec.engine == "grok" and self._grok_journal(rec.task_id).with_suffix(".json").exists():
+                    try:
+                        self._execute_grok(
+                            TaskJob(
+                                rec.task_id,
+                                rec.project_id,
+                                rec.engine,
+                                rec.request_params.get("action", "generate"),
+                                rec.request_params,
+                            )
+                        )
+                    except Exception:
+                        pass
+
+                refreshed = self.tasks.get(rec.task_id)
+                if refreshed.status == "completed":
+                    recovered_ids.append(rec.task_id)
+                else:
+                    still_unknown.append(refreshed)
+
+            by_channel_org: dict[tuple[str, str], list[str]] = {}
+            for rec in still_unknown:
+                runtime = rec.request_params.get("channel_runtime")
+                if runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1"}:
+                    org = (rec.request_params.get("channel_authority") or {}).get("organization_id")
+                    if org:
+                        by_channel_org.setdefault((runtime, org), []).append(rec.task_id)
+
+            for (runtime, org), op_ids in by_channel_org.items():
+                channel = {
+                    "google-channel-v1": self.google_channel,
+                    "grok-channel-v1": self.grok_channel,
+                    "chatgpt-channel-v1": self.chatgpt_channel,
+                }.get(runtime)
+                if channel is not None and hasattr(channel, "cleanup_unknown"):
+                    try:
+                        channel.cleanup_unknown(org, op_ids)
+                    except Exception:
+                        pass
+
+            for rec in still_unknown:
+                try:
+                    journal = self._grok_journal(rec.task_id)
+                    for p in (journal, journal.with_suffix(".json"), journal.with_suffix(".part"), journal.with_suffix(".tmp")):
+                        if p.exists():
+                            p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                try:
+                    self.tasks.delete_task(rec.task_id)
+                    cleaned_unknown_ids.append(rec.task_id)
+                except Exception:
+                    pass
+
+        if clean_failed:
+            failed_records, _ = self.tasks.list_tasks(status="failed", limit=10000, include_nsfw=True)
+            for rec in failed_records:
+                try:
+                    self.tasks.delete_task(rec.task_id)
+                    cleaned_failed_ids.append(rec.task_id)
+                except Exception:
+                    pass
+
+        return {
+            "ok": True,
+            "recovered_count": len(recovered_ids),
+            "cleaned_unknown_count": len(cleaned_unknown_ids),
+            "cleaned_failed_count": len(cleaned_failed_ids),
+            "recovered_task_ids": recovered_ids,
+            "cleaned_unknown_task_ids": cleaned_unknown_ids,
+            "cleaned_failed_task_ids": cleaned_failed_ids,
+        }
 
     def _grok_journal(self, task_id):
         root = self.tasks.db_path.parent / ".grok-results"

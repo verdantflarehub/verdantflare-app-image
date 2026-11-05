@@ -23,6 +23,7 @@ from .content_rating import ContentRatingError, ContentRatingStore, include_nsfw
 from .dashboard import (
     api_artifact_content,
     api_artifact_thumbnail,
+    api_cleanup_tasks,
     api_create_task,
     api_delete_task,
     api_get_task,
@@ -1149,6 +1150,8 @@ app = Starlette(
         Route("/image/api/tasks", api_create_task, methods=["POST"]),
         Route("/api/tasks/stats", api_task_stats, methods=["GET"]),
         Route("/image/api/tasks/stats", api_task_stats, methods=["GET"]),
+        Route("/api/tasks/cleanup", api_cleanup_tasks, methods=["POST"]),
+        Route("/image/api/tasks/cleanup", api_cleanup_tasks, methods=["POST"]),
         Route("/api/tasks/{task_id}/title", api_update_task_title, methods=["POST"]),
         Route("/image/api/tasks/{task_id}/title", api_update_task_title, methods=["POST"]),
         Route("/api/tasks/{task_id}/delete", api_delete_task, methods=["POST"]),

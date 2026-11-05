@@ -36,7 +36,7 @@ class ImageChannel:
             with self.client.stream(method, self.endpoint + path, headers={
                 'Authorization': 'Bearer ' + self.token,
                 'X-Organization-ID': organization, 'X-Caller-ID': 'image-mcp',
-            }, json=payload, timeout=200, follow_redirects=False) as response:
+            }, json=payload, timeout=320, follow_redirects=False) as response:
                 # Do not trust arbitrary HTTP failures as proof of non-acceptance.
                 if response.status_code != 200:
                     raise ChannelUnavailable('channel_response_unavailable')
@@ -77,6 +77,10 @@ class ImageChannel:
     def recover(self, organization, task_id, operation_id):
         return self._status(self._request('GET', '/v1/calls/by-idempotency/' +
                            quote(operation_id, safe=''), organization), task_id)
+
+    def cleanup_unknown(self, organization, operation_ids=None):
+        payload = {'operation_ids': list(operation_ids)} if operation_ids is not None else {}
+        return self._request('POST', '/v1/calls/cleanup-unknown', organization, payload)
 
     def capabilities(self, organization='system-capabilities'):
         value = self._request('GET', '/v1/capabilities', organization)

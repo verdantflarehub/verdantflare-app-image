@@ -862,12 +862,77 @@ async def api_update_task_title(request: Request) -> Response:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
+async def api_cleanup_tasks(request: Request) -> Response:
+    if not check_auth(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json() if await request.body() else {}
+    except Exception:
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "invalid_json"}, status_code=400)
+    clean_unknown = bool(body.get("clean_unknown", True))
+    clean_failed = bool(body.get("clean_failed", False))
+    if not clean_unknown and not clean_failed:
+        return JSONResponse({"error": "empty_cleanup_selection"}, status_code=400)
+    queue_mgr = getattr(request.app.state, "queue_manager", None)
+    if queue_mgr is not None and hasattr(queue_mgr, "cleanup_tasks"):
+        result = await asyncio.to_thread(
+            queue_mgr.cleanup_tasks,
+            clean_unknown=clean_unknown,
+            clean_failed=clean_failed,
+        )
+        return JSONResponse(result)
+    tasks_store: TaskStore = request.app.state.tasks
+    cleaned_unknown_ids: list[str] = []
+    cleaned_failed_ids: list[str] = []
+    if clean_unknown:
+        running_records, _ = tasks_store.list_tasks(status="running", limit=10000, include_nsfw=True)
+        for rec in running_records:
+            if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown":
+                tasks_store.delete_task(rec.task_id)
+                cleaned_unknown_ids.append(rec.task_id)
+    if clean_failed:
+        failed_records, _ = tasks_store.list_tasks(status="failed", limit=10000, include_nsfw=True)
+        for rec in failed_records:
+            tasks_store.delete_task(rec.task_id)
+            cleaned_failed_ids.append(rec.task_id)
+    return JSONResponse({
+        "ok": True,
+        "recovered_count": 0,
+        "cleaned_unknown_count": len(cleaned_unknown_ids),
+        "cleaned_failed_count": len(cleaned_failed_ids),
+        "recovered_task_ids": [],
+        "cleaned_unknown_task_ids": cleaned_unknown_ids,
+        "cleaned_failed_task_ids": cleaned_failed_ids,
+    })
+
+
 async def api_delete_task(request: Request) -> Response:
     if not check_auth(request):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     task_id = str(request.path_params.get("task_id", "")).strip()
+    if task_id == "_cleanup":
+        return await api_cleanup_tasks(request)
     try:
-        request.app.state.tasks.delete_task(task_id)
+        tasks_store: TaskStore = request.app.state.tasks
+        rec = tasks_store.get(task_id)
+        if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown":
+            queue_mgr = getattr(request.app.state, "queue_manager", None)
+            runtime = rec.request_params.get("channel_runtime")
+            org = (rec.request_params.get("channel_authority") or {}).get("organization_id")
+            if queue_mgr is not None and runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1"} and org:
+                channel = {
+                    "google-channel-v1": queue_mgr.google_channel,
+                    "grok-channel-v1": queue_mgr.grok_channel,
+                    "chatgpt-channel-v1": queue_mgr.chatgpt_channel,
+                }.get(runtime)
+                if channel is not None and hasattr(channel, "cleanup_unknown"):
+                    try:
+                        await asyncio.to_thread(channel.cleanup_unknown, org, [task_id])
+                    except Exception:
+                        pass
+        tasks_store.delete_task(task_id)
         return JSONResponse({"ok": True, "deleted": True, "task_id": task_id})
     except TaskNotFound:
         return JSONResponse({"error": "not_found"}, status_code=404)

@@ -1671,7 +1671,28 @@
       *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
     .card-action-item:disabled { opacity: .55; cursor: wait; }
-    #ratingClearDialog, #taskDeleteDialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 420px; }
+    #ratingClearDialog, #taskDeleteDialog, #zombieCleanupDialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-width: 460px; width: min(460px, 92vw); padding: 20px 22px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28); }
+    #zombieCleanupDialog::backdrop { background: rgba(15, 23, 19, 0.45); backdrop-filter: blur(3px); }
+    .btn.amber-cleanup { border-color: rgba(173, 106, 20, 0.36); background: rgba(173, 106, 20, 0.11); color: var(--amber, #ad6a14); font-weight: 700; }
+    .btn.amber-cleanup:hover:not(:disabled) { background: rgba(173, 106, 20, 0.18); }
+    .chip-btn.amber-chip { border-color: rgba(173, 106, 20, 0.36); color: var(--amber, #ad6a14); background: rgba(173, 106, 20, 0.11); }
+    .chip-btn.amber-chip.active { background: var(--amber, #ad6a14); color: #fff; border-color: var(--amber, #ad6a14); }
+    .cleanup-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .cleanup-dialog-head h3 { font-size: 15px; font-weight: 700; margin: 0; }
+    .cleanup-dialog-desc { font-size: 12px; color: var(--muted); line-height: 1.55; margin: 0 0 12px; }
+    .cleanup-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+    .cleanup-check-card { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--subtle); cursor: pointer; user-select: none; }
+    .cleanup-check-card.checked-amber { border-color: rgba(173, 106, 20, 0.36); background: rgba(173, 106, 20, 0.11); }
+    .cleanup-check-card.checked-danger { border-color: rgba(193, 74, 54, 0.36); background: rgba(193, 74, 54, 0.1); }
+    .cleanup-check-card input[type="checkbox"] { margin-top: 2px; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+    .cleanup-check-body { flex: 1; min-width: 0; }
+    .cleanup-check-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+    .cleanup-check-title { font-size: 13px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+    .cleanup-default-pill { font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: rgba(173, 106, 20, 0.14); color: var(--amber, #ad6a14); }
+    .cleanup-check-sub { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+    .cleanup-dialog-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .cleanup-dialog-hint { font-size: 11.5px; color: var(--muted); }
+    .cleanup-dialog-btns { display: flex; gap: 8px; }
     #taskActionStatus { position: fixed; top: 16px; right: 20px; z-index: 1000; width: min(400px, calc(100vw - 40px)); padding: 12px 16px; margin: 0; box-shadow: 0 4px 20px #0002; pointer-events: none; }
   </style>
 </head>
@@ -1751,6 +1772,7 @@
             <button type="button" data-view="gallery" aria-pressed="true">画廊</button>
             <button type="button" data-view="table" aria-pressed="false">表格</button>
           </div>
+          <button class="btn" id="btnCleanupZombies" type="button" disabled>清理</button>
           <button class="btn" id="btnRefreshTasks">刷新</button>
         </div>
       </div>
@@ -1758,6 +1780,7 @@
         <button class="chip-btn active" data-status="all" aria-pressed="true">全部 <span class="chip-count" id="countAll">0</span></button>
         <button class="chip-btn" data-status="succeeded" aria-pressed="false">已完成 <span class="chip-count" id="countSucceeded">0</span></button>
         <button class="chip-btn" data-status="running" aria-pressed="false">生成中 <span class="chip-count" id="countRunning">0</span></button>
+        <button class="chip-btn" data-status="zombie" id="chipZombie" aria-pressed="false">待核对 <span class="chip-count" id="countZombie">0</span></button>
         <button class="chip-btn" data-status="queued" aria-pressed="false">排队中 <span class="chip-count" id="countQueued">0</span></button>
         <button class="chip-btn" data-status="failed" aria-pressed="false">已失败 <span class="chip-count" id="countFailed">0</span></button>
         <span class="task-summary" id="taskSummary">正在读取任务…</span>
@@ -1765,6 +1788,41 @@
       <div class="state-panel" id="taskActionStatus" role="status" aria-live="polite" hidden></div>
       <dialog id="ratingClearDialog"><p>设为 SFW？确认后这张图片将作为普通内容显示。</p><button type="button" onclick="document.getElementById('ratingClearDialog').close('cancel')" class="btn">取消</button><button type="button" onclick="document.getElementById('ratingClearDialog').close('confirm')" class="btn primary">确认</button></dialog>
       <dialog id="taskDeleteDialog" aria-label="删除任务"><p>删除这个任务？此操作不可恢复。</p><button type="button" onclick="document.getElementById('taskDeleteDialog').close('cancel')" class="btn">取消</button><button type="button" onclick="document.getElementById('taskDeleteDialog').close('confirm')" class="btn primary">确认删除</button></dialog>
+      <dialog id="zombieCleanupDialog" aria-labelledby="zombieDialogTitle">
+        <div class="cleanup-dialog-head">
+          <h3 id="zombieDialogTitle">清理任务</h3>
+        </div>
+        <p class="cleanup-dialog-desc">请选择需要批量统一清理的任务类别：</p>
+        <div class="cleanup-options">
+          <label class="cleanup-check-card checked-amber" id="cardCheckUnknown">
+            <input type="checkbox" id="chkCleanUnknown" checked onchange="syncCleanupDialogState()"/>
+            <div class="cleanup-check-body">
+              <div class="cleanup-check-top">
+                <span class="cleanup-check-title">待核对任务 <span class="cleanup-default-pill">默认勾选</span></span>
+                <span class="tag-badge amber num" id="badgeUnknownCount">0 项</span>
+              </div>
+              <div class="cleanup-check-sub">向渠道批量核对结果：若实际已出图则自动追回为「已完成」；若无结果或连接已断开，释放冻结的预留预算并清理移除。</div>
+            </div>
+          </label>
+          <label class="cleanup-check-card" id="cardCheckFailed">
+            <input type="checkbox" id="chkCleanFailed" onchange="syncCleanupDialogState()"/>
+            <div class="cleanup-check-body">
+              <div class="cleanup-check-top">
+                <span class="cleanup-check-title">已失败任务</span>
+                <span class="tag-badge danger num" id="badgeFailedCount">0 项</span>
+              </div>
+              <div class="cleanup-check-sub">一并批量清理移除列表中所有「已失败」的任务记录，保持画廊整洁。</div>
+            </div>
+          </label>
+        </div>
+        <div class="cleanup-dialog-foot">
+          <span class="cleanup-dialog-hint num" id="dialogSelectedSummary">已选 1 类 · 共 0 项待清理</span>
+          <div class="cleanup-dialog-btns">
+            <button type="button" class="btn" onclick="closeCleanupModal()">取消</button>
+            <button type="button" class="btn primary" id="btnConfirmCleanup" onclick="executeCleanupTasks()">确认</button>
+          </div>
+        </div>
+      </dialog>
       <div class="state-panel" id="taskState" role="status" aria-live="polite" data-state="loading"><h3>正在加载图像任务…</h3></div>
       <div id="taskTableContainer" hidden></div>
 
@@ -2576,23 +2634,46 @@
       return { maxImages: 8, maxMasks: 1, maxFaces: 1, maxSize: '50 MB' };
     }
 
+    function isZombieTask(t) {
+      return t.phase === 'submission_unknown' || t.phase === 'collect_retry';
+    }
+
     // Render Gallery & Table (Task Cards: top-left 模型 × [Logo] 渠道, bottom-left 模式码 + 分辨率 + 画幅比 + 格式, bottom-right 查看)
     function renderGallery() {
       updateTaskPagination();
       const filtered = allTasks.filter(t => {
-        if (currentFilter !== "all" && t.status !== currentFilter) return false;
+        if (currentFilter === "zombie") {
+          if (!isZombieTask(t)) return false;
+        } else if (currentFilter === "running") {
+          if (t.status !== "running" || isZombieTask(t)) return false;
+        } else if (currentFilter !== "all" && t.status !== currentFilter) {
+          return false;
+        }
         if (filterModel.value && t.model !== filterModel.value) return false;
         if (filterEngine.value && t.channelLabel !== filterEngine.value && t.engine !== filterEngine.value) return false;
         if (filterProject.value && t.project !== filterProject.value) return false;
         return true;
       });
 
+      const zombieCount = allTasks.filter(isZombieTask).length;
+      const runningCount = allTasks.filter(t => t.status === "running" && !isZombieTask(t)).length;
+      const failedCount = allTasks.filter(t => t.status === 'failed').length;
+
       document.getElementById("countAll").textContent = allTasks.length;
       document.getElementById("countSucceeded").textContent = allTasks.filter(t => t.status === "succeeded").length;
-      document.getElementById("countRunning").textContent = allTasks.filter(t => t.status === "running").length;
+      document.getElementById("countRunning").textContent = runningCount;
+      const countZombieEl = document.getElementById("countZombie");
+      if (countZombieEl) countZombieEl.textContent = zombieCount;
+      const chipZombieEl = document.getElementById("chipZombie");
+      if (chipZombieEl) chipZombieEl.classList.toggle("amber-chip", zombieCount > 0);
       document.getElementById("countQueued").textContent = allTasks.filter(t => t.status === "queued").length;
 
-      document.getElementById('countFailed').textContent = allTasks.filter(t => t.status === 'failed').length;
+      document.getElementById('countFailed').textContent = failedCount;
+      const btnCleanup = document.getElementById('btnCleanupZombies');
+      if (btnCleanup) {
+        btnCleanup.disabled = (zombieCount === 0 && failedCount === 0);
+        btnCleanup.classList.toggle('amber-cleanup', zombieCount > 0);
+      }
       document.getElementById('taskSummary').textContent = `显示 ${filtered.length} / 已加载 ${allTasks.length} 项 · 共 ${taskTotal} 项`;
       const empty = filtered.length === 0;
       const state = taskLoadState === 'loading' ? 'loading' : taskLoadState === 'error' ? 'error' : empty ? 'empty' : 'ready';
@@ -2777,6 +2858,83 @@
         renderGallery();
       }
     }
+
+    function syncCleanupDialogState() {
+      const zombies = allTasks.filter(isZombieTask).length;
+      const failed = allTasks.filter(t => t.status === 'failed').length;
+      const chkUnknown = document.getElementById('chkCleanUnknown');
+      const chkFailed = document.getElementById('chkCleanFailed');
+      if (!chkUnknown || !chkFailed) return;
+
+      document.getElementById('badgeUnknownCount').textContent = `${zombies} 项`;
+      document.getElementById('badgeFailedCount').textContent = `${failed} 项`;
+      document.getElementById('cardCheckUnknown').classList.toggle('checked-amber', chkUnknown.checked);
+      document.getElementById('cardCheckFailed').classList.toggle('checked-danger', chkFailed.checked);
+
+      let types = 0;
+      let total = 0;
+      if (chkUnknown.checked) { types += 1; total += zombies; }
+      if (chkFailed.checked) { types += 1; total += failed; }
+
+      document.getElementById('dialogSelectedSummary').textContent =
+        types > 0 ? `已选 ${types} 类 · 共 ${total} 项待清理` : '请至少勾选一类待清理任务';
+      document.getElementById('btnConfirmCleanup').disabled = total === 0;
+    }
+
+    function openCleanupModal() {
+      const dialog = document.getElementById('zombieCleanupDialog');
+      if (!dialog) return;
+      const zombies = allTasks.filter(isZombieTask).length;
+      const failed = allTasks.filter(t => t.status === 'failed').length;
+      document.getElementById('chkCleanUnknown').checked = zombies > 0;
+      document.getElementById('chkCleanFailed').checked = zombies === 0 && failed > 0;
+      syncCleanupDialogState();
+      if (!dialog.open) dialog.showModal();
+    }
+
+    function closeCleanupModal() {
+      const dialog = document.getElementById('zombieCleanupDialog');
+      if (dialog && dialog.open) dialog.close();
+    }
+
+    async function executeCleanupTasks() {
+      const chkUnknown = Boolean(document.getElementById('chkCleanUnknown')?.checked);
+      const chkFailed = Boolean(document.getElementById('chkCleanFailed')?.checked);
+      if (!chkUnknown && !chkFailed) return;
+      const btnConfirm = document.getElementById('btnConfirmCleanup');
+      if (btnConfirm) {
+        btnConfirm.disabled = true;
+        btnConfirm.textContent = '清理中…';
+      }
+      try {
+        const result = await requestApi('/api/tasks/_cleanup/delete', {
+          method: 'POST',
+          body: { clean_unknown: chkUnknown, clean_failed: chkFailed }
+        });
+        if (result?.ok !== true) throw new Error('未取得有效清理回执');
+        closeCleanupModal();
+        await syncBackendTasks(false, true);
+        const parts = [];
+        if (chkUnknown) {
+          const rec = Number(result.recovered_count || 0);
+          const cln = Number(result.cleaned_unknown_count || 0);
+          parts.push(rec > 0 ? `追回 ${rec} 项、清理 ${cln} 项待核对任务` : `${cln} 项待核对任务（已释放预留预算）`);
+        }
+        if (chkFailed) {
+          parts.push(`${Number(result.cleaned_failed_count || 0)} 项已失败任务`);
+        }
+        showTaskActionStatus(`已统一清理：${parts.join(' + ')}`);
+      } catch (err) {
+        showTaskActionStatus(`清理失败：${err.message || err}`, true);
+      } finally {
+        if (btnConfirm) {
+          btnConfirm.disabled = false;
+          btnConfirm.textContent = '确认';
+        }
+      }
+    }
+
+    document.getElementById('btnCleanupZombies')?.addEventListener('click', openCleanupModal);
 
     function confirmTaskDelete() {
       const dialog = document.getElementById('taskDeleteDialog');

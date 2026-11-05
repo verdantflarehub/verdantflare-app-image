@@ -380,6 +380,97 @@ class TestDashboardStaticHtml(unittest.TestCase):
             html,
             r'(?s)<div class="output-pane">.*?id="inspOutputMeta".*?id="inspPromptBox".*?</div>\s*<div class="input-pane">\s*<!-- 2\. 参考图',
         )
+        self.assertIn('id="btnCleanupZombies"', html)
+        self.assertIn('id="zombieCleanupDialog"', html)
+        self.assertIn('id="chkCleanUnknown"', html)
+        self.assertIn('id="chkCleanFailed"', html)
+        self.assertIn('id="chipZombie"', html)
+
+    def test_cleanup_tasks_api_and_channel_reservation_release(self):
+        import tempfile
+        from pathlib import Path
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.testclient import TestClient as DirectTestClient
+        from src.artifacts import ArtifactStore
+        from src.tasks import TaskStore
+        from src.dashboard import api_cleanup_tasks, api_delete_task
+
+        class _DummyChannel:
+            def __init__(self):
+                self.cleaned = []
+
+            def recover(self, org, task_id, op_id):
+                return {"task_id": task_id, "call_id": "c-1", "accepted": None, "state": "acceptance_unknown"}
+
+            def cleanup_unknown(self, org, op_ids):
+                self.cleaned.append((org, list(op_ids)))
+                return {"schema_version": 1, "cleaned_count": len(op_ids)}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            art_store = ArtifactStore(root_dir=root / "projects")
+            task_store = TaskStore(db_path=root / "tasks.db")
+            task_store.ensure_ready()
+
+            t_zombie = task_store.create(
+                project_id="p1",
+                idempotency_key="idem-z1",
+                engine="codex",
+                model="gpt-image-2.6-sunburst",
+                request_params={
+                    "prompt": "zombie task",
+                    "action": "edit",
+                    "channel_runtime": "chatgpt-channel-v1",
+                    "channel_authority": {"organization_id": "org-1"},
+                },
+            )
+            task_store.update_status(t_zombie.task_id, "running", phase="submission_unknown", error="submission_unknown")
+
+            t_failed = task_store.create(
+                project_id="p1",
+                idempotency_key="idem-f1",
+                engine="codex",
+                model="gpt-image-2.5-sunburst",
+                request_params={"prompt": "failed task", "action": "generate"},
+            )
+            task_store.update_status(t_failed.task_id, "failed", phase="failed", error="failed")
+
+            from src.queue import TaskQueueManager
+            dummy_chatgpt = _DummyChannel()
+            qm = TaskQueueManager(
+                tasks=task_store,
+                artifacts=art_store,
+                codex_provider=None,
+                gemini_provider=None,
+                chatgpt_channel=dummy_chatgpt,
+                google_authorize=lambda proj, auth: {"organization_id": "org-1"},
+            )
+
+            mini_app = Starlette(
+                routes=[
+                    Route("/api/tasks/cleanup", api_cleanup_tasks, methods=["POST"]),
+                    Route("/api/tasks/{task_id}/delete", api_delete_task, methods=["POST"]),
+                ]
+            )
+            mini_app.state.tasks = task_store
+            mini_app.state.artifacts = art_store
+            mini_app.state.queue_manager = qm
+
+            with DirectTestClient(mini_app) as client:
+                resp = client.post(
+                    "/api/tasks/_cleanup/delete",
+                    headers={"Authorization": "Bearer dash-secret-token"},
+                    json={"clean_unknown": True, "clean_failed": True},
+                )
+                self.assertEqual(resp.status_code, 200, resp.text)
+                body = resp.json()
+                self.assertTrue(body["ok"])
+                self.assertEqual(body["cleaned_unknown_count"], 1)
+                self.assertEqual(body["cleaned_failed_count"], 1)
+                self.assertEqual(dummy_chatgpt.cleaned, [("org-1", [t_zombie.task_id])])
+                remaining, total = task_store.list_tasks(include_nsfw=True)
+                self.assertEqual(total, 0)
 
 
 if __name__ == "__main__":
