@@ -1802,7 +1802,7 @@
             <span class="tag-badge">Tool</span>
           </div>
           <p>标准异步生图接口。参数接收 prompt、aspect_ratio、resolution (2k/4k)、engine 及 model，输出任务编号及落盘产物。</p>
-          <pre class="code-schema-block">{ "prompt": "string", "aspect_ratio": "9:16", "resolution": "4k", "engine": "codex", "model": "gpt-image-2.5-sunburst" }</pre>
+          <pre class="code-schema-block">{ "prompt": "string", "aspect_ratio": "9:16", "resolution": "4k", "engine": "codex", "model": "gpt-image-2.6-sunburst" }</pre>
         </div>
 
         <div class="deck-card">
@@ -2148,6 +2148,8 @@
       'gemini-2.5-flash-image': 'Nano Banana',
       'moss-image': 'MOSS Image',
       'moss-image-sft-int8-convrot': 'MOSS Image',
+      'gpt-image-2.6-sunburst': 'GPT Image 2.6 Sunburst',
+      'gpt-image-2.6-flare': 'GPT Image 2.6 Flare',
       'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst',
       'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
       'grok-imagine-image-2.0': 'Grok Imagine Image 2.0',
@@ -2160,7 +2162,7 @@
       if (MODEL_CODE_ALIASES[lower]) return MODEL_CODE_ALIASES[lower];
       if (!raw && String(engine || '').toLowerCase().includes('gemini')) return 'gemini-nano-banana-2.1';
       if (!raw && String(engine || '').toLowerCase().includes('moss')) return 'moss-image-sft-int8-convrot';
-      return raw || 'gpt-image-2.5-sunburst';
+      return raw || 'gpt-image-2.6-sunburst';
     }
 
     function modelDisplayName(rawModel, engine) {
@@ -2169,7 +2171,7 @@
       if (MODEL_DISPLAY_MAP[lower]) return MODEL_DISPLAY_MAP[lower];
       const norm = normalizeModelCode(raw, engine).toLowerCase();
       if (MODEL_DISPLAY_MAP[norm]) return MODEL_DISPLAY_MAP[norm];
-      return raw || 'GPT Image 2.5 Sunburst';
+      return raw || 'GPT Image 2.6 Sunburst';
     }
 
     function actionModeCode(action, hasRefs, hasSource = false) {
@@ -3434,8 +3436,8 @@
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
-          { mark: 'SB', displayName: 'GPT Image 2.5 Sunburst', modelId: 'gpt-image-2.5-sunburst', officialName: 'OpenAI GPT Image 2.5 Sunburst', title: 'gpt-image-2.5-sunburst', biz: '图像生成', res: '1K / 2K / 4K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识与复杂空间排版理解能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
-          { mark: 'FL', displayName: 'GPT Image 2.5 Flare', modelId: 'gpt-image-2.5-flare', officialName: 'OpenAI GPT Image 2.5 Flare', title: 'gpt-image-2.5-flare', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '快速概念设计与分镜草图生成底座。' }
+          { mark: 'SB', displayName: 'GPT Image 2.6 Sunburst', modelId: 'gpt-image-2.6-sunburst', officialName: 'OpenAI GPT Image 2.6 Sunburst', title: 'gpt-image-2.6-sunburst', biz: '图像生成', res: '1K / 2K / 4K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/WebP/SVG/GIF', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识、复杂空间排版与多轮编辑一致性能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
+          { mark: 'FL', displayName: 'GPT Image 2.6 Flare', modelId: 'gpt-image-2.6-flare', officialName: 'OpenAI GPT Image 2.6 Flare', title: 'gpt-image-2.6-flare', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '极速低延迟概念设计与分镜草图生成底座（较上一代提速约 50%）。' }
         ]
       },
       {
@@ -3687,7 +3689,7 @@
             const sourceIdentityArtifactId = req.source_identity_artifact_id || req.face_reference_artifact_id || ((t.engine === 'moss-image' && refImageIds.length > 0) ? refImageIds[0] : '');
             const modeCode = actionModeCode(action, extraRefs.length > 0, Boolean(sourceArtifactId));
             const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : (extraRefs.length > 0 ? '多参考生图' : (sourceArtifactId ? '图生图' : '文生图'))));
-            const rawModelCode = t.model || req.model || t.engine || 'gpt-image-2.5-sunburst';
+            const rawModelCode = t.model || req.model || t.engine || 'gpt-image-2.6-sunburst';
             const engineRaw = t.engine || req.engine || 'local';
             const modelCode = typeof normalizeModelCode === 'function' ? normalizeModelCode(rawModelCode, engineRaw) : rawModelCode;
             const modelName = typeof modelDisplayName === 'function' ? modelDisplayName(rawModelCode, engineRaw) : rawModelCode;

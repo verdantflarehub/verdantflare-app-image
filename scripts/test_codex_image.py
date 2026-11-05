@@ -34,7 +34,7 @@ except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
 
 
-DEFAULT_MODEL = "gpt-image-2.5-sunburst"
+DEFAULT_MODEL = "gpt-image-2.6-sunburst"
 DEFAULT_RESPONSES_FALLBACK_MODEL = "gpt-5.5"
 DEFAULT_SIZE = "2048x1152"
 DEFAULT_4K_SIZE = "4096x2304"

@@ -281,7 +281,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         const dur = t.duration_seconds > 0 ? `${Math.round(t.duration_seconds)}s` : '--';
         const dateStr = t.created_at ? new Date(t.created_at).toLocaleTimeString() : '--';
         const engineLabel = t.engine === 'gemini' ? 'Gemini' : 'Codex';
-        const modelLabel = t.model || (t.engine === 'gemini' ? 'gemini-3.1-f' : 'gpt-image-2.5-sunburst');
+        const modelLabel = t.model || (t.engine === 'gemini' ? 'gemini-3.1-f' : 'gpt-image-2.6-sunburst');
 
         return `
           <tr class="hover:bg-slate-800/40 transition">
@@ -564,7 +564,7 @@ async def api_create_task(request: Request) -> Response:
 
     model = str(body.get("model", "")).strip()
     resolved_model = model or (
-        "gpt-image-2.5-sunburst" if engine == "codex"
+        "gpt-image-2.6-sunburst" if engine == "codex"
         else "moss-image-sft-int8-convrot" if engine == "moss-image"
         else "gemini-nano-banana-2.1"
     )

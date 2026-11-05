@@ -10,8 +10,8 @@ import urllib.request
 import uuid
 from typing import Any
 
-# 官方规范：Codex 生图模型主力为 gpt-image-2.5-sunburst (画质基准)，亦支持 gpt-image-2.5-flare (极速响应) 与 gpt-image-2 (向下兼容)
-DEFAULT_IMAGE_MODEL = "gpt-image-2.5-sunburst"
+# 官方规范：Codex 生图模型主力为 gpt-image-2.6-sunburst (画质基准)，亦支持 gpt-image-2.6-flare (极速响应) 与 gpt-image-2.5-sunburst / gpt-image-2.5-flare / gpt-image-2 (向下兼容)
+DEFAULT_IMAGE_MODEL = "gpt-image-2.6-sunburst"
 DEFAULT_SESSION_MODEL = "gpt-5.6-luna"
 DEFAULT_SIZE = "2048x1152"
 DEFAULT_4K_SIZE = "3840x2160"

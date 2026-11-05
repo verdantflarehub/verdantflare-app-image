@@ -134,7 +134,7 @@ verdantflare-app-image/
   - `project_id` (string): 项目标识。
   - `idempotency_key` (string): 幂等唯一键（建议 `<unit_id>/<attempt_id>`）。
   - `engine` (string): 指定底层引擎（`"codex"` 或 `"gemini"`，默认 `"codex"`）。
-  - `model` (string, 可选): 指定具体模型（Codex 默认 `gpt-image-2.5-sunburst`，Gemini 默认 `gemini-3.1-flash-image`）。
+  - `model` (string, 可选): 指定具体模型（Codex 默认 `gpt-image-2.6-sunburst`，Gemini 默认 `gemini-nano-banana-2.1`）。
   - `prompt` (string): 提示词。
   - `aspect_ratio` (string): 画幅比例（`"16:9"`, `"9:16"`, `"1:1"`, `"4:3"`, `"3:4"`，默认 `"16:9"`）。
   - `resolution` (string): 分辨率（`"2k"` 或 `"4k"`，默认 `"2k"`）。

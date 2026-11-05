@@ -356,6 +356,8 @@ class TestDashboardStaticHtml(unittest.TestCase):
         self.assertIn("MOSS Image", html)
         self.assertIn("moss-image-sft-int8-convrot", html)
         self.assertIn("grok-imagine-image-2.0", html)
+        self.assertIn("gpt-image-2.6-sunburst", html)
+        self.assertIn("gpt-image-2.6-flare", html)
         self.assertIn("gpt-image-2.5-sunburst", html)
         self.assertIn("gpt-image-2.5-flare", html)
         for fake_entry in (

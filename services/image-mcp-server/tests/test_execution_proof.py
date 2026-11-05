@@ -7,7 +7,7 @@ from src.execution_proof import proof
 class ProofTests(unittest.TestCase):
     def setUp(self):
         self.task = SimpleNamespace(status='completed',artifact_id='out',engine='codex',
-            model='gpt-image-2.5-sunburst',task_id='task1',project_id='project1',request_params={
+            model='gpt-image-2.6-sunburst',task_id='task1',project_id='project1',request_params={
                 'channel_runtime':'chatgpt-channel-v1','prompt':'角色肖像','action':'generate',
                 'aspect_ratio':'9:16','channel_authority':{'user_id':'PRIVATE'},'channel_account_id':'PRIVATE'})
         self.store=SimpleNamespace(get=lambda artifact_id,project_id: SimpleNamespace(

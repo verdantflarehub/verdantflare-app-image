@@ -81,7 +81,7 @@ mcp = MCPServer("VerdantFlare Image")
 IMAGE_TOOLS_SCHEMA = [
     {
         "name": "image.create",
-        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.5), Gemini, Grok, or MOSS-Image.",
+        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.6), Gemini, Grok, or MOSS-Image.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -89,7 +89,7 @@ IMAGE_TOOLS_SCHEMA = [
                 "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
                 "model": {
                     "type": "string",
-                    "description": "Model identifier, e.g. gpt-image-2.5-sunburst, gemini-nano-banana-2.1, gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image",
+                    "description": "Model identifier, e.g. gpt-image-2.6-sunburst, gpt-image-2.6-flare, gemini-nano-banana-2.1, gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image",
                 },
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"], "default": "16:9"},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
@@ -267,7 +267,7 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.50"
+SERVICE_VERSION = "v0.2.51"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -424,7 +424,7 @@ async def image_generate(
     遵循 GPT Image 2.5 官方提示词标准 (Scene, Subject, Details, Constraints)。
     - engine: 默认 "codex" (OpenAI Responses API 驱动)，亦可选 "gemini", "grok", "moss-image"
     - model:
-        codex 引擎推荐: "gpt-image-2.5-sunburst" (画质首选，微观细节与皮肤毛孔) 或 "gpt-image-2.5-flare" (极速响应)
+        codex 引擎推荐: "gpt-image-2.6-sunburst" (画质首选，微观细节与皮肤毛孔) 或 "gpt-image-2.6-flare" (极速响应)
         gemini 引擎 (Google 渠道 Nano Banana 系列): 默认 "gemini-nano-banana-2.1" (Nano Banana 2.1，Flash 级高保真与多轮一致性)，可选 "gemini-3-pro-image" (Nano Banana Pro，旗舰光学摄影感，兼容 "-preview")、"gemini-3.1-flash-image" (Nano Banana 2，极速现实锚定，兼容 "-preview")、"gemini-3.1-flash-lite-image" (Nano Banana 2 Lite，轻量高性价比) 或 "gemini-2.5-flash-image" (Nano Banana，经典兼容底座)
         moss-image 引擎: "moss-image-sft-int8-convrot" (自托管 INT8-ConvRot 文字排版与版式生成)
     - aspect_ratio: "16:9", "9:16", "1:1", "4:3", "3:4"
@@ -641,7 +641,7 @@ async def image_edit(
     - reference_artifact_ids: 可选附加参考图 ID 列表 (如单品服装图、环境参考图)
     - mask_artifact_id: 可选局部修改遮罩 ID
     - prompt: 编辑指令，建议使用 "Change only X, preserve exact facial features, skin tone, and body pose"
-    - model: codex 默认 "gpt-image-2.5-sunburst" (或 "gpt-image-2.5-flare")；gemini 默认 "gemini-nano-banana-2.1" (Nano Banana 2.1)，可选 "gemini-3-pro-image" (Nano Banana Pro)、"gemini-3.1-flash-image" (Nano Banana 2)、"gemini-3.1-flash-lite-image" (Nano Banana 2 Lite)、"gemini-2.5-flash-image" (Nano Banana)
+    - model: codex 默认 "gpt-image-2.6-sunburst" (或 "gpt-image-2.6-flare")；gemini 默认 "gemini-nano-banana-2.1" (Nano Banana 2.1)，可选 "gemini-3-pro-image" (Nano Banana Pro)、"gemini-3.1-flash-image" (Nano Banana 2)、"gemini-3.1-flash-lite-image" (Nano Banana 2 Lite)、"gemini-2.5-flash-image" (Nano Banana)
     - background: "auto", "transparent" (扣除背景生成透明底), "opaque"
     - quality: "auto", "low", "medium", "high", "xhigh", "max"
     """

@@ -2,11 +2,19 @@
 import hashlib
 
 
+SUPPORTED_CODEX_PROOF_MODELS = {
+    'gpt-image-2.6-sunburst',
+    'gpt-image-2.6-flare',
+    'gpt-image-2.5-sunburst',
+    'gpt-image-2.5-flare',
+}
+
+
 def proof(task, artifacts):
     p = task.request_params
     if (task.status != 'completed' or not task.artifact_id or task.engine != 'codex'
             or p.get('channel_runtime') != 'chatgpt-channel-v1'
-            or task.model != 'gpt-image-2.5-sunburst'):
+            or task.model not in SUPPORTED_CODEX_PROOF_MODELS):
         raise ValueError('execution_proof_not_ready')
     prompt = p.get('prompt')
     if not isinstance(prompt, str) or not prompt:
