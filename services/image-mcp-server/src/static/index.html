@@ -3568,7 +3568,7 @@
         kindLabel: '本地 5090 自托管算力 · MOSS Image 多模态海报与角色参考生图',
         billing: '本地算力队列 · 免外部积分',
         models: [
-          { mark: 'MI', displayName: 'MOSS Image', modelId: 'moss-image-sft-int8-convrot', officialName: 'MOSS-Image + Qwen3.5-9B Vision', releaseMeta: 'RTX 5090 GPU 租约按需推理', pricingLine: '本地 GPU 算力队列（零外部 API 费用）', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 3张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 MOSS Image (moss-image-sft-int8-convrot) 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
+          { mark: 'MI', displayName: 'MOSS Image', modelId: 'moss-image-sft-int8-convrot', officialName: 'MOSS-Image + Qwen3.5-9B Vision', releaseMeta: 'RTX 5090 GPU 租约按需推理', pricingLine: '本地 GPU 算力队列（零外部 API 费用）', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2K', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 3张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 MOSS Image (moss-image-sft-int8-convrot) 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
         ]
       },
       {
@@ -3579,23 +3579,23 @@
         kindLabel: 'Google AI Studio · Nano Banana 全系列原生多模态图像渠道',
         billing: '按量计费 (Google Cloud Credits · 内置官方价格表结算)',
         models: [
-          { mark: 'NB2', displayName: 'Nano Banana 2.1', modelId: 'gemini-nano-banana-2.1', modelLogo: 'nano-banana.png', officialName: 'Gemini Nano Banana 2.1', releaseMeta: '发布 2026-10-06 · 知识截止 2025-01 · New · Paid · 默认', pricingLine: 'Image 输出 $0.0336/张（输入 $1.50/M） · Text 输入 $1.50 / 输出 $7.50', title: 'gemini-nano-banana-2.1', biz: '主力图像生成（默认）', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.0336/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 新一代 Flash 级高保真多模态生图与编辑模型 (Gemini Nano Banana 2.1)，兼具增强事实准确性、高视觉保真度与多轮一致性（$0.0336/张）。' },
-          { mark: 'NBP', displayName: 'Nano Banana Pro', modelId: 'gemini-3-pro-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3 Pro Image', releaseMeta: '发布 2026-05-29 · 知识截止 2025-01 · Paid', pricingLine: 'Image 输出 $0.134/张（输入 $2.00/M） · Text 输入 $2.00 / 输出 $12.00', title: 'gemini-3-pro-image', biz: '旗舰图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.134/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 旗舰光学摄影感多模态生图与编辑模型 (Gemini 3 Pro Image)，具备强空间肢体理解与复杂长提示词遵循能力（$0.134/张）。' },
-          { mark: 'NB2', displayName: 'Nano Banana 2', modelId: 'gemini-3.1-flash-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3.1 Flash Image', releaseMeta: '发布 2026-05-29 · 知识截止 2025-01 · Paid', pricingLine: 'Image 输出 $0.0672/张（输入 $0.50/M） · Text 输入 $0.50 / 输出 $3.00', title: 'gemini-3.1-flash-image', biz: '极速图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.0672/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google Pro 级视觉智能与 Flash 级效率生图底座 (Gemini 3.1 Flash Image)，支持多参考图融合与现实锚定生成（$0.0672/张）。' },
-          { mark: 'NBL', displayName: 'Nano Banana 2 Lite', modelId: 'gemini-3.1-flash-lite-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3.1 Flash Lite Image', releaseMeta: '发布 2026-07-01 · 知识截止 2025-01 · 高性价比', pricingLine: 'Image 输出 $0.0336/张（输入 $0.25/M） · Text 输入 $0.25 / 输出 $1.50', title: 'gemini-3.1-flash-lite-image', biz: '轻量规模生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG · $0.0336/张', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 最具性价比的轻量级图像生成与编辑底座 (Gemini 3.1 Flash Lite Image)，面向大规模高并发草图与分镜出图（$0.0336/张）。' },
-          { mark: 'NB1', displayName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 2.5 Flash Image', releaseMeta: '知识截止 2025-01 · Paid · 经典兼容底座', pricingLine: 'Paid · 按 Google Cloud 账单计费', title: 'gemini-2.5-flash-image', biz: '经典图像生成', res: '自适应原生尺寸', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 经典原生多模态图像生成与编辑模型 (Gemini 2.5 Flash Image)，支持文生图与多参考图连续微调。' }
+          { mark: 'NB2', displayName: 'Nano Banana 2.1', modelId: 'gemini-nano-banana-2.1', modelLogo: 'nano-banana.png', officialName: 'Gemini Nano Banana 2.1', releaseMeta: '发布 2026-10-06 · 知识截止 2025-01 · New · Paid · 默认', pricingLine: '按量计费 (Google Cloud Credits)', title: 'gemini-nano-banana-2.1', biz: '主力图像生成（默认）', res: '4K', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 新一代 Flash 级高保真多模态生图与编辑模型 (Gemini Nano Banana 2.1)，兼具增强事实准确性、高视觉保真度与多轮一致性。' },
+          { mark: 'NBP', displayName: 'Nano Banana Pro', modelId: 'gemini-3-pro-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3 Pro Image', releaseMeta: '发布 2026-05-29 · 知识截止 2025-01 · Paid', pricingLine: '按量计费 (Google Cloud Credits)', title: 'gemini-3-pro-image', biz: '旗舰图像生成', res: '4K', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考定妆']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 旗舰光学摄影感多模态生图与编辑模型 (Gemini 3 Pro Image)，具备强空间肢体理解与复杂长提示词遵循能力。' },
+          { mark: 'NB2', displayName: 'Nano Banana 2', modelId: 'gemini-3.1-flash-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3.1 Flash Image', releaseMeta: '发布 2026-05-29 · 知识截止 2025-01 · Paid', pricingLine: '按量计费 (Google Cloud Credits)', title: 'gemini-3.1-flash-image', biz: '极速图像生成', res: '4K', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google Pro 级视觉智能与 Flash 级效率生图底座 (Gemini 3.1 Flash Image)，支持多参考图融合与现实锚定生成。' },
+          { mark: 'NBL', displayName: 'Nano Banana 2 Lite', modelId: 'gemini-3.1-flash-lite-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 3.1 Flash Lite Image', releaseMeta: '发布 2026-07-01 · 知识截止 2025-01 · 高性价比', pricingLine: '按量计费 (Google Cloud Credits)', title: 'gemini-3.1-flash-lite-image', biz: '轻量规模生成', res: '1K', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 最具性价比的轻量级图像生成与编辑底座 (Gemini 3.1 Flash Lite Image)，面向大规模高并发草图与分镜出图。' },
+          { mark: 'NB1', displayName: 'Nano Banana', modelId: 'gemini-2.5-flash-image', modelLogo: 'nano-banana.png', officialName: 'Gemini 2.5 Flash Image', releaseMeta: '知识截止 2025-01 · Paid · 经典兼容底座', pricingLine: 'Paid · 按 Google Cloud 账单计费', title: 'gemini-2.5-flash-image', biz: '经典图像生成', res: '1K', fps: 'PNG', maxSize: '24MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考生图']], refQuota: '最多 6张参考图 · 0张蒙版', desc: 'Google 经典原生多模态图像生成与编辑模型 (Gemini 2.5 Flash Image)，支持文生图与多参考图连续微调。' }
         ]
       },
       {
         id: 'chatgpt',
         name: 'ChatGPT',
         fullName: 'ChatGPT',
-        version: 'v0.1.12',
+        version: 'v0.1.16',
         kindLabel: 'OpenAI 多模态图像生成与指令编辑渠道',
         billing: '按 Token / 张数计费 (USD)',
         models: [
-          { mark: 'SB', displayName: 'GPT Image 2.6 Sunburst', modelId: 'gpt-image-2.6-sunburst', officialName: 'OpenAI GPT Image 2.6 Sunburst', title: 'gpt-image-2.6-sunburst', biz: '图像生成', res: '1K / 2K / 4K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG/WebP/SVG/GIF', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识、复杂空间排版与多轮编辑一致性能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
-          { mark: 'FL', displayName: 'GPT Image 2.6 Flare', modelId: 'gpt-image-2.6-flare', officialName: 'OpenAI GPT Image 2.6 Flare', title: 'gpt-image-2.6-flare', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '极速低延迟概念设计与分镜草图生成底座（较上一代提速约 50%）。' }
+          { mark: 'SB', displayName: 'GPT Image 2.6 Sunburst', modelId: 'gpt-image-2.6-sunburst', officialName: 'OpenAI GPT Image 2.6 Sunburst', title: 'gpt-image-2.6-sunburst', biz: '图像生成', res: '4K', fps: 'PNG/WebP/SVG/GIF', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图'], ['R2I', '多参考组合'], ['INPAINT', '局部重绘']], refQuota: '最多 8张参考图 · 1张 Alpha 蒙版 · 支持透明背景直出', desc: '具备强世界知识、复杂空间排版与多轮编辑一致性能力，支持最多 8 张参考资产组合创作与 4K 高清输出。' },
+          { mark: 'FL', displayName: 'GPT Image 2.6 Flare', modelId: 'gpt-image-2.6-flare', officialName: 'OpenAI GPT Image 2.6 Flare', title: 'gpt-image-2.6-flare', biz: '图像生成', res: '2K', fps: 'PNG', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 2张参考图 · 纯文本提示词直传', desc: '极速低延迟概念设计与分镜草图生成底座（较上一代提速约 50%）。' }
         ]
       },
       {
@@ -3606,7 +3606,7 @@
         kindLabel: 'xAI Grok Imagine · 文生图与单参考图编辑渠道',
         billing: '按张数计费 (USD)',
         models: [
-          { mark: 'GRK', displayName: 'Grok Imagine Image 2.0', modelId: 'grok-imagine-image-2.0', officialName: 'xAI Grok Imagine 2.0', title: 'grok-imagine-image-2.0', biz: '图像生成', res: '1K / 2K', duration: '1:1 / 3:4 / 4:3 / 9:16 / 16:9 / 2:3 / 3:2', fps: 'PNG/JPEG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 (I2I)', desc: 'xAI Grok Imagine 2.0 图像生成与单参考图编辑渠道，支持 1K/2K 分辨率与多画幅比例。' }
+          { mark: 'GRK', displayName: 'Grok Imagine Image 2.0', modelId: 'grok-imagine-image-2.0', officialName: 'xAI Grok Imagine 2.0', title: 'grok-imagine-image-2.0', biz: '图像生成', res: '2K', fps: 'PNG/JPEG/WebP', maxSize: '10MB', caps: [['T2I', '文生图'], ['I2I', '图生图']], refQuota: '最多 1张参考底图 (I2I)', desc: 'xAI Grok Imagine 2.0 图像生成与单参考图编辑渠道，支持 1K/2K 分辨率与多画幅比例。' }
         ]
       }
     ];
@@ -3673,7 +3673,7 @@
               if (catalogItem.official_name) existing.officialName = catalogItem.official_name;
               if (catalogItem.pricing_line) existing.pricingLine = catalogItem.pricing_line;
               if (catalogItem.release_meta) existing.releaseMeta = catalogItem.release_meta;
-              if (catalogItem.desc) existing.desc = catalogItem.desc;
+              if (catalogItem.desc) existing.desc = String(catalogItem.desc).replace(/（\$[0-9.]+\/张）/g, '');
             }
             if (!existing.biz.includes(statusLabel)) {
               existing.biz = `${existing.biz} · ${statusLabel}`;
@@ -3688,13 +3688,12 @@
               releaseMeta: (catalogItem && catalogItem.release_meta) || '',
               title: canonicalCode,
               biz: `${(catalogItem && catalogItem.biz) || '图像生成'} · ${statusLabel}`,
-              res: (catalogItem && catalogItem.output_summary) || '自适应原生尺寸',
-              duration: '1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9',
+              res: (lowerCode.includes('lite') || lowerCode.includes('2.5')) ? '1K' : ((targetId === 'google' || lowerCode.includes('sunburst')) ? '4K' : '2K'),
               fps: 'PNG',
               maxSize: targetId === 'google' ? '24MB' : '10MB',
               caps: [['T2I', '文生图'], ['I2I', '图生图']],
               refQuota: (catalogItem && catalogItem.input_summary) || (targetId === 'google' ? '最多 6张参考图 · 0张蒙版' : '最多 1张参考底图 (I2I)'),
-              desc: (catalogItem && catalogItem.desc) || '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。'
+              desc: String((catalogItem && catalogItem.desc) || '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。').replace(/（\$[0-9.]+\/张）/g, '')
             });
           }
         }
@@ -3765,8 +3764,7 @@
                 <p>${escapeHtml(m.desc)}</p>
                 <div class="model-foot">
                   <div class="tags" style="flex-wrap:wrap;">
-                    <span style="white-space:nowrap;" title="最大分辨率">${escapeHtml(m.res)}</span>
-                    <span style="white-space:nowrap;" title="支持画幅比例">${escapeHtml(m.duration)}</span>
+                    <span style="white-space:nowrap;" title="最高分辨率档位">${escapeHtml(m.res)}</span>
                     <span style="white-space:nowrap;" title="输出格式">${escapeHtml(m.fps)}</span>
                   </div>
                 </div>

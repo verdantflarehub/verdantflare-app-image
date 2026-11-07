@@ -46,7 +46,7 @@ GEMINI_MODEL_CATALOG = (
         "price_per_image_usd": "0.0336",
         "pricing_line": "Text: $1.50 / $7.50 · Image: Input $1.50 / Output $0.0336/张",
         "release_meta": "发布: 2026-10-06 · 知识截止: 2025-01",
-        "desc": "Google 新一代 Flash 级高保真多模态生图与编辑模型 (Gemini Nano Banana 2.1)，兼具增强事实准确性、高视觉保真度与多轮一致性（$0.0336/张）。",
+        "desc": "Google 新一代 Flash 级高保真多模态生图与编辑模型 (Gemini Nano Banana 2.1)，兼具增强事实准确性、高视觉保真度与多轮一致性。",
     },
     {
         "model_id": "gemini-3-pro-image",
@@ -59,7 +59,7 @@ GEMINI_MODEL_CATALOG = (
         "price_per_image_usd": "0.134",
         "pricing_line": "Text: $2.00 / $12.00 · Image: Input $2.00 / Output $0.134/张",
         "release_meta": "发布: 2026-05-29 · 知识截止: 2025-01",
-        "desc": "Google 旗舰光学摄影感多模态生图与编辑模型 (Gemini 3 Pro Image)，具备强空间肢体理解与复杂长提示词遵循能力（$0.134/张）。",
+        "desc": "Google 旗舰光学摄影感多模态生图与编辑模型 (Gemini 3 Pro Image)，具备强空间肢体理解与复杂长提示词遵循能力。",
     },
     {
         "model_id": "gemini-3.1-flash-image",
@@ -72,7 +72,7 @@ GEMINI_MODEL_CATALOG = (
         "price_per_image_usd": "0.0672",
         "pricing_line": "Text: $0.50 / $3.00 · Image: Input $0.50 / Output $0.0672/张",
         "release_meta": "发布: 2026-05-29 · 知识截止: 2025-01",
-        "desc": "Google Pro 级视觉智能与 Flash 级效率生图底座 (Gemini 3.1 Flash Image)，支持多参考图融合与现实锚定生成（$0.0672/张）。",
+        "desc": "Google Pro 级视觉智能与 Flash 级效率生图底座 (Gemini 3.1 Flash Image)，支持多参考图融合与现实锚定生成。",
     },
     {
         "model_id": "gemini-3.1-flash-lite-image",
@@ -85,7 +85,7 @@ GEMINI_MODEL_CATALOG = (
         "price_per_image_usd": "0.0336",
         "pricing_line": "Text: $0.25 / $1.50 · Image: Input $0.25 / Output $0.0336/张",
         "release_meta": "发布: 2026-07-01 · 知识截止: 2025-01",
-        "desc": "Google 最具性价比的轻量级图像生成与编辑底座 (Gemini 3.1 Flash Lite Image)，面向大规模高并发草图与分镜出图（$0.0336/张）。",
+        "desc": "Google 最具性价比的轻量级图像生成与编辑底座 (Gemini 3.1 Flash Lite Image)，面向大规模高并发草图与分镜出图。",
     },
 )
 GEMINI_COMPAT_MODEL_CATALOG = (
