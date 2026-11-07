@@ -7,6 +7,7 @@ import hashlib
 import json
 import threading
 import base64
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
@@ -49,6 +50,42 @@ def _image_storage_type(data: bytes) -> tuple[str, str]:
     return ".png", "image/png"
 
 
+class _DynamicConcurrencyGate:
+    """Thread-safe dynamic concurrency gate (1..20, default 4) synced from ChatGPT channel."""
+
+    def __init__(self, initial_limit: int = 4) -> None:
+        self._cond = threading.Condition()
+        self._limit = max(1, min(20, int(initial_limit)))
+        self._active = 0
+
+    @property
+    def limit(self) -> int:
+        with self._cond:
+            return self._limit
+
+    def update_limit(self, new_limit: Any) -> None:
+        if isinstance(new_limit, bool) or not isinstance(new_limit, int):
+            return
+        clamped = max(1, min(20, new_limit))
+        with self._cond:
+            if clamped != self._limit:
+                self._limit = clamped
+                self._cond.notify_all()
+
+    @contextmanager
+    def hold(self):
+        with self._cond:
+            while self._active >= self._limit:
+                self._cond.wait()
+            self._active += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._active -= 1
+                self._cond.notify_all()
+
+
 class TaskQueueManager:
     def __init__(
         self,
@@ -74,6 +111,9 @@ class TaskQueueManager:
         self.google_authorize = google_authorize
         self.channel_directory = channel_directory
         self.google_lock = threading.Lock()
+        self.chatgpt_gate = _DynamicConcurrencyGate(4)
+        self._task_locks_guard = threading.Lock()
+        self._task_locks: dict[str, threading.Lock] = {}
         self.grok_provider = GrokImageProvider()
         self.grok_sem = asyncio.Semaphore(max(1, int(os.getenv("XAI_IMAGE_MAX_CONCURRENCY", "1"))))
         self.grok_lock = threading.Lock()
@@ -81,9 +121,9 @@ class TaskQueueManager:
         self.moss_gpu = moss_gpu or GpuCoordinator.from_environment()
         self.moss_sem = asyncio.Semaphore(max(1, int(os.getenv("MOSS_IMAGE_MAX_CONCURRENCY", "1"))))
 
-        codex_limit = int(os.environ.get("CODEX_MAX_CONCURRENCY", "2"))
+        codex_limit = max(1, min(20, int(os.environ.get("CODEX_MAX_CONCURRENCY", "20"))))
         gemini_limit = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "5"))
-        worker_count = int(os.environ.get("IMAGE_QUEUE_WORKERS", "8"))
+        worker_count = max(1, int(os.environ.get("IMAGE_QUEUE_WORKERS", "20")))
 
         self.codex_sem = asyncio.Semaphore(codex_limit)
         self.gemini_sem = asyncio.Semaphore(gemini_limit)
@@ -380,16 +420,25 @@ class TaskQueueManager:
     def _execute_google(self, job, recovery=False):
         return self._execute_channel(job, recovery)
 
+    def _task_lock(self, task_id: str) -> threading.Lock:
+        with self._task_locks_guard:
+            lock = self._task_locks.get(task_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._task_locks[task_id] = lock
+            return lock
+
     def _execute_channel(self, job, recovery=False):
-        # The worker and collector serialize collection; only the claimed worker
-        # may submit. A crash anywhere after claiming leaves GET-only recovery.
-        with self.google_lock:
+        # The worker and collector serialize collection per task; ChatGPT channel
+        # tasks run concurrently up to the channel-configured concurrent_limit (1..20, default 4).
+        runtime = job.params.get('channel_runtime')
+        is_chatgpt = runtime == 'chatgpt-channel-v1'
+        outer_ctx = self.chatgpt_gate.hold() if is_chatgpt else self.google_lock
+        with outer_ctx, self._task_lock(job.task_id):
             record = self.tasks.get(job.task_id)
             if record.status != 'running':
                 return
-            runtime = job.params.get('channel_runtime')
             is_grok = runtime == 'grok-channel-v1'
-            is_chatgpt = runtime == 'chatgpt-channel-v1'
             channel_name, channel = {
                 'google-channel-v1': ('google', self.google_channel),
                 'grok-channel-v1': ('grok', self.grok_channel),
@@ -456,6 +505,8 @@ class TaskQueueManager:
                     job.params.get('model') or (DEFAULT_IMAGE_MODEL if is_chatgpt else DEFAULT_GEMINI_MODEL),
                     payload,
                     job.params.get('channel_account_id'), job.params.get('budget_limit'))
+            if is_chatgpt and isinstance(result, dict) and 'concurrent_limit' in result:
+                self.chatgpt_gate.update_limit(result.get('concurrent_limit'))
             if result['accepted'] is False or result.get('state') == 'failed':
                 reason = result.get('reason_code') or result.get('error') or ''
                 err = f"channel_call_failed: {reason}" if reason else 'channel_call_failed'

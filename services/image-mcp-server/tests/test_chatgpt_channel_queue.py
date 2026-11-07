@@ -2,6 +2,7 @@ import base64
 import asyncio
 import io
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
@@ -196,6 +197,40 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
         self.assertEqual(payload['action'], 'edit')
         self.assertEqual(payload['size'], '1024x1536')
         self.assertEqual(len(payload['images']), 1)
+
+    def test_four_concurrent_chatgpt_channel_jobs_execute_in_parallel_and_sync_limit(self):
+        self.assertEqual(self.queue.chatgpt_gate.limit, 4)
+        barrier = threading.Barrier(4, timeout=3)
+        entered = []
+        lock = threading.Lock()
+
+        def concurrent_submit(org, task_id, op_id, model, payload, account_id, ceiling):
+            with lock:
+                entered.append(task_id)
+            barrier.wait()
+            return {'accepted': True, 'state': 'completed', 'call_id': f'call-{task_id}', 'concurrent_limit': 12}
+
+        self.channel.submit.side_effect = concurrent_submit
+        self.channel.result.side_effect = lambda org, task_id, call_id: (self.image, 'image/png')
+
+        jobs = []
+        for idx in range(4):
+            params = self.queue.prepare('codex', 'project-test', {
+                'action': 'generate', 'prompt': f'Quad prompt {idx}', 'budget_limit': '1'})
+            rec = self.tasks.create('project-test', f'quad-op-{idx}', 'codex', params)
+            self.tasks.claim_task(rec.task_id)
+            jobs.append(TaskJob(rec.task_id, 'project-test', 'codex', 'generate', params))
+
+        threads = [threading.Thread(target=self.queue._execute_channel, args=(j,)) for j in jobs]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        self.assertEqual(len(entered), 4)
+        for j in jobs:
+            self.assertEqual(self.tasks.get(j.task_id).status, 'completed')
+        self.assertEqual(self.queue.chatgpt_gate.limit, 12)
 
 
 class ChannelWorkerFailureTests(unittest.IsolatedAsyncioTestCase):
