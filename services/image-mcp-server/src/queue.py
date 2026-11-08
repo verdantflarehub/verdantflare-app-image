@@ -559,6 +559,11 @@ class TaskQueueManager:
         if not org:
             return
         result = channel.recover(org, rec.task_id, rec.task_id)
+        if result.get("accepted") is False or result.get("state") in ("failed", "rejected"):
+            reason = result.get("reason_code") or result.get("error") or ""
+            err = f"channel_call_failed: {reason}" if reason else "channel_call_failed"
+            self.tasks.update_status(rec.task_id, "failed", error=err, phase="failed")
+            return
         if result.get("state") == "completed" and result.get("accepted") is True:
             self.tasks.update_status(rec.task_id, "running", phase="collecting")
             data, media_type = channel.result(org, rec.task_id, result["call_id"])

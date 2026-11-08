@@ -870,6 +870,12 @@ def image_status(task_id: str) -> types.CallToolResult:
     task = tasks.get(task_id)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    if task.status == "running" and task.phase in {"submission_unknown", "collect_retry"}:
+        try:
+            queue_manager._recover_channel_unknown(task)
+            task = tasks.get(task_id)
+        except Exception:
+            pass
     return _result(
         {
             "task_id": task.task_id,

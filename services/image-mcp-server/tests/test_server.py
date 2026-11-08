@@ -132,6 +132,35 @@ class TestServer(unittest.TestCase):
         caps = json.loads(server.image_capabilities().content[0].text)
         self.assertEqual(caps["import"]["max_image_bytes"], 20 * 1024 * 1024)
 
+    def test_image_status_recovers_submission_unknown_on_demand(self):
+        import json
+        from unittest import mock
+        from src import server
+        rec = server.tasks.create(
+            "proj-recover-status",
+            "op-recover-status-1",
+            "codex",
+            {
+                "action": "edit",
+                "prompt": "test",
+                "channel_runtime": "chatgpt-channel-v1",
+                "channel_authority": {"organization_id": "org", "user_id": "user"},
+                "budget_limit": "1.50",
+            },
+        )
+        server.tasks.update_status(rec.task_id, "running", error="submission_unknown", phase="submission_unknown")
+
+        def fake_recover(task_rec):
+            server.tasks.update_status(task_rec.task_id, "failed", error="channel_call_failed: image_safety", phase="failed")
+
+        with mock.patch.object(server.queue_manager, "_recover_channel_unknown", side_effect=fake_recover) as mock_rec:
+            res = json.loads(server.image_status(rec.task_id).content[0].text)
+        mock_rec.assert_called_once()
+        self.assertEqual(res["status"], "failed")
+        self.assertEqual(res["phase"], "failed")
+        self.assertEqual(res["error"], "channel_call_failed: image_safety")
+        self.assertFalse(res["needs_attention"])
+
 if __name__ == "__main__":
     unittest.main()
 

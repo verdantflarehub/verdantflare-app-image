@@ -208,6 +208,24 @@ class GoogleQueueTests(unittest.TestCase):
                 'budget_limit': '1',
             })
 
+    def test_recover_channel_unknown_transitions_failed_or_rejected_channel_calls(self):
+        self.channel.submit.return_value = {'accepted': None, 'state': 'acceptance_unknown'}
+        self.queue._execute_google(self.job)
+        rec = self.store.get(self.record.task_id)
+        self.assertEqual(rec.status, 'running')
+        self.assertEqual(rec.phase, 'submission_unknown')
+
+        self.channel.recover.return_value = {
+            'accepted': True,
+            'state': 'failed',
+            'reason_code': 'image_safety',
+        }
+        self.queue._recover_channel_unknown(rec)
+        after = self.store.get(self.record.task_id)
+        self.assertEqual(after.status, 'failed')
+        self.assertEqual(after.phase, 'failed')
+        self.assertEqual(after.error, 'channel_call_failed: image_safety')
+
 
 if __name__ == '__main__':
     unittest.main()

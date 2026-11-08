@@ -232,6 +232,25 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
             self.assertEqual(self.tasks.get(j.task_id).status, 'completed')
         self.assertEqual(self.queue.chatgpt_gate.limit, 12)
 
+    def test_recover_channel_unknown_transitions_chatgpt_failed_and_completed(self):
+        job = self.job()
+        self.channel.submit.return_value = {'accepted': None, 'state': 'acceptance_unknown'}
+        self.queue._execute_channel(job)
+        rec = self.tasks.get(job.task_id)
+        self.assertEqual(rec.status, 'running')
+        self.assertEqual(rec.phase, 'submission_unknown')
+
+        self.channel.recover.return_value = {
+            'accepted': True,
+            'state': 'failed',
+            'reason_code': 'image_safety',
+        }
+        self.queue._recover_channel_unknown(rec)
+        after = self.tasks.get(job.task_id)
+        self.assertEqual(after.status, 'failed')
+        self.assertEqual(after.phase, 'failed')
+        self.assertEqual(after.error, 'channel_call_failed: image_safety')
+
 
 class ChannelWorkerFailureTests(unittest.IsolatedAsyncioTestCase):
     async def test_failures_preserve_submission_boundary(self):
@@ -276,3 +295,7 @@ class ChannelWorkerFailureTests(unittest.IsolatedAsyncioTestCase):
                         queue._execute_channel(TaskJob(record.task_id, record.project_id,
                             record.engine, 'generate', params), recovery=True)
                     channel.submit.assert_called_once()
+
+
+if __name__ == '__main__':
+    unittest.main()
