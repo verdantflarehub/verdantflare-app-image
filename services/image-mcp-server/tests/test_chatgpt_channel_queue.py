@@ -244,12 +244,13 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
             'accepted': True,
             'state': 'failed',
             'reason_code': 'image_safety',
+            'error': {'code': 'image_safety', 'message': '抱歉，无法按原描述生成。'},
         }
         self.queue._recover_channel_unknown(rec)
         after = self.tasks.get(job.task_id)
         self.assertEqual(after.status, 'failed')
         self.assertEqual(after.phase, 'failed')
-        self.assertEqual(after.error, 'channel_call_failed: image_safety')
+        self.assertEqual(after.error, 'channel_call_failed: image_safety: 抱歉，无法按原描述生成。')
 
 
 class ChannelWorkerFailureTests(unittest.IsolatedAsyncioTestCase):

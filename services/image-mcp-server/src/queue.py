@@ -417,6 +417,23 @@ class TaskQueueManager:
                 finally:
                     self._queue.task_done()
 
+    @staticmethod
+    def _format_channel_failure(result: dict[str, Any]) -> str:
+        reason = str(result.get('reason_code') or '').strip()
+        raw_err = result.get('error')
+        detail = ''
+        if isinstance(raw_err, dict):
+            detail = str(raw_err.get('message') or raw_err.get('detail') or raw_err.get('code') or '').strip()
+        elif isinstance(raw_err, str):
+            detail = raw_err.strip()
+        if reason and detail and detail != reason:
+            return f"channel_call_failed: {reason}: {detail}"
+        if reason:
+            return f"channel_call_failed: {reason}"
+        if detail:
+            return f"channel_call_failed: {detail}"
+        return 'channel_call_failed'
+
     def _execute_google(self, job, recovery=False):
         return self._execute_channel(job, recovery)
 
@@ -508,8 +525,7 @@ class TaskQueueManager:
             if is_chatgpt and isinstance(result, dict) and 'concurrent_limit' in result:
                 self.chatgpt_gate.update_limit(result.get('concurrent_limit'))
             if result['accepted'] is False or result.get('state') == 'failed':
-                reason = result.get('reason_code') or result.get('error') or ''
-                err = f"channel_call_failed: {reason}" if reason else 'channel_call_failed'
+                err = self._format_channel_failure(result)
                 self.tasks.update_status(job.task_id, 'failed',
                     error=err, phase='failed')
             elif result.get('state') == 'completed' and result['accepted'] is True:
@@ -560,8 +576,7 @@ class TaskQueueManager:
             return
         result = channel.recover(org, rec.task_id, rec.task_id)
         if result.get("accepted") is False or result.get("state") in ("failed", "rejected"):
-            reason = result.get("reason_code") or result.get("error") or ""
-            err = f"channel_call_failed: {reason}" if reason else "channel_call_failed"
+            err = self._format_channel_failure(result)
             self.tasks.update_status(rec.task_id, "failed", error=err, phase="failed")
             return
         if result.get("state") == "completed" and result.get("accepted") is True:
