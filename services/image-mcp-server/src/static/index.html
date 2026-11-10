@@ -2542,6 +2542,7 @@
           if (disposed || !blob || !blob.size) return '';
           const url = URL.createObjectURL(blob);
           artifactThumbMap.set(cacheKey, url);
+          previewBlobs.set(url, blob);
           return url;
         } catch (err) {
           console.warn(`Thumbnail ${cacheKey} load failed, falling back to content:`, err);
@@ -3167,13 +3168,16 @@
       }
       const zoomTrigger = e.target.closest('[data-zoom-img]');
       if (zoomTrigger) {
+        const zoomLabel = zoomTrigger.dataset.zoomLabel || '图像预览';
+        const refAid = zoomTrigger.dataset.refArtifact;
         if (zoomTrigger.dataset.zoomImg) {
-          openZoomModal(zoomTrigger.dataset.zoomImg, zoomTrigger.dataset.zoomLabel || '图像预览');
-        } else if (zoomTrigger.dataset.refArtifact) {
-          getArtifactBlobUrl(zoomTrigger.dataset.refArtifact).then(url => {
-            if (url) {
-              zoomTrigger.dataset.zoomImg = url;
-              openZoomModal(url, zoomTrigger.dataset.zoomLabel || '图像预览');
+          openZoomModal(zoomTrigger.dataset.zoomImg, zoomLabel);
+        } else if (refAid) {
+          getArtifactBlobUrl(refAid).then(url => {
+            const targetUrl = url || getCachedThumbUrl(refAid, 640) || getCachedThumbUrl(refAid, 320);
+            if (targetUrl) {
+              if (zoomTrigger.isConnected) zoomTrigger.dataset.zoomImg = targetUrl;
+              openZoomModal(targetUrl, zoomLabel);
             }
           });
         }
@@ -3198,9 +3202,10 @@
     function formatVerbatimPromptHtml(promptText, negativePrompt, refImgs, refMasks, refFaces) {
       const raw = String(promptText || '（未记录提示词）');
       const matchedTargets = new Set();
-      let html = escapeHtml(raw).replace(/&lt;(Picture|Mask|Control|Face)\s*(\d+)&gt;/gi, (match, kind, numStr) => {
-        const idx = Math.max(0, parseInt(numStr, 10) - 1);
-        const k = kind.toLowerCase();
+      let html = escapeHtml(raw).replace(/&lt;(Picture|Mask|Control|Face)\s*(\d+)&gt;|\b(Image)\s*(\d+)\b|(参考图|输入图)\s*(\d+)/gi, (match, kind, numStr, imgWord, imgNum, cnWord, cnNum) => {
+        const resolvedNum = numStr || imgNum || cnNum;
+        const idx = Math.max(0, parseInt(resolvedNum, 10) - 1);
+        const k = (kind || 'picture').toLowerCase();
         const targetId = k === 'picture' ? `ref-img-${idx}` : (k === 'face' ? `ref-face-${idx}` : `ref-mask-${idx}`);
         matchedTargets.add(targetId);
         return `<button type="button" class="prompt-ref-chip" data-focus-ref="${targetId}">${match}</button>`;
@@ -3423,7 +3428,16 @@
     }
     const openInspector = async function(id, notifyStudio = true) {
       closeHostPreview();
-      const task = allTasks.find(t => t.id === id);
+      let task = allTasks.find(t => t.id === id);
+      if (!task && typeof mapBackendTask === 'function') {
+        try {
+          const singleRes = await requestApi(`/api/tasks/${encodeURIComponent(id)}`);
+          if (singleRes && singleRes.task_id) {
+            task = mapBackendTask(singleRes);
+            allTasks = mergeTaskPage(allTasks, [task], true);
+          }
+        } catch (_) {}
+      }
       if (!task) return;
       const savedWinScroll = window.scrollY;
       const epoch = ++detailEpoch;
@@ -3819,6 +3833,78 @@
       taskSyncPromise = performTaskSync(append).finally(() => { taskSyncPromise = null; });
       return taskSyncPromise;
     }
+    function mapBackendTask(t) {
+      const req = t.request_params || {};
+      const action = req.action || 't2i';
+      const sourceArtifactId = req.source_artifact_id || req.target_artifact_id || '';
+      const maskArtifactId = req.mask_artifact_id || '';
+      const extraRefs = Array.isArray(req.reference_artifact_ids) ? req.reference_artifact_ids.filter(Boolean) : [];
+      const refImageIds = [...new Set([...(sourceArtifactId ? [sourceArtifactId] : []), ...extraRefs])];
+      const sourceIdentityArtifactId = req.source_identity_artifact_id || req.face_reference_artifact_id || ((t.engine === 'moss-image' && refImageIds.length > 0) ? refImageIds[0] : '');
+      const modeCode = actionModeCode(action, extraRefs.length > 0, Boolean(sourceArtifactId));
+      const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : (extraRefs.length > 0 ? '多参考生图' : (sourceArtifactId ? '图生图' : '文生图'))));
+      const rawModelCode = t.model || req.model || t.engine || 'gpt-image-2.6-sunburst';
+      const engineRaw = t.engine || req.engine || 'local';
+      const modelCode = typeof normalizeModelCode === 'function' ? normalizeModelCode(rawModelCode, engineRaw) : rawModelCode;
+      const modelName = typeof modelDisplayName === 'function' ? modelDisplayName(rawModelCode, engineRaw) : rawModelCode;
+      const channelLabel = channelDisplayName(engineRaw);
+      const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
+      const artifactId = t.artifact_id || '';
+      if (artifactId && !artifactMediaMap.has(artifactId)) {
+        const rawMedia = t.media && typeof t.media === 'object' ? t.media : null;
+        const width = Number(t.outputWidth ?? t.output_width ?? rawMedia?.width);
+        const height = Number(t.outputHeight ?? t.output_height ?? rawMedia?.height);
+        const sizeBytes = Number(t.outputSizeBytes ?? t.output_size_bytes ?? rawMedia?.sizeBytes ?? rawMedia?.size_bytes);
+        const format = String(t.outputFormat || t.output_format || rawMedia?.format || '').trim();
+        if ((Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0) || (Number.isSafeInteger(sizeBytes) && sizeBytes >= 0) || format) {
+          artifactMediaMap.set(artifactId, {
+            width: Number.isSafeInteger(width) && width > 0 ? width : undefined,
+            height: Number.isSafeInteger(height) && height > 0 ? height : undefined,
+            sizeBytes: Number.isSafeInteger(sizeBytes) && sizeBytes >= 0 ? sizeBytes : undefined,
+            format
+          });
+        }
+      }
+      const imgUrl = artifactBlobMap.get(artifactId) || '';
+      const customTitle = String(req.title || t.title || '').trim();
+      const defaultTitle = (t.prompt_preview || req.prompt || '图像任务').slice(0, 24) + '…';
+      const ratingObj = t.content_rating && typeof t.content_rating === 'object' ? t.content_rating : null;
+      const contentRating = ratingObj ? (ratingObj.rating || 'general') : (typeof t.content_rating === 'string' ? t.content_rating : 'general');
+      const isNsfw = contentRating === 'nsfw';
+
+      return {
+        id: t.task_id,
+        title: customTitle || defaultTitle,
+        prompt: req.prompt || t.prompt_preview || '',
+        negativePrompt: req.negative_prompt || '',
+        contentRating,
+        isNsfw,
+        type: action,
+        modeCode,
+        typeName,
+        model: modelName,
+        modelId: modelCode,
+        modelShort: modelName,
+        engine: engineRaw,
+        channelLabel,
+        phase: t.phase,
+        requestedResolution: req.resolution,
+        requestedAspectRatio: req.aspect_ratio,
+        error: t.error || '',
+        ...outputMediaLabels(artifactMediaMap.get(artifactId)),
+        duration: t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物' : dur,
+        status: t.status === 'completed' ? 'succeeded' : t.status,
+        project: t.project_id || 'default',
+        time: t.created_at ? new Date(t.created_at).toLocaleTimeString() : '刚刚',
+        artifactId,
+        sourceArtifactId,
+        refImageIds,
+        maskArtifactId,
+        sourceIdentityArtifactId,
+        img: imgUrl
+      };
+    }
+
     // Live Tasks Sync
     async function performTaskSync(append = false) {
       if (syncingTasks || disposed || document.hidden) return;
@@ -3835,77 +3921,7 @@
         loadCapabilities(tasksRes.capabilities);
         if (tasksRes && Array.isArray(tasksRes.tasks)) {
           taskLoadState = 'ready'; taskLoadError = ''; taskTotal = tasksRes.total ?? tasksRes.tasks.length;
-          const incoming = tasksRes.tasks.map(t => {
-            const req = t.request_params || {};
-            const action = req.action || 't2i';
-            const sourceArtifactId = req.source_artifact_id || req.target_artifact_id || '';
-            const maskArtifactId = req.mask_artifact_id || '';
-            const extraRefs = Array.isArray(req.reference_artifact_ids) ? req.reference_artifact_ids.filter(Boolean) : [];
-            const refImageIds = [...new Set([...(sourceArtifactId ? [sourceArtifactId] : []), ...extraRefs])];
-            const sourceIdentityArtifactId = req.source_identity_artifact_id || req.face_reference_artifact_id || ((t.engine === 'moss-image' && refImageIds.length > 0) ? refImageIds[0] : '');
-            const modeCode = actionModeCode(action, extraRefs.length > 0, Boolean(sourceArtifactId));
-            const typeName = t.engine === 'grok' && action === 'edit' ? '单图编辑' : action === 'faceswap' ? '骨相换脸' : (action === 'inpaint' ? '局部重绘' : (action === 'edit' ? (extraRefs.length > 0 ? '多参考编辑' : '图生图') : (extraRefs.length > 0 ? '多参考生图' : (sourceArtifactId ? '图生图' : '文生图'))));
-            const rawModelCode = t.model || req.model || t.engine || 'gpt-image-2.6-sunburst';
-            const engineRaw = t.engine || req.engine || 'local';
-            const modelCode = typeof normalizeModelCode === 'function' ? normalizeModelCode(rawModelCode, engineRaw) : rawModelCode;
-            const modelName = typeof modelDisplayName === 'function' ? modelDisplayName(rawModelCode, engineRaw) : rawModelCode;
-            const channelLabel = channelDisplayName(engineRaw);
-            const dur = t.duration_seconds > 0 ? `${t.duration_seconds.toFixed(1)}s` : (t.status === 'completed' ? '已完成' : (t.status === 'running' ? '执行中' : (t.status === 'failed' ? '失败' : '排队中')));
-            const artifactId = t.artifact_id || '';
-            if (artifactId && !artifactMediaMap.has(artifactId)) {
-              const rawMedia = t.media && typeof t.media === 'object' ? t.media : null;
-              const width = Number(t.outputWidth ?? t.output_width ?? rawMedia?.width);
-              const height = Number(t.outputHeight ?? t.output_height ?? rawMedia?.height);
-              const sizeBytes = Number(t.outputSizeBytes ?? t.output_size_bytes ?? rawMedia?.sizeBytes ?? rawMedia?.size_bytes);
-              const format = String(t.outputFormat || t.output_format || rawMedia?.format || '').trim();
-              if ((Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0) || (Number.isSafeInteger(sizeBytes) && sizeBytes >= 0) || format) {
-                artifactMediaMap.set(artifactId, {
-                  width: Number.isSafeInteger(width) && width > 0 ? width : undefined,
-                  height: Number.isSafeInteger(height) && height > 0 ? height : undefined,
-                  sizeBytes: Number.isSafeInteger(sizeBytes) && sizeBytes >= 0 ? sizeBytes : undefined,
-                  format
-                });
-              }
-            }
-            const imgUrl = artifactBlobMap.get(artifactId) || '';
-            const customTitle = String(req.title || t.title || '').trim();
-            const defaultTitle = (t.prompt_preview || req.prompt || '图像任务').slice(0, 24) + '…';
-            const ratingObj = t.content_rating && typeof t.content_rating === 'object' ? t.content_rating : null;
-            const contentRating = ratingObj ? (ratingObj.rating || 'general') : (typeof t.content_rating === 'string' ? t.content_rating : 'general');
-            const isNsfw = contentRating === 'nsfw';
-
-            return {
-              id: t.task_id,
-              title: customTitle || defaultTitle,
-              prompt: req.prompt || t.prompt_preview || '',
-              negativePrompt: req.negative_prompt || '',
-              contentRating,
-              isNsfw,
-              type: action,
-              modeCode,
-              typeName,
-              model: modelName,
-              modelId: modelCode,
-              modelShort: modelName,
-              engine: engineRaw,
-              channelLabel,
-              phase: t.phase,
-              requestedResolution: req.resolution,
-              requestedAspectRatio: req.aspect_ratio,
-              error: t.error || '',
-              ...outputMediaLabels(artifactMediaMap.get(artifactId)),
-              duration: t.phase === 'submission_unknown' ? '提交结果待核对，请勿重提' : t.phase === 'collect_retry' ? '正在回收产物' : dur,
-              status: t.status === 'completed' ? 'succeeded' : t.status,
-              project: t.project_id || 'default',
-              time: t.created_at ? new Date(t.created_at).toLocaleTimeString() : '刚刚',
-              artifactId,
-              sourceArtifactId,
-              refImageIds,
-              maskArtifactId,
-              sourceIdentityArtifactId,
-              img: imgUrl
-            };
-          });
+          const incoming = tasksRes.tasks.map(mapBackendTask);
           allTasks = mergeTaskPage(allTasks, incoming, append);
           taskNextOffset = offset + tasksRes.tasks.length;
           taskPageExhausted = tasksRes.tasks.length < limit;
