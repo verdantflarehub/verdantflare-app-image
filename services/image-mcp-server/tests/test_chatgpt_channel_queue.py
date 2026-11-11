@@ -56,6 +56,21 @@ class ChatGPTChannelQueueTests(unittest.TestCase):
         self.assertEqual(record.status, 'completed')
         self.assertEqual(self.artifacts.get(record.artifact_id, 'project-test').metadata['channel'], 'chatgpt')
 
+    def test_square_resolution_size_mapping(self):
+        params_2k = self.queue.prepare('codex', 'project-test', {
+            'action': 'generate', 'prompt': 'Square 2k', 'budget_limit': '1', 'aspect_ratio': '1:1', 'resolution': '2k'})
+        rec_2k = self.tasks.create('project-test', 'op-sq-2k', 'codex', params_2k)
+        self.tasks.claim_task(rec_2k.task_id)
+        self.queue._execute_channel(TaskJob(rec_2k.task_id, 'project-test', 'codex', 'generate', params_2k))
+        self.assertEqual(self.channel.submit.call_args.args[4]['size'], '2048x2048')
+
+        params_1k = self.queue.prepare('codex', 'project-test', {
+            'action': 'generate', 'prompt': 'Square 1k', 'budget_limit': '1', 'aspect_ratio': '1:1', 'resolution': '1k'})
+        rec_1k = self.tasks.create('project-test', 'op-sq-1k', 'codex', params_1k)
+        self.tasks.claim_task(rec_1k.task_id)
+        self.queue._execute_channel(TaskJob(rec_1k.task_id, 'project-test', 'codex', 'generate', params_1k))
+        self.assertEqual(self.channel.submit.call_args.args[4]['size'], '1024x1024')
+
     def test_discovery_blocks_new_submission_but_allows_original_recovery(self):
         job = self.job()
         directory = Mock()

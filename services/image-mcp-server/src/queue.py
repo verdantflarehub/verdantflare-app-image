@@ -491,6 +491,8 @@ class TaskQueueManager:
                 effective_action = 'edit' if (job.action in ('edit', 'inpaint') or images) else job.action
                 if runtime == 'google-channel-v1' and job.params.get('aspect_ratio'):
                     payload['aspect_ratio'] = job.params['aspect_ratio']
+                if runtime == 'google-channel-v1':
+                    payload['resolution'] = (job.params.get('resolution') or '2k').lower()
                 if is_grok:
                     effective_action = job.action
                     payload = {key: job.params[key] for key in ('prompt', 'action', 'resolution')}
@@ -500,7 +502,9 @@ class TaskQueueManager:
                         payload['aspect_ratio'] = job.params['aspect_ratio']
                 if is_chatgpt:
                     p = job.params
-                    size = {'16:9': '2048x1152', '9:16': '1152x2048', '1:1': '1024x1024',
+                    res_lower = (p.get('resolution') or '2k').lower()
+                    sq_size = '1024x1024' if res_lower == '1k' else '2048x2048'
+                    size = {'16:9': '2048x1152', '9:16': '1152x2048', '1:1': sq_size,
                             '4:3': '1792x1344', '3:4': '1344x1792',
                             '3:2': '1536x1024', '2:3': '1024x1536'}.get(p.get('aspect_ratio'), p.get('size') or '2048x1152')
                     effective_action = 'edit' if (job.action in ('edit', 'inpaint') or images or p.get('mask_artifact_id')) else job.action

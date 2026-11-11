@@ -119,6 +119,7 @@ class GoogleQueueTests(unittest.TestCase):
         self.channel.submit.assert_called_once()
         submitted_payload = self.channel.submit.call_args.args[4]
         self.assertEqual(submitted_payload['aspect_ratio'], '9:16')
+        self.assertEqual(submitted_payload['resolution'], '2k')
         self.assertEqual(len(submitted_payload['images']), 1)
         self.assertEqual(submitted_payload['images'][0]['mime_type'], 'image/png')
 

@@ -236,6 +236,7 @@ class CodexProvider:
             "2048x1152": "3840x2160",  # 16:9 4K (8,294,400 像素，官方允许上限)
             "1152x2048": "2160x3840",  # 9:16 4K
             "1024x1024": "2048x2048",  # 1:1 2K 正方形
+            "2048x2048": "2048x2048",  # 1:1 2K 正方形
             "1792x1344": "2880x2160",  # 4:3 4K
             "1344x1792": "2160x2880",  # 3:4 4K
             "1536x1024": "3072x2048",  # 3:2 4K
@@ -292,6 +293,17 @@ class CodexProvider:
                 b64_img = base64.b64encode(b_data).decode("utf-8")
                 user_content.append({"type": "input_image", "image_url": f"data:{mime};base64,{b64_img}"})
 
+        if not source_bytes and "x" in size:
+            try:
+                import math
+                w, h = map(int, size.split("x", 1))
+                if w > 0 and h > 0:
+                    g = math.gcd(w, h)
+                    ratio = f"{w // g}:{h // g}"
+                    if ratio in {"16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "1:1"} and ratio not in prompt:
+                        prompt = f"[Aspect Ratio {ratio}] {prompt}"
+            except ValueError:
+                pass
         user_content.append({"type": "input_text", "text": prompt})
 
         payload = {

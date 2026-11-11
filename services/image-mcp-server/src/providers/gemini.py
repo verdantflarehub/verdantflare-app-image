@@ -304,6 +304,7 @@ class GeminiProvider:
         source_image_bytes: bytes | None = None,
         mask_bytes: bytes | None = None,
         aspect_ratio: str | None = None,
+        resolution: str | None = None,
         timeout: int = 120,
     ) -> bytes:
         base = self.base_url.rstrip("/")
@@ -328,8 +329,13 @@ class GeminiProvider:
         generation_config: dict[str, Any] = {
             "responseModalities": ["IMAGE", "TEXT"],
         }
+        image_cfg: dict[str, Any] = {}
         if aspect_ratio:
-            generation_config["imageConfig"] = {"aspectRatio": aspect_ratio}
+            image_cfg["aspectRatio"] = aspect_ratio
+        if resolution and resolution.strip().lower() in {"1k", "2k", "4k"} and model != "gemini-2.5-flash-image":
+            image_cfg["imageSize"] = resolution.strip().upper()
+        if image_cfg:
+            generation_config["imageConfig"] = image_cfg
         payload = {
             "contents": [{"parts": parts}],
             "generationConfig": generation_config,
@@ -368,6 +374,7 @@ class GeminiProvider:
         source_image_bytes: bytes | None = None,
         mask_bytes: bytes | None = None,
         aspect_ratio: str | None = None,
+        resolution: str | None = None,
         retries: int = 2,
     ) -> bytes:
         if mask_bytes is not None:
@@ -397,6 +404,7 @@ class GeminiProvider:
                         source_image_bytes=source_image_bytes,
                         mask_bytes=mask_bytes,
                         aspect_ratio=api_aspect_ratio,
+                        resolution=resolution,
                     )
                 else:
                     return self._generate_anthropic(
