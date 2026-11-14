@@ -29,7 +29,7 @@ def _make_png_bytes(width: int = 64, height: int = 64) -> bytes:
 
 class TestMossProviderValidation(unittest.TestCase):
     def setUp(self) -> None:
-        self.provider = MossProvider(base_url="http://image-moss-api:8000")
+        self.provider = MossProvider(base_url="http://image-moss:8000")
 
     def test_capability_declares_self_hosted_contract(self) -> None:
         caps = self.provider.capability()
@@ -187,7 +187,7 @@ class TestMossProviderExecution(unittest.TestCase):
             return httpx.Response(404)
 
         client = httpx.Client(transport=httpx.MockTransport(handler))
-        provider = MossProvider(base_url="http://image-moss-api:8000", client=client)
+        provider = MossProvider(base_url="http://image-moss:8000", client=client)
         try:
             self.assertTrue(provider.health())
             params = provider.normalize({"prompt": "山海寻踪", "width": 1024, "height": 1024, "seed": 42})
@@ -208,7 +208,7 @@ class TestMossProviderExecution(unittest.TestCase):
             tasks.ensure_ready()
 
             png_bytes = _make_png_bytes(128, 128)
-            moss_provider = MossProvider(base_url="http://image-moss-api:8000")
+            moss_provider = MossProvider(base_url="http://image-moss:8000")
             moss_gpu = MagicMock()
             moss_gpu.hold.return_value.__enter__ = MagicMock(return_value=None)
             moss_gpu.hold.return_value.__exit__ = MagicMock(return_value=False)
@@ -291,7 +291,7 @@ class TestMossProviderExecution(unittest.TestCase):
                 media_type="image/png",
             )
 
-            moss_provider = MossProvider(base_url="http://image-moss-api:8000")
+            moss_provider = MossProvider(base_url="http://image-moss:8000")
             moss_gpu = MagicMock()
             moss_gpu.hold.return_value.__enter__ = MagicMock(return_value=None)
             moss_gpu.hold.return_value.__exit__ = MagicMock(return_value=False)

@@ -143,7 +143,7 @@ class MossProvider:
         timeout: float | None = None,
         client: httpx.Client | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("MOSS_IMAGE_API_URL", "http://image-moss-api:8000")).rstrip("/")
+        self.base_url = (base_url or os.environ.get("MOSS_IMAGE_API_URL", "http://image-moss:8000")).rstrip("/")
         self.timeout = timeout or float(os.environ.get("MOSS_IMAGE_TIMEOUT", "210"))
         self._client = client
 
@@ -376,9 +376,9 @@ class MossProvider:
                 with httpx.Client(timeout=self.timeout, trust_env=False) as client:
                     resp = client.post(f"{self.base_url}/v1/generate", json=payload)
         except httpx.TimeoutException as exc:
-            raise MossProviderError("UPSTREAM_TIMEOUT", f"image-moss-api timed out: {exc}", 504) from exc
+            raise MossProviderError("UPSTREAM_TIMEOUT", f"image-moss timed out: {exc}", 504) from exc
         except httpx.HTTPError as exc:
-            raise MossProviderError("MODEL_NOT_READY", f"image-moss-api unreachable: {exc}", 503) from exc
+            raise MossProviderError("MODEL_NOT_READY", f"image-moss unreachable: {exc}", 503) from exc
 
         if resp.status_code != 200:
             try:

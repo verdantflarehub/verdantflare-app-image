@@ -1,4 +1,4 @@
-"""Request/response schemas and domain validation for image-moss-api."""
+"""Request/response schemas and domain validation for image-moss."""
 from __future__ import annotations
 
 import base64
@@ -97,7 +97,7 @@ class GenerateResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
-    service: str = "image-moss-api"
+    service: str = "image-moss"
     model: str = "moss-image-sft-int8-convrot"
     comfyui_version: str
     comfyui_commit: str

@@ -7,8 +7,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.source="https://github.com/verdantflarehub/verdantflare-app-image"
-LABEL org.opencontainers.image.title="VerdantFlare Image Face Fusion API"
-LABEL org.opencontainers.image.version="0.2.2"
+LABEL org.opencontainers.image.title="VerdantFlare Image Face Fusion"
+LABEL org.opencontainers.image.version="0.2.3"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

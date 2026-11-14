@@ -1,23 +1,23 @@
-name: Image MOSS API
+name: Image MOSS
 
 on:
   push:
     branches: [release]
     paths:
-      - services/image-moss-api/**
-      - .github/workflows/image-moss-api.yml
+      - services/image-moss/**
+      - .github/workflows/image-moss.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: image-moss-api-release
+  group: image-moss-release
   cancel-in-progress: false
 
 env:
-  SERVICE: image-moss-api
-  VERSION: 0.2.1
+  SERVICE: image-moss
+  VERSION: 0.2.2
 
 jobs:
   build:
@@ -50,5 +50,7 @@ jobs:
           provenance: false
           sbom: false
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
-          cache-from: type=gha,scope=${{ env.SERVICE }}
+          cache-from: |
+            type=gha,scope=${{ env.SERVICE }}
+            type=gha,scope=image-moss-api
           cache-to: type=gha,mode=max,scope=${{ env.SERVICE }}

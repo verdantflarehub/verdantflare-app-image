@@ -15,7 +15,7 @@ VerdantFlare App Image 是部署在 VerdantFlare Station 上的 AI 图像资产�
 
 ## 1. 架构定位：告别套娃，单微服务收敛
 
-生图与编辑对接云端 API，由 `image-mcp-server` 统一提供入口。图片换脸由内部 `image-face-fusion-api` 承载官方 FaceFusion worker；两项服务独立构建。换脸契约及当前验证状态见设计仓库 [Face Fusion 规范](../docs/design/app/image/face-fusion.md)。
+生图与编辑对接云端 API，由 `image-mcp-server` 统一提供入口。图片换脸由内部 `image-face-fusion` 承载官方 FaceFusion worker；两项服务独立构建。换脸契约及当前验证状态见设计仓库 [Face Fusion 规范](../docs/design/app/image/face-fusion.md)。
 
 ```mermaid
 flowchart TD

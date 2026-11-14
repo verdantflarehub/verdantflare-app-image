@@ -1,4 +1,4 @@
-"""Unit tests for image-moss-api schemas, layout serialization, workflow, and endpoints."""
+"""Unit tests for image-moss schemas, layout serialization, workflow, and endpoints."""
 from __future__ import annotations
 
 import asyncio

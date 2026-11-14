@@ -1,10 +1,10 @@
-"""Shared GPU task lease and on-demand scale for image-moss-api.
+"""Shared GPU task lease and on-demand scale for image-moss.
 
 Follows the 5090 GPU lease protocol (`gpu-task-moss-image`):
 - Write this role's Lease first, then read conflicting peers (`music3`).
 - A live conflicting peer (`gpu-task-music3`) means release and retry.
 - `moss-image` does not conflict with `h3` or `indextts2`.
-- Scales `Deployment/image-moss-api` from 0 -> 1 when held and back to 0 after
+- Scales `Deployment/image-moss` from 0 -> 1 when held and back to 0 after
   the 10-minute (600s) idle window.
 """
 from __future__ import annotations
@@ -225,7 +225,11 @@ class GpuCoordinator:
             os.environ.get("MOSS_GPU_TASK_HOLDER", "").strip()
             or f"{role}/{os.environ.get('HOSTNAME', 'local')}"
         )
-        deployment = os.environ.get("MOSS_GPU_TASK_DEPLOYMENT", "image-moss-api").strip() or None
+        deployment = (
+            os.environ.get("MOSS_GPU_TASK_DEPLOYMENT")
+            or os.environ.get("MOSS_GPU_DEPLOYMENT_NAME")
+            or "image-moss"
+        ).strip() or None
         return cls(
             api=K8sApi(namespace),
             role=role,

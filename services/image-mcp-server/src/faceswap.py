@@ -103,7 +103,7 @@ async def handle_faceswap(
     project_id: str | None = None,
     target_face_index: int = 0,
 ) -> dict[str, Any]:
-    """执行阶段二骨相置换与面容超分融合，内部向 image-face-fusion-api 发起零网络拷贝 RPC。"""
+    """执行阶段二骨相置换与面容超分融合，内部向 image-face-fusion 发起零网络拷贝 RPC。"""
     # 1. 字段校验与范围规约
     strength = max(0.5, min(1.0, float(identity_strength)))
     fidelity = max(0.0, min(1.0, float(restoration_fidelity)))
@@ -145,7 +145,7 @@ async def handle_faceswap(
     output_physical_path = project_dir / f"{output_artifact_id}-{output_filename}"
 
     # 5. 构造微服务请求负载
-    api_url = os.environ.get("IMAGE_FACE_FUSION_API_URL", "http://image-face-fusion-api:8000").rstrip("/")
+    api_url = os.environ.get("IMAGE_FACE_FUSION_API_URL", "http://image-face-fusion:8000").rstrip("/")
     fuse_endpoint = f"{api_url}/v1/fuse"
     timeout_sec = float(os.environ.get("IMAGE_FACE_FUSION_TIMEOUT", "150.0"))
 

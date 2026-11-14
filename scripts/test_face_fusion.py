@@ -12,9 +12,9 @@ import argparse
 from pathlib import Path
 from PIL import Image
 
-# Add services/image-face-fusion-api to path
+# Add services/image-face-fusion to path
 repo_root = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(repo_root / "services" / "image-face-fusion-api"))
+sys.path.insert(0, str(repo_root / "services" / "image-face-fusion"))
 
 from src.pipeline import FaceFusionPipeline, FaceFusionPipelineError
 

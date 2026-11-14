@@ -1,23 +1,23 @@
-name: Image Face Fusion API
+name: Image Face Fusion
 
 on:
   push:
     branches: [release]
     paths:
-      - services/image-face-fusion-api/**
-      - .github/workflows/image-face-fusion-api.yml
+      - services/image-face-fusion/**
+      - .github/workflows/image-face-fusion.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: image-face-fusion-api-release
+  group: image-face-fusion-release
   cancel-in-progress: false
 
 env:
-  SERVICE: image-face-fusion-api
-  VERSION: 0.2.2
+  SERVICE: image-face-fusion
+  VERSION: 0.2.3
 
 jobs:
   build:
@@ -50,6 +50,8 @@ jobs:
           provenance: false
           sbom: false
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.version }}
-          cache-from: type=gha,scope=${{ env.SERVICE }}
+          cache-from: |
+            type=gha,scope=${{ env.SERVICE }}
+            type=gha,scope=image-face-fusion-api
           cache-to: type=gha,mode=max,scope=${{ env.SERVICE }}
 

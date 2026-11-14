@@ -212,7 +212,7 @@ class MossImagePipeline:
         healthy = bool(self._models_verified and reachable and gpu_info.get("available", False))
         return {
             "status": "healthy" if healthy else "unhealthy",
-            "service": "image-moss-api",
+            "service": "image-moss",
             "model": "moss-image-sft-int8-convrot",
             "comfyui_version": COMFYUI_VERSION,
             "comfyui_commit": COMFYUI_COMMIT,

@@ -1,4 +1,4 @@
-"""Service configuration for image-moss-api."""
+"""Service configuration for image-moss."""
 from __future__ import annotations
 
 from dataclasses import dataclass
