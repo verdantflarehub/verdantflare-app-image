@@ -412,9 +412,220 @@ class ComfyUILocalChannelTests(unittest.TestCase):
         )
         journal = self.queue._comfyui_journal(rec.task_id)
         journal.write_text(json.dumps({"remote_task_id": REMOTE_TASK_ID}), encoding="utf-8")
-        self.assertTrue(self.queue.cancel_comfyui_task(rec))
+        outcome = self.queue.cancel_comfyui_task(rec)
+        self.assertTrue(outcome)
+        self.assertTrue(outcome.confirmed_terminal)
+        self.assertEqual(outcome.terminal_status, "canceled")
         cancel_call = next(c for c in self.headless_calls if c["name"] == "task.cancel")
         self.assertEqual(cancel_call["arguments"]["task_id"], REMOTE_TASK_ID)
+
+    def test_cancel_and_status_enforce_caller_org_and_write_authorization(self) -> None:
+        from src import server as server_mod
+
+        ref_art = self.artifacts.create_from_bytes(
+            project_id=PROJECT_A,
+            filename="ref-auth.png",
+            data=_make_png_bytes((70, 90, 110)),
+            media_type="image/png",
+        )
+        allow_write = True
+
+        def strict_authorize(pid: str, _auth=None, *, require_write: bool = True) -> dict[str, str]:
+            caller = CALLER.get() or {}
+            if pid != PROJECT_A:
+                raise ValueError("project_access_denied")
+            if caller.get("organization_id") != ORG_A:
+                raise ValueError("project_access_denied")
+            if require_write and not allow_write:
+                raise ValueError("project_access_denied")
+            return {"organization_id": caller["organization_id"], "user_id": caller["user_id"]}
+
+        self.queue.google_authorize = strict_authorize
+        tok = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+        try:
+            prepared = self.queue.prepare(
+                "comfyui",
+                PROJECT_A,
+                {
+                    "action": "edit",
+                    "model": "comfyui:sdxl-lora-img2img@1.0.0",
+                    "prompt": "auth guarded cancel",
+                    "source_artifact_id": ref_art.artifact_id,
+                },
+            )
+        finally:
+            CALLER.reset(tok)
+
+        rec = self.tasks.create(
+            project_id=PROJECT_A,
+            idempotency_key="idem-comfy-auth-cancel-1",
+            engine="comfyui",
+            model=prepared["model"],
+            request_params=prepared,
+        )
+
+        with (
+            patch.object(server_mod, "tasks", self.tasks),
+            patch.object(server_mod, "artifacts", self.artifacts),
+            patch.object(server_mod, "queue_manager", self.queue),
+        ):
+            # 1. Unauthenticated caller without CALLER cannot cancel or inspect
+            with self.assertRaisesRegex(ValueError, "verified_studio_identity_required"):
+                server_mod.image_cancel(rec.task_id)
+            with self.assertRaisesRegex(ValueError, "verified_studio_identity_required"):
+                server_mod.image_status(rec.task_id)
+
+            # 2. Cross-org caller ORG_B cannot cancel, inspect status, or read result
+            tok_b = CALLER.set({"organization_id": ORG_B, "user_id": USER_A})
+            try:
+                with self.assertRaisesRegex(ValueError, "project_access_denied"):
+                    server_mod.image_cancel(rec.task_id)
+                with self.assertRaisesRegex(ValueError, "project_access_denied"):
+                    server_mod.image_status(rec.task_id)
+                with self.assertRaisesRegex(ValueError, "project_access_denied"):
+                    server_mod.image_result(rec.task_id)
+            finally:
+                CALLER.reset(tok_b)
+
+            # 3. Same-org caller with read-only access (write revoked) can read status, but cannot cancel
+            allow_write = False
+            tok_ro = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+            try:
+                st_payload = json.loads(server_mod.image_status(rec.task_id).content[0].text)
+                self.assertEqual(st_payload["task_id"], rec.task_id)
+                with self.assertRaisesRegex(ValueError, "project_access_denied"):
+                    server_mod.image_cancel(rec.task_id)
+            finally:
+                CALLER.reset(tok_ro)
+            self.assertEqual(self.tasks.get(rec.task_id).status, "queued")
+
+    def test_unconfirmed_cancel_replays_submit_keeps_journal_and_blocks_delete(self) -> None:
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+        from src import dashboard as dash_mod
+        from src import server as server_mod
+
+        ref_art = self.artifacts.create_from_bytes(
+            project_id=PROJECT_A,
+            filename="ref-unconfirmed.png",
+            data=_make_png_bytes((90, 120, 150)),
+            media_type="image/png",
+        )
+        tok = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+        try:
+            prepared = self.queue.prepare(
+                "comfyui",
+                PROJECT_A,
+                {
+                    "action": "edit",
+                    "model": "comfyui:sdxl-lora-img2img@1.0.0",
+                    "prompt": "unconfirmed cancel test",
+                    "source_artifact_id": ref_art.artifact_id,
+                },
+            )
+        finally:
+            CALLER.reset(tok)
+
+        rec = self.tasks.create(
+            project_id=PROJECT_A,
+            idempotency_key="idem-comfy-unconfirmed-1",
+            engine="comfyui",
+            model=prepared["model"],
+            request_params=prepared,
+        )
+        self.tasks.update_status(rec.task_id, "running", error="submission_unknown", phase="submission_unknown")
+        journal = self.queue._comfyui_journal(rec.task_id)
+        # Simulate api.invoke transport timeout: submitted=True persisted, remote_task_id missing!
+        journal.write_text(
+            json.dumps({"submitted": True, "bridged_inputs": {"ref_image": STUDIO_IN_AID}}),
+            encoding="utf-8",
+        )
+
+        remote_cancel_confirmed = False
+        orig_call = self.comfyui._call_headless_tool
+
+        def staged_headless(principal, tool_name, arguments):
+            if tool_name == "task.cancel" and not remote_cancel_confirmed:
+                self.headless_calls.append({"name": tool_name, "arguments": arguments})
+                return {
+                    "task_id": REMOTE_TASK_ID,
+                    "project_id": arguments["project_id"],
+                    "state": "reconciling",
+                    "cancel_requested": True,
+                }
+            if tool_name == "task.get" and not remote_cancel_confirmed:
+                self.headless_calls.append({"name": tool_name, "arguments": arguments})
+                return {
+                    "task_id": REMOTE_TASK_ID,
+                    "project_id": arguments["project_id"],
+                    "state": "reconciling",
+                    "result": None,
+                }
+            if tool_name == "task.get" and remote_cancel_confirmed:
+                self.headless_calls.append({"name": tool_name, "arguments": arguments})
+                return {
+                    "task_id": REMOTE_TASK_ID,
+                    "project_id": arguments["project_id"],
+                    "state": "cancelled",
+                    "result": None,
+                }
+            return orig_call(principal, tool_name, arguments)
+
+        app = Starlette(routes=[Route("/api/tasks/{task_id}", dash_mod.api_delete_task, methods=["DELETE"])])
+        app.state.tasks = self.tasks
+        app.state.queue_manager = self.queue
+
+        with (
+            patch.object(self.comfyui, "_call_headless_tool", side_effect=staged_headless),
+            patch.object(server_mod, "tasks", self.tasks),
+            patch.object(server_mod, "artifacts", self.artifacts),
+            patch.object(server_mod, "queue_manager", self.queue),
+            patch.object(dash_mod, "check_auth", return_value=True),
+        ):
+            tok_c = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+            try:
+                cancel_res = json.loads(server_mod.image_cancel(rec.task_id).content[0].text)
+            finally:
+                CALLER.reset(tok_c)
+
+            # Must replay api.invoke with deterministic idempotency key and keep local status non-terminal!
+            self.assertFalse(cancel_res["canceled"])
+            self.assertTrue(cancel_res["cancel_pending"])
+            self.assertEqual(cancel_res["status"], "running")
+            self.assertEqual(cancel_res["phase"], "canceling")
+            saved_journal = json.loads(journal.read_text(encoding="utf-8"))
+            self.assertEqual(saved_journal["remote_task_id"], REMOTE_TASK_ID)
+            self.assertTrue(journal.with_suffix(".cancel").exists())
+
+            # cleanup_tasks must NOT wipe journal or delete task while unconfirmed
+            clean_res = self.queue.cleanup_tasks(clean_unknown=True)
+            self.assertEqual(clean_res["cleaned_unknown_count"], 0)
+            self.assertTrue(journal.exists())
+
+            # DELETE /api/tasks/{id} must reject with 409 while remote cancel is unconfirmed
+            with TestClient(app) as client:
+                del_pending = client.delete(f"/api/tasks/{rec.task_id}")
+                self.assertEqual(del_pending.status_code, 409)
+                self.assertEqual(del_pending.json()["error"], "task_cancel_pending")
+            self.assertTrue(journal.exists())
+
+            # Once ComfyUI confirms terminal cancelled, status converges to canceled and DELETE succeeds!
+            remote_cancel_confirmed = True
+            tok_s = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+            try:
+                status_res = json.loads(server_mod.image_status(rec.task_id).content[0].text)
+            finally:
+                CALLER.reset(tok_s)
+            self.assertEqual(status_res["status"], "canceled")
+            self.assertEqual(status_res["phase"], "canceled")
+
+            with TestClient(app) as client:
+                del_ok = client.delete(f"/api/tasks/{rec.task_id}")
+                self.assertEqual(del_ok.status_code, 200)
+                self.assertTrue(del_ok.json()["deleted"])
+            self.assertFalse(journal.exists())
+            self.assertFalse(journal.with_suffix(".cancel").exists())
 
 
 if __name__ == "__main__":

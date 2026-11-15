@@ -927,6 +927,8 @@ async def api_cleanup_tasks(request: Request) -> Response:
     if clean_unknown:
         running_records, _ = tasks_store.list_tasks(status="running", limit=10000, include_nsfw=True)
         for rec in running_records:
+            if rec.engine == "comfyui":
+                continue
             if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown":
                 tasks_store.delete_task(rec.task_id)
                 cleaned_unknown_ids.append(rec.task_id)
@@ -956,19 +958,41 @@ async def api_delete_task(request: Request) -> Response:
         tasks_store: TaskStore = request.app.state.tasks
         rec = tasks_store.get(task_id)
         queue_mgr = getattr(request.app.state, "queue_manager", None)
-        if rec.engine == "comfyui" and queue_mgr is not None:
-            if rec.status in ("queued", "running") or rec.phase in ("submission_unknown", "collect_retry"):
+        if rec.engine == "comfyui":
+            if rec.status not in ("completed", "failed", "canceled"):
+                if queue_mgr is None:
+                    return JSONResponse(
+                        {"error": "task_cancel_pending", "status": rec.status, "task_id": task_id},
+                        status_code=409,
+                    )
                 try:
-                    await asyncio.to_thread(queue_mgr.cancel_comfyui_task, rec)
+                    outcome = await asyncio.to_thread(queue_mgr.cancel_comfyui_task, rec)
+                except Exception:
+                    outcome = None
+                if outcome is None or not outcome.confirmed_terminal:
+                    tasks_store.update_status(
+                        task_id,
+                        "running",
+                        error="cancel_requested",
+                        phase="canceling",
+                    )
+                    return JSONResponse(
+                        {
+                            "error": "task_cancel_pending",
+                            "status": "running",
+                            "phase": "canceling",
+                            "task_id": task_id,
+                        },
+                        status_code=409,
+                    )
+            if queue_mgr is not None:
+                try:
+                    cj = queue_mgr._comfyui_journal(task_id)
+                    for p in (cj, cj.with_suffix(".tmp"), cj.with_suffix(".cancel")):
+                        if p.exists():
+                            p.unlink(missing_ok=True)
                 except Exception:
                     pass
-            try:
-                cj = queue_mgr._comfyui_journal(task_id)
-                for p in (cj, cj.with_suffix(".tmp")):
-                    if p.exists():
-                        p.unlink(missing_ok=True)
-            except Exception:
-                pass
         if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown":
             runtime = rec.request_params.get("channel_runtime")
             org = (rec.request_params.get("channel_authority") or {}).get("organization_id")

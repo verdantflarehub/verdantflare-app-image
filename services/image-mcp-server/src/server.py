@@ -74,7 +74,9 @@ queue_manager = TaskQueueManager(
     grok_channel=grok_channel,
     chatgpt_channel=chatgpt_channel,
     channel_directory=channel_discovery.directory if channel_discovery else None,
-    google_authorize=lambda project_id, authority: authorize(authority_client, project_id, authority),
+    google_authorize=lambda project_id, authority=None, *, require_write=True: authorize(
+        authority_client, project_id, authority, require_write=require_write
+    ),
 )
 
 mcp = MCPServer("VerdantFlare Image")
@@ -919,15 +921,41 @@ def image_rate_content(
     return _result(res)
 
 
+def _authorize_task_operation(task, *, require_write: bool) -> None:
+    if task.engine == "comfyui":
+        queue_manager.authorize_task_caller(task, require_write=require_write)
+        return
+    if not require_write:
+        return
+    caller = CALLER.get()
+    has_caller_identity = isinstance(caller, dict) and bool(
+        str(caller.get("organization_id") or "").strip()
+        or str(caller.get("user_id") or "").strip()
+    )
+    project_auth_url = os.environ.get("IMAGE_PROJECT_SERVICE_URL", "").strip()
+    saved_org = str((task.request_params.get("channel_authority") or {}).get("organization_id") or "").strip()
+    if project_auth_url:
+        verified = authorize(authority_client, task.project_id, None, require_write=True)
+        if saved_org and str(verified.get("organization_id") or "").strip() != saved_org:
+            raise ValueError("project_access_denied")
+    elif has_caller_identity:
+        caller_org = str(caller.get("organization_id") or "").strip()
+        if not caller_org or not str(caller.get("user_id") or "").strip():
+            raise ValueError("verified_studio_identity_required")
+        if saved_org and caller_org != saved_org:
+            raise ValueError("project_access_denied")
+
+
 @mcp.tool(name="image.status")
 def image_status(task_id: str) -> types.CallToolResult:
     task = tasks.get(task_id)
+    _authorize_task_operation(task, require_write=False)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
-    if task.status == "running" and task.phase in {"submission_unknown", "collect_retry"}:
+    if task.status == "running" and task.phase in {"submission_unknown", "collect_retry", "canceling"}:
         try:
             if task.engine == "comfyui":
-                queue_manager.recover_comfyui()
+                queue_manager.poll_comfyui_task(task.task_id)
             else:
                 queue_manager._recover_channel_unknown(task)
             task = tasks.get(task_id)
@@ -943,7 +971,7 @@ def image_status(task_id: str) -> types.CallToolResult:
             "artifact_id": task.artifact_id,
             "error": task.error,
             "phase": task.phase,
-            "needs_attention": task.phase in {"submission_unknown", "collect_retry"},
+            "needs_attention": task.phase in {"submission_unknown", "collect_retry", "canceling"},
         }
     )
 
@@ -953,12 +981,54 @@ def image_cancel(task_id: str, project_id: str | None = None) -> types.CallToolR
     task = tasks.get(task_id)
     if project_id and task.project_id != project_id:
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    _authorize_task_operation(task, require_write=True)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
     if task.status in {"completed", "failed", "canceled"}:
         return _result({"task_id": task.task_id, "status": task.status, "canceled": task.status == "canceled"})
     if task.engine == "comfyui":
-        queue_manager.cancel_comfyui_task(task)
+        outcome = queue_manager.cancel_comfyui_task(task)
+        if not outcome.confirmed_terminal:
+            updated = tasks.update_status(
+                task.task_id,
+                "running",
+                error="cancel_requested",
+                phase="canceling",
+            )
+            return _result(
+                {
+                    "task_id": updated.task_id,
+                    "status": updated.status,
+                    "phase": updated.phase,
+                    "canceled": False,
+                    "cancel_pending": True,
+                    "reason": outcome.reason,
+                }
+            )
+        if outcome.terminal_status == "completed":
+            queue_manager.poll_comfyui_task(task.task_id)
+            refreshed = tasks.get(task.task_id)
+            return _result(
+                {
+                    "task_id": refreshed.task_id,
+                    "status": refreshed.status,
+                    "canceled": False,
+                }
+            )
+        if outcome.terminal_status == "failed":
+            updated = tasks.update_status(
+                task.task_id,
+                "failed",
+                error="comfyui_execution_failed",
+                phase="failed",
+            )
+            return _result(
+                {
+                    "task_id": updated.task_id,
+                    "status": updated.status,
+                    "canceled": False,
+                }
+            )
     updated = tasks.update_status(task.task_id, "canceled", error="canceled_by_caller", phase="canceled")
     return _result({"task_id": updated.task_id, "status": updated.status, "canceled": True})
 
@@ -966,6 +1036,7 @@ def image_cancel(task_id: str, project_id: str | None = None) -> types.CallToolR
 @mcp.tool(name="image.result")
 def image_result(task_id: str, execution_proof_only: bool = False) -> types.CallToolResult:
     task = tasks.get(task_id)
+    _authorize_task_operation(task, require_write=False)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
     if execution_proof_only:

@@ -955,6 +955,7 @@ class ComfyUIWorkflowProvider:
         if not slug or not version:
             slug, version = parse_comfyui_model_id(params.get("model"))
 
+        cancel_marker = journal_path.with_suffix(".cancel")
         journal: dict[str, Any] = {}
         if journal_path.exists():
             try:
@@ -966,6 +967,8 @@ class ComfyUIWorkflowProvider:
         remote_task_id = str(journal.get("remote_task_id") or "").strip()
 
         if not remote_task_id:
+            if cancel_marker.exists() and not journal.get("submitted"):
+                raise ComfyUIProviderError("canceled_by_caller", uncertain=False)
             resolved_params = dict(wf_info.get("resolved_params") or {})
             media_slots = dict(wf_info.get("media_slot_types") or {})
             bridged_inputs = dict(journal.get("bridged_inputs") or {})
@@ -973,6 +976,8 @@ class ComfyUIWorkflowProvider:
                 if slot_name not in resolved_params:
                     continue
                 if slot_name not in bridged_inputs:
+                    if cancel_marker.exists() and not journal.get("submitted"):
+                        raise ComfyUIProviderError("canceled_by_caller", uncertain=False)
                     bridged_inputs[slot_name] = self._bridge_local_input_to_studio(
                         principal=principal,
                         project_id=project_id,
@@ -983,6 +988,9 @@ class ComfyUIWorkflowProvider:
                     journal["bridged_inputs"] = bridged_inputs
                     self._write_journal(journal_path, journal)
                 resolved_params[slot_name] = bridged_inputs[slot_name]
+
+            if cancel_marker.exists() and not journal.get("submitted"):
+                raise ComfyUIProviderError("canceled_by_caller", uncertain=False)
 
             if on_phase is not None:
                 on_phase("submitting")
@@ -1016,9 +1024,32 @@ class ComfyUIWorkflowProvider:
             "running",
             "collecting",
             "reconciling",
+            "cancelling",
         }
+        cancel_dispatched = False
         deadline = time.monotonic() + self._timeout_seconds
         while True:
+            if cancel_marker.exists() and not cancel_dispatched:
+                cancel_dispatched = True
+                if on_phase is not None:
+                    on_phase("canceling")
+                try:
+                    cancel_resp = self._call_headless_tool(
+                        principal,
+                        "task.cancel",
+                        {
+                            "project_id": project_id,
+                            "idempotency_key": f"cancel-{task_id}",
+                            "task_id": remote_task_id,
+                        },
+                    )
+                    if isinstance(cancel_resp, dict) and cancel_resp.get("state"):
+                        remote_task = cancel_resp
+                        journal["last_remote_task"] = remote_task
+                        self._write_journal(journal_path, journal)
+                except Exception:
+                    pass
+
             if remote_task is None or remote_task.get("state") in in_flight_states:
                 if remote_task is not None and remote_task.get("state") in {
                     "queued",
@@ -1026,13 +1057,15 @@ class ComfyUIWorkflowProvider:
                     "running",
                     "collecting",
                     "reconciling",
+                    "cancelling",
                 }:
                     if on_phase is not None:
-                        on_phase(
-                            "collecting"
-                            if remote_task.get("state") == "collecting"
-                            else "generating"
-                        )
+                        if cancel_marker.exists() or remote_task.get("state") == "cancelling":
+                            on_phase("canceling")
+                        elif remote_task.get("state") == "collecting":
+                            on_phase("collecting")
+                        else:
+                            on_phase("generating")
                     if time.monotonic() >= deadline:
                         raise ComfyUIProviderError("comfyui_poll_timeout", uncertain=True)
                     time.sleep(self._poll_interval)
@@ -1055,6 +1088,8 @@ class ComfyUIWorkflowProvider:
             if state == "succeeded":
                 break
             if state in {"failed", "cancelled"}:
+                if state == "cancelled" and cancel_marker.exists():
+                    raise ComfyUIProviderError("canceled_by_caller", uncertain=False)
                 err_obj = remote_task.get("error")
                 code = "comfyui_execution_cancelled" if state == "cancelled" else "comfyui_execution_failed"
                 if isinstance(err_obj, dict) and err_obj.get("code"):
@@ -1096,22 +1131,95 @@ class ComfyUIWorkflowProvider:
         project_id: str,
         params: dict[str, Any],
         journal_path: Path,
-    ) -> bool:
+        artifacts: ArtifactStore | None = None,
+        worker_active: bool = False,
+    ) -> ComfyUICancelResult:
+        journal_path.parent.mkdir(parents=True, exist_ok=True)
+        cancel_marker = journal_path.with_suffix(".cancel")
+        if not cancel_marker.exists():
+            cancel_marker.write_text("cancel_requested", encoding="utf-8")
+
         if not journal_path.exists():
-            return False
+            if worker_active:
+                return ComfyUICancelResult(confirmed_terminal=False, reason="worker_starting")
+            return ComfyUICancelResult(
+                confirmed_terminal=True,
+                terminal_status="canceled",
+                remote_state="not_submitted",
+            )
         try:
             journal = json.loads(journal_path.read_text(encoding="utf-8"))
         except Exception:
-            return False
-        remote_task_id = str(journal.get("remote_task_id") or "").strip()
+            return ComfyUICancelResult(confirmed_terminal=False, reason="journal_unreadable")
+
         auth_info = params.get("comfyui_authority") or {}
+        wf_info = params.get("comfyui_workflow") or {}
         org_id = str(auth_info.get("organization_id") or "").strip()
         user_id = str(auth_info.get("user_id") or "").strip()
-        if not is_uuid4_or_7(remote_task_id) or not is_uuid7(org_id) or not is_uuid7(user_id):
-            return False
+        if not is_uuid7(org_id) or not is_uuid7(user_id):
+            return ComfyUICancelResult(confirmed_terminal=False, reason="comfyui_authority_missing")
         principal = _Principal(organization_id=org_id, user_id=user_id)
+
+        remote_task_id = str(journal.get("remote_task_id") or "").strip()
+        if not remote_task_id:
+            if not journal.get("submitted"):
+                if worker_active:
+                    return ComfyUICancelResult(confirmed_terminal=False, reason="worker_preparing")
+                return ComfyUICancelResult(
+                    confirmed_terminal=True,
+                    terminal_status="canceled",
+                    remote_state="not_submitted",
+                )
+            if worker_active:
+                return ComfyUICancelResult(confirmed_terminal=False, reason="submit_in_flight")
+            try:
+                slug = str(wf_info.get("endpoint_slug") or "").strip()
+                version = str(wf_info.get("version") or "").strip()
+                if not slug or not version:
+                    slug, version = parse_comfyui_model_id(params.get("model"))
+                resolved_params = dict(wf_info.get("resolved_params") or {})
+                media_slots = dict(wf_info.get("media_slot_types") or {})
+                bridged_inputs = dict(journal.get("bridged_inputs") or {})
+                for slot_name in media_slots:
+                    if slot_name not in resolved_params:
+                        continue
+                    if slot_name in bridged_inputs:
+                        resolved_params[slot_name] = bridged_inputs[slot_name]
+                    elif artifacts is not None:
+                        bridged_inputs[slot_name] = self._bridge_local_input_to_studio(
+                            principal=principal,
+                            project_id=project_id,
+                            task_id=task_id,
+                            local_artifact_id=str(resolved_params[slot_name]),
+                            artifacts=artifacts,
+                        )
+                        resolved_params[slot_name] = bridged_inputs[slot_name]
+                replayed = self._call_headless_tool(
+                    principal,
+                    "api.invoke",
+                    {
+                        "project_id": project_id,
+                        "idempotency_key": f"imgmcp-{task_id}",
+                        "endpoint_slug": slug,
+                        "version": version,
+                        "params": resolved_params,
+                    },
+                )
+                remote_task_id = str(replayed.get("task_id") or "").strip()
+                if not is_uuid4_or_7(remote_task_id):
+                    return ComfyUICancelResult(confirmed_terminal=False, reason="comfyui_invalid_task_id")
+                journal["bridged_inputs"] = bridged_inputs
+                journal["remote_task_id"] = remote_task_id
+                journal["last_remote_task"] = replayed
+                self._write_journal(journal_path, journal)
+            except Exception:
+                return ComfyUICancelResult(confirmed_terminal=False, reason="remote_recovery_unavailable")
+
+        if not is_uuid4_or_7(remote_task_id):
+            return ComfyUICancelResult(confirmed_terminal=False, reason="comfyui_invalid_task_id")
+
         try:
-            self._call_headless_tool(
+            cancel_resp = self._call_headless_tool(
                 principal,
                 "task.cancel",
                 {
@@ -1120,9 +1228,63 @@ class ComfyUIWorkflowProvider:
                     "task_id": remote_task_id,
                 },
             )
-            return True
         except Exception:
-            return False
+            return ComfyUICancelResult(confirmed_terminal=False, reason="cancel_transport_error")
+
+        if worker_active:
+            return ComfyUICancelResult(
+                confirmed_terminal=False,
+                remote_state=str(cancel_resp.get("state") or "") or None,
+                reason="worker_draining_cancel",
+            )
+
+        latest_resp = cancel_resp
+        state = str(latest_resp.get("state") or "")
+        if state not in {"cancelled", "succeeded", "failed"}:
+            try:
+                latest_resp = self._call_headless_tool(
+                    principal,
+                    "task.get",
+                    {
+                        "project_id": project_id,
+                        "task_id": remote_task_id,
+                    },
+                )
+                state = str(latest_resp.get("state") or "")
+            except Exception:
+                pass
+
+        journal["cancel_requested"] = True
+        journal["last_remote_task"] = latest_resp
+        try:
+            self._write_journal(journal_path, journal)
+        except Exception:
+            pass
+
+        if state == "cancelled":
+            return ComfyUICancelResult(
+                confirmed_terminal=True,
+                terminal_status="canceled",
+                remote_state="cancelled",
+            )
+        if state == "failed":
+            return ComfyUICancelResult(
+                confirmed_terminal=True,
+                terminal_status="failed",
+                remote_state="failed",
+            )
+        if state == "succeeded":
+            return ComfyUICancelResult(
+                confirmed_terminal=True,
+                terminal_status="completed",
+                remote_state="succeeded",
+                reason="remote_already_succeeded",
+            )
+        return ComfyUICancelResult(
+            confirmed_terminal=False,
+            remote_state=state or None,
+            reason="remote_cancel_pending",
+        )
 
     @staticmethod
     def _write_journal(path: Path, data: dict[str, Any]) -> None:

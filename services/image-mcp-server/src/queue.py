@@ -23,7 +23,7 @@ from .providers.gemini import (
     SUPPORTED_GEMINI_MODELS,
 )
 from .providers.moss import DEFAULT_MOSS_MODEL, MossProvider
-from .providers.comfyui import ComfyUIProviderError, ComfyUIWorkflowProvider
+from .providers.comfyui import ComfyUICancelResult, ComfyUIProviderError, ComfyUIWorkflowProvider
 from .tasks import TaskRecord, TaskStore
 from .providers.grok import GrokImageProvider, GrokError
 from .providers.google_channel import ChannelUnavailable
@@ -451,6 +451,27 @@ class TaskQueueManager:
                         code = exc.code if isinstance(exc, ComfyUIProviderError) else "comfyui_execution_failed"
                         uncertain = isinstance(exc, ComfyUIProviderError) and exc.uncertain
                         journal = self._comfyui_journal(job.task_id)
+                        cancel_marker = journal.with_suffix(".cancel")
+                        cur_rec = self.tasks.get(job.task_id)
+                        cancel_requested = cancel_marker.exists() or cur_rec.error == "cancel_requested" or cur_rec.phase == "canceling"
+                        if not uncertain and cancel_requested and code in {"canceled_by_caller", "comfyui_execution_cancelled"}:
+                            self.tasks.update_status(
+                                job.task_id,
+                                "canceled",
+                                error="canceled_by_caller",
+                                phase="canceled",
+                                duration_seconds=duration,
+                            )
+                            continue
+                        if uncertain and cancel_requested:
+                            self.tasks.update_status(
+                                job.task_id,
+                                "running",
+                                error="cancel_requested",
+                                phase="canceling",
+                                duration_seconds=None,
+                            )
+                            continue
                         phase = "collect_retry" if journal.exists() else "submission_unknown"
                         self.tasks.update_status(
                             job.task_id,
@@ -671,7 +692,8 @@ class TaskQueueManager:
             running_records, _ = self.tasks.list_tasks(status="running", limit=10000, include_nsfw=True)
             unknown_records = [
                 rec for rec in running_records
-                if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown"
+                if rec.phase in ("submission_unknown", "collect_retry", "canceling")
+                or rec.error in ("submission_unknown", "cancel_requested")
             ]
             still_unknown: list[TaskRecord] = []
             for rec in unknown_records:
@@ -695,21 +717,23 @@ class TaskQueueManager:
                     except Exception:
                         pass
                 elif rec.engine == "comfyui":
-                    try:
-                        self._execute_comfyui(
-                            TaskJob(
-                                rec.task_id,
-                                rec.project_id,
-                                rec.engine,
-                                rec.request_params.get("action", "generate"),
-                                rec.request_params,
+                    cj = self._comfyui_journal(rec.task_id)
+                    if rec.phase != "canceling" and rec.error != "cancel_requested" and not cj.with_suffix(".cancel").exists():
+                        try:
+                            self._execute_comfyui(
+                                TaskJob(
+                                    rec.task_id,
+                                    rec.project_id,
+                                    rec.engine,
+                                    rec.request_params.get("action", "generate"),
+                                    rec.request_params,
+                                )
                             )
-                        )
-                        refreshed_c = self.tasks.get(rec.task_id)
-                        if refreshed_c.artifact_id and refreshed_c.status == "running":
-                            self.tasks.update_status(rec.task_id, "completed", error="", phase="completed")
-                    except Exception:
-                        pass
+                            refreshed_c = self.tasks.get(rec.task_id)
+                            if refreshed_c.artifact_id and refreshed_c.status == "running":
+                                self.tasks.update_status(rec.task_id, "completed", error="", phase="completed")
+                        except Exception:
+                            pass
 
                 refreshed = self.tasks.get(rec.task_id)
                 if refreshed.status == "completed":
@@ -739,13 +763,25 @@ class TaskQueueManager:
 
             for rec in still_unknown:
                 if rec.engine == "comfyui":
+                    outcome = ComfyUICancelResult(confirmed_terminal=False, reason="cancel_failed")
                     try:
-                        self.cancel_comfyui_task(rec)
+                        outcome = self.cancel_comfyui_task(rec)
                     except Exception:
-                        pass
+                        outcome = ComfyUICancelResult(confirmed_terminal=False, reason="cancel_failed")
+                    if not outcome.confirmed_terminal:
+                        try:
+                            self.tasks.update_status(
+                                rec.task_id,
+                                "running",
+                                error="cancel_requested",
+                                phase="canceling",
+                            )
+                        except Exception:
+                            pass
+                        continue
                     try:
                         cj = self._comfyui_journal(rec.task_id)
-                        for p in (cj, cj.with_suffix(".tmp")):
+                        for p in (cj, cj.with_suffix(".tmp"), cj.with_suffix(".cancel")):
                             if p.exists():
                                 p.unlink(missing_ok=True)
                     except Exception:
@@ -863,25 +899,81 @@ class TaskQueueManager:
                 phase="completed",
             )
 
+    def authorize_task_caller(self, rec: TaskRecord, *, require_write: bool) -> dict[str, str]:
+        if rec.engine == "comfyui":
+            return self.comfyui_provider.authorize_task_caller(
+                project_id=rec.project_id,
+                params=rec.request_params,
+                authorize_fn=self.google_authorize,
+                require_write=require_write,
+            )
+        return {}
+
     def recover_comfyui(self) -> None:
         records, _ = self.tasks.list_tasks(engine="comfyui", status="running", limit=10000, include_nsfw=True)
         for rec in records:
-            journal = self._comfyui_journal(rec.task_id)
+            self.poll_comfyui_task(rec.task_id)
+
+    def poll_comfyui_task(self, task_id: str) -> None:
+        rec = self.tasks.get(task_id)
+        if rec.engine != "comfyui" or rec.status != "running":
+            return
+        journal = self._comfyui_journal(rec.task_id)
+        cancel_marker = journal.with_suffix(".cancel")
+        cancel_requested = cancel_marker.exists() or rec.phase == "canceling" or rec.error == "cancel_requested"
+        if cancel_requested:
+            outcome = self.cancel_comfyui_task(rec)
+            if outcome.confirmed_terminal:
+                if outcome.terminal_status == "completed" and not rec.artifact_id:
+                    pass
+                elif outcome.terminal_status == "failed":
+                    self.tasks.update_status(rec.task_id, "failed", error="comfyui_execution_failed", phase="failed")
+                    return
+                else:
+                    self.tasks.update_status(rec.task_id, "canceled", error="canceled_by_caller", phase="canceled")
+                    return
+            else:
+                self.tasks.update_status(rec.task_id, "running", error="cancel_requested", phase="canceling")
+                return
+
+        lock = self._task_lock(rec.task_id)
+        if not lock.acquire(blocking=False):
+            return
+        try:
             if journal.exists():
                 try:
-                    self._execute_comfyui(
-                        TaskJob(
-                            rec.task_id,
-                            rec.project_id,
-                            rec.engine,
-                            rec.request_params.get("action", "generate"),
-                            rec.request_params,
-                        )
+                    raw_bytes, mime_type, _remote_filename, meta = self.comfyui_provider.execute_or_recover(
+                        task_id=rec.task_id,
+                        project_id=rec.project_id,
+                        params=rec.request_params,
+                        artifacts=self.artifacts,
+                        journal_path=journal,
+                        on_phase=lambda ph: self.tasks.update_status(rec.task_id, "running", phase=ph),
                     )
-                    self.tasks.update_status(rec.task_id, "completed", error="", phase="completed")
+                    extension, detected_media_type = _image_storage_type(raw_bytes)
+                    final_media_type = mime_type if mime_type in {"image/png", "image/jpeg", "image/webp"} else detected_media_type
+                    filename = f"comfyui-{rec.task_id}{extension}"
+                    artifact_id = "art-" + hashlib.sha256(rec.task_id.encode("utf-8")).hexdigest()[:16]
+                    art_rec = self.artifacts.create_from_bytes(
+                        project_id=rec.project_id,
+                        artifact_id=artifact_id,
+                        filename=filename,
+                        data=raw_bytes,
+                        media_type=final_media_type,
+                        metadata=meta,
+                    )
+                    self.tasks.update_status(
+                        rec.task_id,
+                        "completed",
+                        artifact_id=art_rec.artifact_id,
+                        error="",
+                        phase="completed",
+                    )
                 except ComfyUIProviderError as exc:
                     if exc.uncertain:
                         self.tasks.update_status(rec.task_id, "running", error=exc.code, phase="collect_retry")
+                    elif cancel_marker.exists() and exc.code in {"canceled_by_caller", "comfyui_execution_cancelled"}:
+                        self.tasks.update_status(rec.task_id, "canceled", error="canceled_by_caller", phase="canceled")
                     else:
                         self.tasks.update_status(rec.task_id, "failed", error=exc.code, phase="failed")
                 except Exception:
@@ -893,17 +985,42 @@ class TaskQueueManager:
                     error=rec.error or "submission_unknown",
                     phase="submission_unknown",
                 )
+        finally:
+            lock.release()
 
-    def cancel_comfyui_task(self, rec: TaskRecord) -> bool:
+    def cancel_comfyui_task(self, rec: TaskRecord) -> ComfyUICancelResult:
         if rec.engine != "comfyui":
-            return False
+            return ComfyUICancelResult(confirmed_terminal=False, reason="unsupported_engine")
         journal = self._comfyui_journal(rec.task_id)
-        return self.comfyui_provider.cancel_remote_task(
-            task_id=rec.task_id,
-            project_id=rec.project_id,
-            params=rec.request_params,
-            journal_path=journal,
-        )
+        lock = self._task_lock(rec.task_id)
+        acquired = lock.acquire(blocking=False)
+        if not acquired:
+            return self.comfyui_provider.cancel_remote_task(
+                task_id=rec.task_id,
+                project_id=rec.project_id,
+                params=rec.request_params,
+                journal_path=journal,
+                artifacts=self.artifacts,
+                worker_active=True,
+            )
+        try:
+            fresh = self.tasks.get(rec.task_id)
+            if fresh.status in {"completed", "failed", "canceled"}:
+                return ComfyUICancelResult(
+                    confirmed_terminal=True,
+                    terminal_status=fresh.status,
+                    reason="already_terminal",
+                )
+            return self.comfyui_provider.cancel_remote_task(
+                task_id=fresh.task_id,
+                project_id=fresh.project_id,
+                params=fresh.request_params,
+                journal_path=journal,
+                artifacts=self.artifacts,
+                worker_active=False,
+            )
+        finally:
+            lock.release()
 
     async def _collect_grok(self):
         while self._running:
