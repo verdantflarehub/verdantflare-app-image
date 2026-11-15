@@ -193,7 +193,26 @@ class TaskQueueManager:
             if internal in params:
                 raise ValueError('reserved_channel_parameter')
         if engine == 'moss-image':
-            return self.moss_provider.normalize(params)
+            normalized = self.moss_provider.normalize(params)
+            if normalized.get("moss_mode") == "edit":
+                if self.google_authorize is None:
+                    raise ValueError("project_authorization_not_configured")
+                authority = self.google_authorize(project_id, None)
+                for rid in [normalized["source_artifact_id"], *normalized["reference_artifact_ids"]]:
+                    record = self.artifacts.get(rid, project_id)
+                    from PIL import Image, ImageOps
+                    with Image.open(self.artifacts.content_path(record)) as image:
+                        image = ImageOps.exif_transpose(image)
+                        image.load()
+                        if ("A" in image.getbands() or "transparency" in image.info) and image.convert("RGBA").getchannel("A").getextrema()[0] < 255:
+                            raise ValueError("INVALID_REFERENCE_IMAGE: composite transparent images before editing")
+                        if rid == normalized["source_artifact_id"] and not any(
+                            params.get(key) for key in ("width", "height", "size", "aspect_ratio", "resolution")
+                        ):
+                            params.update(width=image.width, height=image.height)
+                normalized = self.moss_provider.normalize(params)
+                normalized["channel_authority"] = authority
+            return normalized
         if engine == 'grok':
             params = self.grok_provider.normalize(params, project_id, self.artifacts, channel=self.grok_channel is not None)
         if engine == 'gemini':
@@ -769,6 +788,14 @@ class TaskQueueManager:
                 pass
 
     def _execute_moss(self, job: TaskJob) -> None:
+        scene_edit = job.params.get("moss_mode") == "edit"
+        if scene_edit:
+            if self.google_authorize is None:
+                raise ValueError("project_authorization_not_configured")
+            authority = job.params.get("channel_authority")
+            if not isinstance(authority, dict):
+                raise ValueError("verified_studio_identity_required")
+            self.google_authorize(job.project_id, authority)
         with self.moss_gpu.hold():
             self.tasks.update_status(job.task_id, "running", phase="acquiring_gpu")
             self.moss_gpu.ensure_worker_ready(self.moss_provider.health)
@@ -801,7 +828,10 @@ class TaskQueueManager:
 
             img_bytes, meta = self.moss_provider.generate(gen_params)
             meta["task_id"] = job.task_id
-            if ref_ids:
+            if ref_ids and scene_edit:
+                meta.update({"source_artifact_id": ref_ids[0], "reference_artifact_ids": ref_ids[1:],
+                             "conditioning_mode": "moss_edit_reference_latents", "moss_mode": "edit"})
+            elif ref_ids:
                 first_ref = ref_ids[0]
                 meta.update(
                     {

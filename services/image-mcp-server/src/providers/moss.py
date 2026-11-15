@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import math
 import os
 import re
@@ -146,6 +147,7 @@ class MossProvider:
         self.base_url = (base_url or os.environ.get("MOSS_IMAGE_API_URL", "http://image-moss:8000")).rstrip("/")
         self.timeout = timeout or float(os.environ.get("MOSS_IMAGE_TIMEOUT", "210"))
         self._client = client
+        self.scene_edit_enabled = os.environ.get("MOSS_SCENE_EDIT_ENABLED", "true").lower() == "true"
 
     def capability(self) -> dict[str, Any]:
         return {
@@ -162,6 +164,9 @@ class MossProvider:
                 "bilingual_typography",
                 "face_identity_reference",
             ],
+            "scene_edit": {"configured": self.scene_edit_enabled, "runtime_readiness": "not_checked",
+                           "mode": "edit", "entrypoint": "image.edit", "max_style_references": 1,
+                           "requires_runtime_edit": True, "geometry_guarantee": False},
             "limits": {
                 "min_dimension": 512,
                 "max_dimension": 2048,
@@ -187,6 +192,32 @@ class MossProvider:
 
     def normalize(self, params: dict[str, Any]) -> dict[str, Any]:
         out = dict(params)
+        mode = out.get("moss_mode")
+        if mode not in (None, "semantic", "edit"):
+            raise ValueError("INVALID_ARGUMENT: unsupported moss_mode")
+        scene_edit = mode == "edit"
+        if scene_edit:
+            if not self.scene_edit_enabled:
+                raise ValueError("CAPABILITY_DISABLED: MOSS scene edit is disabled")
+            if out.get("action") != "edit":
+                raise ValueError("INVALID_ARGUMENT: moss_mode edit requires image.edit")
+            for key in ("face_reference_artifact_id", "source_identity_artifact_id", "outfit_reference_artifact_id",
+                        "identity_strength", "restore_face", "restoration_fidelity", "target_face_index",
+                        "reference_images", "layout", "mask", "mask_artifact_id", "reference_images_base64"):
+                if out.get(key) is not None:
+                    raise ValueError(f"INVALID_ARGUMENT: scene edit does not accept {key}")
+            source = out.get("source_artifact_id")
+            refs = out.get("reference_artifact_ids") or []
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError("INVALID_ARGUMENT: source_artifact_id required")
+            if not isinstance(refs, list) or len(refs) > 1 or any(not isinstance(r, str) or not r.strip() for r in refs):
+                raise ValueError("INVALID_ARGUMENT: at most one style reference")
+            source = source.strip()
+            refs = [r.strip() for r in refs]
+            if source in refs:
+                raise ValueError("INVALID_ARGUMENT: source and style reference must differ")
+            out["source_artifact_id"] = source
+            out["reference_artifact_ids"] = refs
         face_ref_id = (
             out.get("face_reference_artifact_id")
             or out.get("source_identity_artifact_id")
@@ -201,7 +232,9 @@ class MossProvider:
             face_ref_id = ref_list[0]
 
         action = out.get("action", "generate")
-        if action == "edit" and face_ref_id:
+        if scene_edit:
+            pass
+        elif action == "edit" and face_ref_id:
             out["action"] = "generate"
         elif action != "generate":
             raise ValueError("capability_not_supported")
@@ -210,7 +243,7 @@ class MossProvider:
         if out.get("mask") is not None or out.get("mask_artifact_id") is not None or out.get("prefer_4k"):
             raise ValueError("INVALID_ARGUMENT: moss-image does not support mask or prefer_4k")
 
-        if face_ref_id:
+        if face_ref_id and not scene_edit:
             face_ref_id = str(face_ref_id).strip()
             out["source_artifact_id"] = str(out.get("source_artifact_id") or face_ref_id).strip()
             out["face_reference_artifact_id"] = face_ref_id
@@ -288,14 +321,14 @@ class MossProvider:
 
         steps = out.get("steps")
         if steps is None:
-            steps = 50
+            steps = 30 if scene_edit else 50
         if isinstance(steps, bool) or not isinstance(steps, int) or not (1 <= steps <= 50):
             raise ValueError("INVALID_SAMPLING_PARAMS: steps must be an integer between 1 and 50")
         out["steps"] = steps
 
         cfg_scale = out.get("cfg_scale")
         if cfg_scale is None:
-            cfg_scale = 3.0
+            cfg_scale = 4.0 if scene_edit else 3.0
         if isinstance(cfg_scale, bool) or not isinstance(cfg_scale, (int, float)) or not (1.0 <= float(cfg_scale) <= 6.0):
             raise ValueError("INVALID_SAMPLING_PARAMS: cfg_scale must be between 1.0 and 6.0")
         out["cfg_scale"] = float(cfg_scale)
@@ -367,6 +400,9 @@ class MossProvider:
             "seed": params.get("seed"),
             "layout": params.get("layout"),
         }
+        if params.get("moss_mode") == "edit":
+            payload.update(edit=True, edit_lora_strength=1.0,
+                           reference_max_edge=max(params["width"], params["height"]))
         if params.get("reference_images_base64"):
             payload["reference_images_base64"] = params["reference_images_base64"]
         try:
@@ -391,6 +427,16 @@ class MossProvider:
             raise MossProviderError(code, msg, resp.status_code)
 
         body = resp.json()
+        if params.get("moss_mode") == "edit":
+            proof = body.get("execution") or {}
+            refs = proof.get("references") or []
+            expected = [hashlib.sha256(base64.b64decode(raw)).hexdigest()
+                        for raw in params.get("reference_images_base64", [])]
+            if (body.get("prompt_mode") != "edit" or proof.get("mode") != "edit"
+                    or proof.get("conditioning_mode") != "moss_edit_reference_latents"
+                    or not re.fullmatch(r"[0-9a-f]{64}", str(proof.get("workflow_sha256", "")))
+                    or not expected or [r.get("input_sha256") for r in refs] != expected):
+                raise MossProviderError("EXECUTION_MODE_MISMATCH", "Runtime edit evidence does not match requested inputs", 502)
         img_bytes = base64.b64decode(body["image_base64"])
         meta = {
             "engine": "moss-image",
@@ -409,6 +455,11 @@ class MossProvider:
             "prompt_mode": body.get("prompt_mode", "layout" if params.get("layout") else "text"),
             "elapsed_ms": body.get("elapsed_ms", 0),
         }
+        if params.get("moss_mode") == "edit":
+            meta["moss_mode"] = "edit"
+            meta["conditioning_mode"] = "moss_edit_reference_latents"
+            if body.get("execution") is not None:
+                meta["execution"] = body["execution"]
         if params.get("layout") is not None:
             meta["layout"] = params["layout"]
         return img_bytes, meta

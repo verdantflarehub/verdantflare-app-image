@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="VerdantFlare Image MOSS",
-    version="0.2.2",
+    version="0.2.4",
     description="Internal microservice for MOSS-Image-SFT INT8-ConvRot inference backed by headless ComfyUI (pinned 19ae172, with MOSS-Image Edit support)",
     lifespan=lifespan,
 )

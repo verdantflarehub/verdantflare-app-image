@@ -138,6 +138,7 @@ IMAGE_TOOLS_SCHEMA = [
         "inputSchema": {
             "type": "object",
             "properties": {
+                "moss_mode": {"type": "string", "enum": ["semantic", "edit"], "description": "MOSS only: explicit latent scene edit; absent keeps legacy behavior"},
                 "source_artifact_id": {"type": "string", "description": "Base image artifact ID"},
                 "prompt": {"type": "string", "description": "Editing instructions"},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
@@ -268,7 +269,7 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.60"
+SERVICE_VERSION = "v0.2.61"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -627,6 +628,7 @@ async def image_edit(
     mask_artifact_id: str | None = None,
     engine: str = "codex",
     model: str = "",
+    moss_mode: str | None = None,
     size: str = "",
     aspect_ratio: str | None = None,
     resolution: str | None = None,
@@ -646,6 +648,8 @@ async def image_edit(
     - background: "auto", "transparent" (扣除背景生成透明底), "opaque"
     - quality: "auto", "low", "medium", "high", "xhigh", "max"
     """
+    if moss_mode is not None and engine.lower() != "moss-image":
+        raise ValueError("INVALID_ARGUMENT: moss_mode requires moss-image")
     resolved_model = model or (
         {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
@@ -662,6 +666,8 @@ async def image_edit(
         "quality": quality,
         "background": background,
     }
+    if moss_mode is not None:
+        params["moss_mode"] = moss_mode
     if aspect_ratio is not None:
         params["aspect_ratio"] = aspect_ratio
     if channel_account_id is not None:

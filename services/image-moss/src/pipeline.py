@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import hashlib
 import json
 from pathlib import Path
 import secrets
@@ -267,6 +268,7 @@ class MossImagePipeline:
 
         ref_filenames: list[str] = []
         ref_paths: list[Path] = []
+        reference_evidence = []
         if ref_count > 0:
             input_dir = Path(self.settings.comfyui_root) / "input"
             if not input_dir.parent.exists():
@@ -280,14 +282,24 @@ class MossImagePipeline:
                     from PIL import Image, ImageOps
 
                     with Image.open(io.BytesIO(ref_bytes)) as im:
-                        im_rgb = ImageOps.exif_transpose(im).convert("RGB")
+                        transposed = ImageOps.exif_transpose(im)
+                        original_size = list(transposed.size)
+                        if edit and ("A" in transposed.getbands() or "transparency" in transposed.info) and transposed.convert("RGBA").getchannel("A").getextrema()[0] < 255:
+                            raise ValueError("transparent edit references must be composited before submission")
+                        im_rgb = transposed.convert("RGB")
                         if edit:
                             im_rgb = _scale_reference(im_rgb, params["reference_max_edge"])
                         out_buf = io.BytesIO()
                         im_rgb.save(out_buf, format="JPEG", quality=95)
                         normalized_bytes = out_buf.getvalue()
-                except Exception:
-                    pass
+                        reference_evidence.append({"input_sha256": hashlib.sha256(ref_bytes).hexdigest(),
+                                                   "original_size": original_size, "encoded_size": list(im_rgb.size),
+                                                   "encoded_sha256": hashlib.sha256(normalized_bytes).hexdigest()})
+                except Exception as exc:
+                    if edit:
+                        for previous in ref_paths:
+                            previous.unlink(missing_ok=True)
+                        raise MossApiError(400, "INVALID_REFERENCE_IMAGE", "Edit reference must be a decodable opaque image") from exc
                 ref_path.write_bytes(normalized_bytes)
                 ref_filenames.append(ref_filename)
                 ref_paths.append(ref_path)
@@ -351,6 +363,14 @@ class MossImagePipeline:
             "shift": params["shift"],
             "prompt_mode": prompt_mode,
             "elapsed_ms": elapsed_ms,
+            **({"execution": {
+                "mode": "edit", "conditioning_mode": "moss_edit_reference_latents",
+                "workflow_sha256": hashlib.sha256(json.dumps(workflow, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                "comfyui_commit": COMFYUI_COMMIT,
+                "weight_manifest": [{"key": spec["key"], "sha256": spec["sha256"]} for spec in [*MODEL_MANIFEST, *EDIT_LORA_MANIFEST]],
+                "weight_sha256_checked": self.settings.verify_sha256_on_boot,
+                "references": reference_evidence,
+            }} if edit else {}),
         }
 
     def _interrupt_comfyui(self) -> None:

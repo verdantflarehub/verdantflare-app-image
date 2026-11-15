@@ -540,6 +540,13 @@ def test_edit_pipeline_scales_references_and_requires_lora(tmp_path: Path) -> No
         pipe = MossImagePipeline(settings=settings, comfy_runner=inspect_runner)
         res = asyncio.run(pipe.generate(req))
         assert res["prompt_mode"] == "edit"
+        proof = res["execution"]
+        assert proof["conditioning_mode"] == "moss_edit_reference_latents"
+        assert len(proof["workflow_sha256"]) == 64
+        assert [r["original_size"] for r in proof["references"]] == [[1200, 900], [300, 500]]
+        assert [r["encoded_size"] for r in proof["references"]] == [[1024, 768], [288, 496]]
+        import hashlib
+        assert [r["input_sha256"] for r in proof["references"]] == [hashlib.sha256(b).hexdigest() for b in raw_refs]
         # long edge follows the 1024 output and aligns to 16; small images are never enlarged
         assert captured["sizes"] == [(1024, 768), (288, 496)]
         assert captured["wf"]["6"]["class_type"] == "TextEncodeMOSSImageEdit"
