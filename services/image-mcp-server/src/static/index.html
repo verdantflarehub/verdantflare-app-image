@@ -3708,7 +3708,7 @@
             ? eng.model_catalog.filter(item => item && item.model_id).map(item => [normalizeModelCode(item.model_id, eng.engine).toLowerCase(), item])
             : []
         );
-        const declaredModels = Array.isArray(eng.supported_models) && eng.supported_models.length
+        const declaredModels = Array.isArray(eng.supported_models)
           ? eng.supported_models
           : [eng.model || eng.engine];
 

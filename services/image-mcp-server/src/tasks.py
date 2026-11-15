@@ -482,7 +482,7 @@ class TaskStore:
                 SET phase = 'submission_unknown',
                     error = '服务重启，原调用结果待确认；未重新提交',
                     updated_at = ?
-                WHERE status = 'running' AND phase IS NULL AND engine NOT IN ('grok', 'moss-image')
+                WHERE status = 'running' AND phase IS NULL AND engine NOT IN ('grok', 'moss-image', 'comfyui')
                   AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') NOT IN ('google-channel-v1', 'chatgpt-channel-v1')
                 """,
                 (now,),

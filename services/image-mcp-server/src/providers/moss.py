@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import math
 import os
 import re
@@ -148,6 +149,7 @@ class MossProvider:
         self.timeout = timeout or float(os.environ.get("MOSS_IMAGE_TIMEOUT", "210"))
         self._client = client
         self.scene_edit_enabled = os.environ.get("MOSS_SCENE_EDIT_ENABLED", "true").lower() == "true"
+        self.last_reclaim_proof: dict[str, Any] | None = None
 
     def capability(self) -> dict[str, Any]:
         return {
@@ -374,6 +376,21 @@ class MossProvider:
 
         return out
 
+    def health_details(self) -> dict[str, Any]:
+        try:
+            if self._client is not None:
+                resp = self._client.get(f"{self.base_url}/health", timeout=5.0)
+            else:
+                with httpx.Client(timeout=5.0, trust_env=False) as client:
+                    resp = client.get(f"{self.base_url}/health")
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return {}
+
     def health(self) -> bool:
         try:
             if self._client is not None:
@@ -385,7 +402,44 @@ class MossProvider:
         except Exception:
             return False
 
-    def generate(self, params: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    def reclaim_guard(self, *, lease_id: str, fencing_token: int, runtime_token: str = "") -> dict[str, Any] | None:
+        tok = (
+            runtime_token
+            or os.environ.get("IMAGE_RUNTIME_TOKEN", "").strip()
+            or os.environ.get("STATION_GPU_SCHEDULER_TOKEN", "").strip()
+            or os.environ.get("IMAGE_GPU_SCHEDULER_TOKEN", "").strip()
+        )
+        headers = {"Authorization": f"Bearer {tok}"} if tok else {}
+        body = {"lease_id": lease_id, "fencing_token": int(fencing_token)}
+        try:
+            if self._client is not None:
+                resp = self._client.post(
+                    f"{self.base_url}/internal/v1/gpu-guard/reclaim",
+                    json=body,
+                    headers=headers,
+                    timeout=5.0,
+                )
+            else:
+                with httpx.Client(timeout=5.0, trust_env=False) as client:
+                    resp = client.post(
+                        f"{self.base_url}/internal/v1/gpu-guard/reclaim",
+                        json=body,
+                        headers=headers,
+                    )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return None
+
+    def generate(
+        self,
+        params: dict[str, Any],
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> tuple[bytes, dict[str, Any]]:
         payload = {
             "prompt": params["prompt"],
             "negative_prompt": params.get("negative_prompt", ""),
@@ -405,12 +459,15 @@ class MossProvider:
                            reference_max_edge=max(params["width"], params["height"]))
         if params.get("reference_images_base64"):
             payload["reference_images_base64"] = params["reference_images_base64"]
+        req_kwargs: dict[str, Any] = {}
+        if extra_headers:
+            req_kwargs["headers"] = dict(extra_headers)
         try:
             if self._client is not None:
-                resp = self._client.post(f"{self.base_url}/v1/generate", json=payload, timeout=self.timeout)
+                resp = self._client.post(f"{self.base_url}/v1/generate", json=payload, timeout=self.timeout, **req_kwargs)
             else:
                 with httpx.Client(timeout=self.timeout, trust_env=False) as client:
-                    resp = client.post(f"{self.base_url}/v1/generate", json=payload)
+                    resp = client.post(f"{self.base_url}/v1/generate", json=payload, **req_kwargs)
         except httpx.TimeoutException as exc:
             raise MossProviderError("UPSTREAM_TIMEOUT", f"image-moss timed out: {exc}", 504) from exc
         except httpx.HTTPError as exc:
@@ -425,6 +482,16 @@ class MossProvider:
                 code = "INTERNAL_ERROR"
                 msg = resp.text
             raise MossProviderError(code, msg, resp.status_code)
+
+        raw_proof = resp.headers.get("x-vf-reclaim-proof", "").strip()
+        if raw_proof:
+            try:
+                parsed_proof = json.loads(raw_proof)
+                self.last_reclaim_proof = parsed_proof if isinstance(parsed_proof, dict) else None
+            except Exception:
+                self.last_reclaim_proof = None
+        else:
+            self.last_reclaim_proof = None
 
         body = resp.json()
         if params.get("moss_mode") == "edit":

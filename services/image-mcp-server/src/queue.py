@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Coroutine
 
 from .artifacts import ArtifactStore
-from .gpu_lease import GpuCoordinator
+from .gpu_lease import GpuCoordinator, LeaseBusy, SchedulerLeaseClient
 from .providers.codex import CodexProvider, DEFAULT_IMAGE_MODEL
 from .providers.gemini import (
     ADVERTISED_GEMINI_MODELS,
@@ -23,6 +23,7 @@ from .providers.gemini import (
     SUPPORTED_GEMINI_MODELS,
 )
 from .providers.moss import DEFAULT_MOSS_MODEL, MossProvider
+from .providers.comfyui import ComfyUIProviderError, ComfyUIWorkflowProvider
 from .tasks import TaskRecord, TaskStore
 from .providers.grok import GrokImageProvider, GrokError
 from .providers.google_channel import ChannelUnavailable
@@ -100,6 +101,8 @@ class TaskQueueManager:
         channel_directory=None,
         moss_provider: MossProvider | None = None,
         moss_gpu: GpuCoordinator | None = None,
+        scheduler: SchedulerLeaseClient | None = None,
+        comfyui_provider: ComfyUIWorkflowProvider | None = None,
     ) -> None:
         self.tasks = tasks
         self.artifacts = artifacts
@@ -119,7 +122,13 @@ class TaskQueueManager:
         self.grok_lock = threading.Lock()
         self.moss_provider = moss_provider or MossProvider()
         self.moss_gpu = moss_gpu or GpuCoordinator.from_environment()
+        self.scheduler = scheduler or SchedulerLeaseClient.from_environment()
+        if getattr(self.tasks, "db_path", None):
+            from pathlib import Path
+            self.scheduler.configure_journal(Path(self.tasks.db_path).parent / "gpu_pending_releases.json")
         self.moss_sem = asyncio.Semaphore(max(1, int(os.getenv("MOSS_IMAGE_MAX_CONCURRENCY", "1"))))
+        self.comfyui_provider = comfyui_provider or ComfyUIWorkflowProvider()
+        self.comfyui_sem = asyncio.Semaphore(max(1, int(os.getenv("COMFYUI_IMAGE_MAX_CONCURRENCY", "4"))))
 
         codex_limit = max(1, min(20, int(os.environ.get("CODEX_MAX_CONCURRENCY", "20"))))
         gemini_limit = int(os.environ.get("GEMINI_MAX_CONCURRENCY", "5"))
@@ -141,6 +150,7 @@ class TaskQueueManager:
         # 1. 恢复异常退出的运行中任务
         recovered = self.tasks.recover_hanging_tasks()
         self.recover_grok()
+        self.recover_comfyui()
         if recovered > 0:
             print(f"⚠️ [TaskQueue] 保留 {recovered} 个原调用结果未知的任务；未重新提交")
 
@@ -185,11 +195,11 @@ class TaskQueueManager:
         await self._queue.put(job)
 
     def prepare(self, engine, project_id, params):
-        if engine not in {"codex", "gemini", "grok", "moss-image"}:
+        if engine not in {"codex", "gemini", "grok", "moss-image", "comfyui"}:
             raise ValueError("unsupported_engine")
         params = dict(params)
         # Internal route/authority cannot be supplied in generation parameters.
-        for internal in ('channel_runtime', 'channel_authority'):
+        for internal in ('channel_runtime', 'channel_authority', 'comfyui_authority', 'comfyui_workflow'):
             if internal in params:
                 raise ValueError('reserved_channel_parameter')
         if engine == 'moss-image':
@@ -213,6 +223,13 @@ class TaskQueueManager:
                 normalized = self.moss_provider.normalize(params)
                 normalized["channel_authority"] = authority
             return normalized
+        if engine == 'comfyui':
+            return self.comfyui_provider.normalize(
+                params,
+                project_id,
+                self.artifacts,
+                authorize_fn=self.google_authorize,
+            )
         if engine == 'grok':
             params = self.grok_provider.normalize(params, project_id, self.artifacts, channel=self.grok_channel is not None)
         if engine == 'gemini':
@@ -341,6 +358,7 @@ class TaskQueueManager:
                 if self.channel_directory is not None:
                     engine['enabled'] = self.channel_directory.resolve(name, 'image.generate') == channel.endpoint
         engines.append(self.moss_provider.capability())
+        engines.append(self.comfyui_provider.capability())
         return {
             "default_engine": "codex",
             "engines": engines,
@@ -358,6 +376,8 @@ class TaskQueueManager:
             return self.grok_sem
         if eng == "moss-image":
             return self.moss_sem
+        if eng == "comfyui":
+            return self.comfyui_sem
         if eng not in {"codex", "gemini"}:
             raise ValueError("unsupported_engine")
         return self.gemini_sem if eng == "gemini" else self.codex_sem
@@ -386,6 +406,8 @@ class TaskQueueManager:
                         await loop.run_in_executor(None, self._execute_grok, job)
                     elif job.engine == "moss-image":
                         await loop.run_in_executor(None, self._execute_moss, job)
+                    elif job.engine == "comfyui":
+                        await loop.run_in_executor(None, self._execute_comfyui, job)
                     elif job.action == "generate":
                         await loop.run_in_executor(None, self._execute_generate, job)
                     elif job.action in ("edit", "inpaint"):
@@ -424,6 +446,19 @@ class TaskQueueManager:
                         phase = "collect_retry" if journal.with_suffix(".json").exists() else "submission_unknown"
                         self.tasks.update_status(job.task_id, "running" if uncertain else "failed",
                                                  error=code, phase=phase if uncertain else "failed")
+                        continue
+                    if job.engine == "comfyui":
+                        code = exc.code if isinstance(exc, ComfyUIProviderError) else "comfyui_execution_failed"
+                        uncertain = isinstance(exc, ComfyUIProviderError) and exc.uncertain
+                        journal = self._comfyui_journal(job.task_id)
+                        phase = "collect_retry" if journal.exists() else "submission_unknown"
+                        self.tasks.update_status(
+                            job.task_id,
+                            "running" if uncertain else "failed",
+                            error=code,
+                            phase=phase if uncertain else "failed",
+                            duration_seconds=None if uncertain else duration,
+                        )
                         continue
                     err_msg = str(exc)
                     print(f"[TaskQueue] 任务失败: {job.task_id} (action: {job.action}, engine: {job.engine}, model: {job.params.get('model')}) 耗时: {duration}s, 错误详情: {err_msg}", flush=True)
@@ -659,6 +694,22 @@ class TaskQueueManager:
                         )
                     except Exception:
                         pass
+                elif rec.engine == "comfyui":
+                    try:
+                        self._execute_comfyui(
+                            TaskJob(
+                                rec.task_id,
+                                rec.project_id,
+                                rec.engine,
+                                rec.request_params.get("action", "generate"),
+                                rec.request_params,
+                            )
+                        )
+                        refreshed_c = self.tasks.get(rec.task_id)
+                        if refreshed_c.artifact_id and refreshed_c.status == "running":
+                            self.tasks.update_status(rec.task_id, "completed", error="", phase="completed")
+                    except Exception:
+                        pass
 
                 refreshed = self.tasks.get(rec.task_id)
                 if refreshed.status == "completed":
@@ -687,6 +738,18 @@ class TaskQueueManager:
                         pass
 
             for rec in still_unknown:
+                if rec.engine == "comfyui":
+                    try:
+                        self.cancel_comfyui_task(rec)
+                    except Exception:
+                        pass
+                    try:
+                        cj = self._comfyui_journal(rec.task_id)
+                        for p in (cj, cj.with_suffix(".tmp")):
+                            if p.exists():
+                                p.unlink(missing_ok=True)
+                    except Exception:
+                        pass
                 try:
                     journal = self._grok_journal(rec.task_id)
                     for p in (journal, journal.with_suffix(".json"), journal.with_suffix(".part"), journal.with_suffix(".tmp")):
@@ -764,6 +827,84 @@ class TaskQueueManager:
             else:
                 self.tasks.update_status(rec.task_id, "running", error=rec.error or "submission_unknown", phase="submission_unknown")
 
+    def _comfyui_journal(self, task_id: str):
+        root = self.tasks.db_path.parent / ".comfyui-tasks"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / f"{task_id}.json"
+
+    def _execute_comfyui(self, job: TaskJob) -> None:
+        with self._task_lock(job.task_id):
+            journal = self._comfyui_journal(job.task_id)
+            raw_bytes, mime_type, remote_filename, meta = self.comfyui_provider.execute_or_recover(
+                task_id=job.task_id,
+                project_id=job.project_id,
+                params=job.params,
+                artifacts=self.artifacts,
+                journal_path=journal,
+                on_phase=lambda ph: self.tasks.update_status(job.task_id, "running", phase=ph),
+            )
+            extension, detected_media_type = _image_storage_type(raw_bytes)
+            final_media_type = mime_type if mime_type in {"image/png", "image/jpeg", "image/webp"} else detected_media_type
+            filename = f"comfyui-{job.task_id}{extension}"
+            artifact_id = "art-" + hashlib.sha256(job.task_id.encode("utf-8")).hexdigest()[:16]
+            record = self.artifacts.create_from_bytes(
+                project_id=job.project_id,
+                artifact_id=artifact_id,
+                filename=filename,
+                data=raw_bytes,
+                media_type=final_media_type,
+                metadata=meta,
+            )
+            self.tasks.update_status(
+                job.task_id,
+                "running",
+                artifact_id=record.artifact_id,
+                error="",
+                phase="completed",
+            )
+
+    def recover_comfyui(self) -> None:
+        records, _ = self.tasks.list_tasks(engine="comfyui", status="running", limit=10000, include_nsfw=True)
+        for rec in records:
+            journal = self._comfyui_journal(rec.task_id)
+            if journal.exists():
+                try:
+                    self._execute_comfyui(
+                        TaskJob(
+                            rec.task_id,
+                            rec.project_id,
+                            rec.engine,
+                            rec.request_params.get("action", "generate"),
+                            rec.request_params,
+                        )
+                    )
+                    self.tasks.update_status(rec.task_id, "completed", error="", phase="completed")
+                except ComfyUIProviderError as exc:
+                    if exc.uncertain:
+                        self.tasks.update_status(rec.task_id, "running", error=exc.code, phase="collect_retry")
+                    else:
+                        self.tasks.update_status(rec.task_id, "failed", error=exc.code, phase="failed")
+                except Exception:
+                    self.tasks.update_status(rec.task_id, "running", error="comfyui_recovery_pending", phase="collect_retry")
+            else:
+                self.tasks.update_status(
+                    rec.task_id,
+                    "running",
+                    error=rec.error or "submission_unknown",
+                    phase="submission_unknown",
+                )
+
+    def cancel_comfyui_task(self, rec: TaskRecord) -> bool:
+        if rec.engine != "comfyui":
+            return False
+        journal = self._comfyui_journal(rec.task_id)
+        return self.comfyui_provider.cancel_remote_task(
+            task_id=rec.task_id,
+            project_id=rec.project_id,
+            params=rec.request_params,
+            journal_path=journal,
+        )
+
     async def _collect_grok(self):
         while self._running:
             await asyncio.sleep(15)
@@ -788,6 +929,8 @@ class TaskQueueManager:
                 pass
 
     def _execute_moss(self, job: TaskJob) -> None:
+        from contextlib import nullcontext
+
         scene_edit = job.params.get("moss_mode") == "edit"
         if scene_edit:
             if self.google_authorize is None:
@@ -796,68 +939,200 @@ class TaskQueueManager:
             if not isinstance(authority, dict):
                 raise ValueError("verified_studio_identity_required")
             self.google_authorize(job.project_id, authority)
-        with self.moss_gpu.hold():
-            self.tasks.update_status(job.task_id, "running", phase="acquiring_gpu")
-            self.moss_gpu.ensure_worker_ready(self.moss_provider.health)
-            self.tasks.update_status(job.task_id, "running", phase="generating")
-            primary_ref_id = (
-                job.params.get("face_reference_artifact_id")
-                or job.params.get("source_identity_artifact_id")
-                or job.params.get("source_artifact_id")
-            )
-            raw_ref_ids = [
-                primary_ref_id,
-                *(job.params.get("reference_artifact_ids") or []),
-                *(job.params.get("reference_images") or []),
-            ]
-            ref_ids = list(
-                dict.fromkeys(
-                    str(rid).strip()
-                    for rid in raw_ref_ids
-                    if rid and str(rid).strip()
-                )
-            )
-            gen_params = dict(job.params)
-            if ref_ids:
-                ref_b64_list: list[str] = []
-                for rid in ref_ids:
-                    ref_record = self.artifacts.get(rid, job.project_id)
-                    ref_bytes = self.artifacts.content_path(ref_record).read_bytes()
-                    ref_b64_list.append(base64.b64encode(ref_bytes).decode("ascii"))
-                gen_params["reference_images_base64"] = ref_b64_list
 
-            img_bytes, meta = self.moss_provider.generate(gen_params)
-            meta["task_id"] = job.task_id
-            if ref_ids and scene_edit:
-                meta.update({"source_artifact_id": ref_ids[0], "reference_artifact_ids": ref_ids[1:],
-                             "conditioning_mode": "moss_edit_reference_latents", "moss_mode": "edit"})
-            elif ref_ids:
-                first_ref = ref_ids[0]
-                meta.update(
-                    {
-                        "source_identity_artifact_id": first_ref,
-                        "face_reference_artifact_id": first_ref,
-                        "reference_artifact_ids": ref_ids,
-                        "conditioning_mode": "qwen3.5_9b_vision",
-                    }
+        self.tasks.update_status(job.task_id, "running", phase="acquiring_gpu")
+        reps = None
+        if hasattr(self.moss_gpu, "replicas") and callable(self.moss_gpu.replicas):
+            try:
+                raw_reps = self.moss_gpu.replicas()
+                if isinstance(raw_reps, int) and not isinstance(raw_reps, bool):
+                    reps = raw_reps
+            except Exception:
+                reps = None
+        k8s_slots = 1 if reps == 0 else 0
+        pre_ident: dict[str, Any] = {}
+        if self.scheduler.enabled and reps != 0 and hasattr(self.moss_provider, "health_details"):
+            hd = self.moss_provider.health_details()
+            if isinstance(hd.get("runtime_identity"), dict):
+                pre_ident = dict(hd["runtime_identity"])
+
+        deadline = self.scheduler._monotonic() + self.scheduler.queue_seconds
+        delay = 0.2
+        attempt_idx = 0
+        grant = None
+        hold_ctx = nullcontext()
+        while True:
+            attempt_idx += 1
+            pre_vis = pre_ident.get("visible_gpu_uuids")
+            grant = self.scheduler.acquire_for_queue(
+                consumer_kind="moss-image",
+                task_id=job.task_id,
+                stage_id="generate",
+                attempt_id=f"att-{job.task_id[:8]}-{attempt_idx}",
+                k8s_slots_required=k8s_slots,
+                pod_uid=str(pre_ident.get("pod_uid") or ""),
+                container_id=str(pre_ident.get("container_id") or ""),
+                boot_id=str(pre_ident.get("boot_id") or ""),
+                visible_gpu_uuids=pre_vis if isinstance(pre_vis, (list, tuple)) else None,
+            )
+            if self.moss_gpu.enabled:
+                try:
+                    hold_ctx = self.moss_gpu.try_hold().__enter__()
+                except LeaseBusy:
+                    if grant is not None and not grant.is_target_bound:
+                        try:
+                            self.scheduler.release(
+                                grant,
+                                worker_settled=False,
+                                reclaim_mode="abort_unstarted",
+                            )
+                        except Exception:
+                            pass
+                        grant = None
+                    elif grant is not None:
+                        try:
+                            self.scheduler.release(
+                                grant,
+                                worker_settled=False,
+                                runtime_identity=pre_ident,
+                            )
+                        except Exception:
+                            pass
+                        grant = None
+                    if self.scheduler._monotonic() >= deadline:
+                        raise
+                    self.scheduler._sleep(min(5.0, delay))
+                    delay = min(5.0, delay * 1.5)
+                    continue
+            break
+
+        settled = False
+        target_bound = bool(grant is not None and grant.is_target_bound)
+        post_ident: dict[str, Any] = dict(pre_ident)
+        reclaim_proof: dict[str, Any] | None = None
+        try:
+            try:
+                self.moss_gpu.ensure_worker_ready(self.moss_provider.health)
+                if grant is not None and hasattr(self.moss_provider, "health_details"):
+                    hd = self.moss_provider.health_details()
+                    if isinstance(hd.get("runtime_identity"), dict):
+                        post_ident = dict(hd["runtime_identity"])
+                    need_bind = (
+                        k8s_slots > 0
+                        or not grant.is_target_bound
+                        or (post_ident.get("pod_uid") and post_ident.get("pod_uid") != grant.pod_uid)
+                    )
+                    if need_bind:
+                        self.scheduler.bind_target(grant, runtime_identity=post_ident)
+                        target_bound = True
+                self.tasks.update_status(job.task_id, "running", phase="generating")
+                primary_ref_id = (
+                    job.params.get("face_reference_artifact_id")
+                    or job.params.get("source_identity_artifact_id")
+                    or job.params.get("source_artifact_id")
                 )
-            extension, media_type = _image_storage_type(img_bytes)
-            filename = f"moss-{job.task_id}{extension}"
-            artifact_id = "art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16]
-            record = self.artifacts.create_from_bytes(
-                project_id=job.project_id,
-                artifact_id=artifact_id,
-                filename=filename,
-                data=img_bytes,
-                media_type=media_type,
-                metadata=meta,
-            )
-            self.tasks.update_status(
-                job.task_id,
-                "running",
-                artifact_id=record.artifact_id,
-                phase="completed",
-            )
+                raw_ref_ids = [
+                    primary_ref_id,
+                    *(job.params.get("reference_artifact_ids") or []),
+                    *(job.params.get("reference_images") or []),
+                ]
+                ref_ids = list(
+                    dict.fromkeys(
+                        str(rid).strip()
+                        for rid in raw_ref_ids
+                        if rid and str(rid).strip()
+                    )
+                )
+                gen_params = dict(job.params)
+                if ref_ids:
+                    ref_b64_list: list[str] = []
+                    for rid in ref_ids:
+                        ref_record = self.artifacts.get(rid, job.project_id)
+                        ref_bytes = self.artifacts.content_path(ref_record).read_bytes()
+                        ref_b64_list.append(base64.b64encode(ref_bytes).decode("ascii"))
+                    gen_params["reference_images_base64"] = ref_b64_list
+
+                if grant is not None:
+                    img_bytes, meta = self.moss_provider.generate(gen_params, extra_headers=grant.headers())
+                else:
+                    img_bytes, meta = self.moss_provider.generate(gen_params)
+                reclaim_proof = getattr(self.moss_provider, "last_reclaim_proof", None)
+                if grant is not None and reclaim_proof is None and hasattr(self.moss_provider, "reclaim_guard"):
+                    reclaim_proof = self.moss_provider.reclaim_guard(
+                        lease_id=grant.lease_id,
+                        fencing_token=grant.fencing_token,
+                        runtime_token=self.scheduler.token,
+                    )
+                settled = bool(
+                    grant is None
+                    or (
+                        isinstance(reclaim_proof, dict)
+                        and reclaim_proof.get("reclaimed") is True
+                        and reclaim_proof.get("proof_source") == "receiver_guard"
+                        and reclaim_proof.get("token_sealed") is True
+                    )
+                )
+                meta["task_id"] = job.task_id
+                if ref_ids and scene_edit:
+                    meta.update(
+                        {
+                            "source_artifact_id": ref_ids[0],
+                            "reference_artifact_ids": ref_ids[1:],
+                            "conditioning_mode": "moss_edit_reference_latents",
+                            "moss_mode": "edit",
+                        }
+                    )
+                elif ref_ids:
+                    first_ref = ref_ids[0]
+                    meta.update(
+                        {
+                            "source_identity_artifact_id": first_ref,
+                            "face_reference_artifact_id": first_ref,
+                            "reference_artifact_ids": ref_ids,
+                            "conditioning_mode": "qwen3.5_9b_vision",
+                        }
+                    )
+                extension, media_type = _image_storage_type(img_bytes)
+                filename = f"moss-{job.task_id}{extension}"
+                artifact_id = "art-" + hashlib.sha256(job.task_id.encode()).hexdigest()[:16]
+                record = self.artifacts.create_from_bytes(
+                    project_id=job.project_id,
+                    artifact_id=artifact_id,
+                    filename=filename,
+                    data=img_bytes,
+                    media_type=media_type,
+                    metadata=meta,
+                )
+                self.tasks.update_status(
+                    job.task_id,
+                    "running",
+                    artifact_id=record.artifact_id,
+                    phase="completed",
+                )
+            finally:
+                if self.moss_gpu.enabled:
+                    hold_ctx.__exit__(None, None, None)
+        finally:
+            if grant is not None:
+                if not target_bound:
+                    rel_mode = "abort_unstarted"
+                    rel_settled = False
+                elif settled and reclaim_proof:
+                    rel_mode = "warm_idle_settled"
+                    rel_settled = True
+                else:
+                    rel_mode = ""
+                    rel_settled = False
+                try:
+                    self.scheduler.release(
+                        grant,
+                        worker_settled=rel_settled,
+                        runtime_identity=post_ident if target_bound else None,
+                        reclaim_mode=rel_mode,
+                        reclaim_proof=reclaim_proof if rel_settled else None,
+                    )
+                except Exception:
+                    pass
 
     def _execute_generate(self, job: TaskJob) -> None:
         p = job.params

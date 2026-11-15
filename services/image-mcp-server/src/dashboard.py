@@ -584,8 +584,12 @@ async def api_create_task(request: Request) -> Response:
     if not prompt:
         return JSONResponse({"error": "prompt_is_required"}, status_code=400)
 
-    engine = str(body.get("engine", "codex")).strip().lower()
-    if engine not in ("codex", "gemini", "grok", "moss-image"):
+    model = str(body.get("model", "")).strip()
+    raw_engine = str(body.get("engine", "")).strip().lower()
+    engine = raw_engine or ("comfyui" if model.startswith("comfyui:") else "codex")
+    if engine == "codex" and not raw_engine and model.startswith("comfyui:"):
+        engine = "comfyui"
+    if engine not in ("codex", "gemini", "grok", "moss-image", "comfyui"):
         return JSONResponse({"error": "unsupported_engine"}, status_code=400)
 
     aspect_ratio = str(body.get("aspect_ratio", "1:1" if engine == "moss-image" else "16:9")).strip()
@@ -594,10 +598,10 @@ async def api_create_task(request: Request) -> Response:
     if not quality or quality == "auto":
         quality = "hd"
 
-    model = str(body.get("model", "")).strip()
     resolved_model = model or (
         "gpt-image-2.6-sunburst" if engine == "codex"
         else "moss-image-sft-int8-convrot" if engine == "moss-image"
+        else "" if engine == "comfyui"
         else "gemini-nano-banana-2.1"
     )
 
@@ -619,7 +623,7 @@ async def api_create_task(request: Request) -> Response:
         "resolution": resolution,
         "quality": quality,
     }
-    if engine == "moss-image":
+    if engine in ("moss-image", "comfyui"):
         for key in (
             "negative_prompt",
             "width",
@@ -631,6 +635,8 @@ async def api_create_task(request: Request) -> Response:
             "shift",
             "skip_single_layers",
             "seed",
+            "denoise",
+            "workflow_params",
             "layout",
         ):
             if body.get(key) is not None:
@@ -949,8 +955,21 @@ async def api_delete_task(request: Request) -> Response:
     try:
         tasks_store: TaskStore = request.app.state.tasks
         rec = tasks_store.get(task_id)
+        queue_mgr = getattr(request.app.state, "queue_manager", None)
+        if rec.engine == "comfyui" and queue_mgr is not None:
+            if rec.status in ("queued", "running") or rec.phase in ("submission_unknown", "collect_retry"):
+                try:
+                    await asyncio.to_thread(queue_mgr.cancel_comfyui_task, rec)
+                except Exception:
+                    pass
+            try:
+                cj = queue_mgr._comfyui_journal(task_id)
+                for p in (cj, cj.with_suffix(".tmp")):
+                    if p.exists():
+                        p.unlink(missing_ok=True)
+            except Exception:
+                pass
         if rec.phase in ("submission_unknown", "collect_retry") or rec.error == "submission_unknown":
-            queue_mgr = getattr(request.app.state, "queue_manager", None)
             runtime = rec.request_params.get("channel_runtime")
             org = (rec.request_params.get("channel_authority") or {}).get("organization_id")
             if queue_mgr is not None and runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1"} and org:

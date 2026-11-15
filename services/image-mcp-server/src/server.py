@@ -82,12 +82,12 @@ mcp = MCPServer("VerdantFlare Image")
 IMAGE_TOOLS_SCHEMA = [
     {
         "name": "image.create",
-        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.6), Gemini, Grok, or MOSS-Image.",
+        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.6), Gemini, Grok, MOSS-Image, or published ComfyUI local workflow APIs.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Image description prompt"},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image", "comfyui"], "default": "codex"},
                 "model": {
                     "type": "string",
                     "description": "Model identifier, e.g. gpt-image-2.6-sunburst, gpt-image-2.6-flare, gemini-nano-banana-2.1, gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image",
@@ -124,7 +124,9 @@ IMAGE_TOOLS_SCHEMA = [
                 "scheduler": {"type": "string", "description": "Scheduler name (default simple for moss-image)"},
                 "shift": {"type": "number", "description": "ModelSamplingFlux/AuraFlow shift (default 5.0 for moss-image)"},
                 "skip_single_layers": {"type": "string", "description": "SkipLayerGuidanceDiTSimple single_layers (default '22' for moss-image)"},
-                "seed": {"type": "integer", "description": "Random seed (moss-image)"},
+                "seed": {"type": "integer", "description": "Random seed (moss-image / comfyui)"},
+                "denoise": {"type": "number", "description": "Denoise strength (comfyui)"},
+                "workflow_params": {"type": "object", "description": "Optional exposed_inputs parameter map for published ComfyUI workflow APIs"},
                 "layout": {"type": "object", "description": "Experimental JSON layout (abs_centralized yxyx, <=32 items, moss-image)"},
                 "project_id": {"type": "string", "description": "Project ID"},
                 "idempotency_key": {"type": "string", "description": "Unique idempotency key"},
@@ -145,8 +147,10 @@ IMAGE_TOOLS_SCHEMA = [
                 "mask_artifact_id": {"type": "string"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "description": "Target resolution (1k/2k for Grok and MOSS-Image; 2k/4k for Codex)"},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image", "comfyui"], "default": "codex"},
                 "model": {"type": "string"},
+                "denoise": {"type": "number"},
+                "workflow_params": {"type": "object"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "default": "auto"},
                 "project_id": {"type": "string"},
@@ -165,8 +169,10 @@ IMAGE_TOOLS_SCHEMA = [
                 "mask_artifact_id": {"type": "string", "description": "Mask image artifact ID"},
                 "prompt": {"type": "string", "description": "Inpainting instructions"},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
-                "engine": {"type": "string", "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "comfyui"], "default": "codex"},
                 "model": {"type": "string"},
+                "denoise": {"type": "number"},
+                "workflow_params": {"type": "object"},
                 "background": {"type": "string", "default": "auto"},
                 "project_id": {"type": "string"},
                 "idempotency_key": {"type": "string"},
@@ -243,6 +249,20 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
+IMAGE_TOOLS_SCHEMA.append(
+    {
+        "name": "image.cancel",
+        "description": "Cancel a queued or running image generation task.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task ID"},
+                "project_id": {"type": "string", "description": "Optional Project ID"},
+            },
+            "required": ["task_id"],
+        },
+    }
+)
 _IMPORT_TOOLS = [
     ("image.import", "Import one PNG/JPEG/WebP of up to 3 MiB as a native project image artifact; never fetches URLs.",
      {"project_id": {"type": "string"}, "filename": {"type": "string"},
@@ -269,7 +289,7 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.61"
+SERVICE_VERSION = "v0.2.62"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -408,6 +428,8 @@ async def image_generate(
     shift: float | None = None,
     skip_single_layers: str | None = None,
     seed: int | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
     layout: dict[str, Any] | None = None,
     source_artifact_id: str | None = None,
     reference_artifact_ids: list[str] | None = None,
@@ -435,6 +457,8 @@ async def image_generate(
     - background: "auto", "transparent" (纯净透明通道，输出 PNG), "opaque"
     - instructions: 传递给上游主控中介模型的系统指令 (默认注入逐字直传规范)
     """
+    if model and str(model).strip().startswith("comfyui:") and engine == "codex":
+        engine = "comfyui"
     resolved_model = model or (
         {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
@@ -479,6 +503,10 @@ async def image_generate(
         params["skip_single_layers"] = skip_single_layers
     if seed is not None:
         params["seed"] = seed
+    if denoise is not None:
+        params["denoise"] = denoise
+    if workflow_params is not None:
+        params["workflow_params"] = workflow_params
     if layout is not None:
         params["layout"] = layout
     if source_artifact_id:
@@ -561,6 +589,8 @@ async def image_create(
     shift: float | None = None,
     skip_single_layers: str | None = None,
     seed: int | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
     layout: dict[str, Any] | None = None,
     source_artifact_id: str | None = None,
     reference_artifact_ids: list[str] | None = None,
@@ -603,6 +633,8 @@ async def image_create(
         shift=shift,
         skip_single_layers=skip_single_layers,
         seed=seed,
+        denoise=denoise,
+        workflow_params=workflow_params,
         layout=layout,
         source_artifact_id=source_artifact_id,
         reference_artifact_ids=reference_artifact_ids,
@@ -636,6 +668,8 @@ async def image_edit(
     background: str = "auto",
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
 ) -> types.CallToolResult:
     """基于既有参考底图执行多模态指令编辑、骨相锁定换装或多图融合合成。
 
@@ -648,6 +682,8 @@ async def image_edit(
     - background: "auto", "transparent" (扣除背景生成透明底), "opaque"
     - quality: "auto", "low", "medium", "high", "xhigh", "max"
     """
+    if model and str(model).strip().startswith("comfyui:") and engine == "codex":
+        engine = "comfyui"
     if moss_mode is not None and engine.lower() != "moss-image":
         raise ValueError("INVALID_ARGUMENT: moss_mode requires moss-image")
     resolved_model = model or (
@@ -670,6 +706,10 @@ async def image_edit(
         params["moss_mode"] = moss_mode
     if aspect_ratio is not None:
         params["aspect_ratio"] = aspect_ratio
+    if denoise is not None:
+        params["denoise"] = denoise
+    if workflow_params is not None:
+        params["workflow_params"] = workflow_params
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
@@ -717,8 +757,12 @@ async def image_inpaint(
     background: str = "auto",
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
 ) -> types.CallToolResult:
     """基于遮罩（Mask）的精准局部重绘与无痕物体抹除，支持可选服装/主体参考图融合。"""
+    if model and str(model).strip().startswith("comfyui:") and engine == "codex":
+        engine = "comfyui"
     resolved_model = model or (
         {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
@@ -732,6 +776,10 @@ async def image_inpaint(
         "model": resolved_model,
         "background": background,
     }
+    if denoise is not None:
+        params["denoise"] = denoise
+    if workflow_params is not None:
+        params["workflow_params"] = workflow_params
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
@@ -878,7 +926,10 @@ def image_status(task_id: str) -> types.CallToolResult:
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
     if task.status == "running" and task.phase in {"submission_unknown", "collect_retry"}:
         try:
-            queue_manager._recover_channel_unknown(task)
+            if task.engine == "comfyui":
+                queue_manager.recover_comfyui()
+            else:
+                queue_manager._recover_channel_unknown(task)
             task = tasks.get(task_id)
         except Exception:
             pass
@@ -895,6 +946,21 @@ def image_status(task_id: str) -> types.CallToolResult:
             "needs_attention": task.phase in {"submission_unknown", "collect_retry"},
         }
     )
+
+
+@mcp.tool(name="image.cancel")
+def image_cancel(task_id: str, project_id: str | None = None) -> types.CallToolResult:
+    task = tasks.get(task_id)
+    if project_id and task.project_id != project_id:
+        raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    if _is_task_nsfw(task.task_id, task.artifact_id):
+        raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    if task.status in {"completed", "failed", "canceled"}:
+        return _result({"task_id": task.task_id, "status": task.status, "canceled": task.status == "canceled"})
+    if task.engine == "comfyui":
+        queue_manager.cancel_comfyui_task(task)
+    updated = tasks.update_status(task.task_id, "canceled", error="canceled_by_caller", phase="canceled")
+    return _result({"task_id": updated.task_id, "status": updated.status, "canceled": True})
 
 
 @mcp.tool(name="image.result")

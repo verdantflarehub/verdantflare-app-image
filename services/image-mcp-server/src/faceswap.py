@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import httpx
 from PIL import Image
 
 from .artifacts import ArtifactNotFound, ArtifactRecord, ArtifactStore
+from .gpu_lease import LeaseBusy, SchedulerLeaseClient, SchedulerLeaseGrant
 
 
 def resolve_source_face_path(
@@ -102,6 +104,8 @@ async def handle_faceswap(
     restoration_fidelity: float = 0.85,
     project_id: str | None = None,
     target_face_index: int = 0,
+    scheduler: SchedulerLeaseClient | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> dict[str, Any]:
     """执行阶段二骨相置换与面容超分融合，内部向 image-face-fusion 发起零网络拷贝 RPC。"""
     # 1. 字段校验与范围规约
@@ -159,10 +163,100 @@ async def handle_faceswap(
         "output_path": str(output_physical_path.resolve()),
     }
 
-    # 6. 发起内部 HTTP RPC
+    # 6. 发起内部 HTTP RPC（仅在 CUDA 运行态下向 :5056 申请 face-fusion 共享切片并注入 6 元组）
+    sched = scheduler or SchedulerLeaseClient.from_environment()
+    if getattr(artifacts, "root_dir", None):
+        sched.configure_journal(Path(artifacts.root_dir) / "gpu_pending_releases.json")
+    grant: SchedulerLeaseGrant | None = None
+    runtime_ident: dict[str, Any] = {}
+    reclaim_proof: dict[str, Any] | None = None
+    settled = False
+    target_bound = False
+
+    async def _run_rpc(client: httpx.AsyncClient) -> httpx.Response:
+        nonlocal grant, runtime_ident, reclaim_proof, settled, target_bound
+        if sched.enabled:
+            cuda_active = False
+            try:
+                h_resp = await client.get(f"{api_url}/health", timeout=5.0)
+                if h_resp.status_code == 200:
+                    h_data = h_resp.json()
+                    if isinstance(h_data, dict):
+                        ep = str(h_data.get("execution_provider") or "").lower()
+                        cuda_active = bool(h_data.get("cuda_available")) or ("cuda" in ep) or ("tensorrt" in ep)
+                        if isinstance(h_data.get("runtime_identity"), dict):
+                            runtime_ident = dict(h_data["runtime_identity"])
+            except Exception:
+                cuda_active = False
+
+            if cuda_active:
+                vis = runtime_ident.get("visible_gpu_uuids")
+                grant = await asyncio.to_thread(
+                    sched.acquire_for_queue,
+                    consumer_kind="face-fusion",
+                    task_id=output_artifact_id,
+                    stage_id="fuse",
+                    k8s_slots_required=0,
+                    pod_uid=str(runtime_ident.get("pod_uid") or ""),
+                    container_id=str(runtime_ident.get("container_id") or ""),
+                    boot_id=str(runtime_ident.get("boot_id") or ""),
+                    visible_gpu_uuids=vis if isinstance(vis, (list, tuple)) else None,
+                )
+                if grant is not None:
+                    if not grant.is_target_bound and runtime_ident.get("pod_uid"):
+                        await asyncio.to_thread(sched.bind_target, grant, runtime_identity=runtime_ident)
+                    target_bound = grant.is_target_bound
+
+        if grant is not None:
+            r = await client.post(fuse_endpoint, json=payload, headers=grant.headers())
+            raw_proof = r.headers.get("x-vf-reclaim-proof", "").strip()
+            if raw_proof:
+                try:
+                    parsed = json.loads(raw_proof)
+                    if isinstance(parsed, dict):
+                        reclaim_proof = parsed
+                except Exception:
+                    reclaim_proof = None
+            if reclaim_proof is None:
+                tok = (
+                    os.environ.get("IMAGE_RUNTIME_TOKEN", "").strip()
+                    or sched.token
+                )
+                try:
+                    rec_resp = await client.post(
+                        f"{api_url}/internal/v1/gpu-guard/reclaim",
+                        json={"lease_id": grant.lease_id, "fencing_token": grant.fencing_token},
+                        headers={"Authorization": f"Bearer {tok}"} if tok else {},
+                        timeout=5.0,
+                    )
+                    if rec_resp.status_code == 200:
+                        rec_data = rec_resp.json()
+                        if isinstance(rec_data, dict):
+                            reclaim_proof = rec_data
+                except Exception:
+                    pass
+            settled = bool(
+                isinstance(reclaim_proof, dict)
+                and reclaim_proof.get("reclaimed") is True
+                and reclaim_proof.get("proof_source") == "receiver_guard"
+                and reclaim_proof.get("token_sealed") is True
+            )
+            return r
+        r = await client.post(fuse_endpoint, json=payload)
+        settled = True
+        return r
+
     try:
-        async with httpx.AsyncClient(timeout=timeout_sec) as client:
-            resp = await client.post(fuse_endpoint, json=payload)
+        if http_client is not None:
+            resp = await _run_rpc(http_client)
+        else:
+            async with httpx.AsyncClient(timeout=timeout_sec) as client:
+                resp = await _run_rpc(client)
+    except LeaseBusy as exc:
+        return {
+            "status": "failed",
+            "error": f"waiting_gpu_lease: {exc.holder or exc}",
+        }
     except httpx.TimeoutException:
         return {
             "status": "failed",
@@ -173,6 +267,28 @@ async def handle_faceswap(
             "status": "failed",
             "error": f"调用人脸融合微服务失败 ({fuse_endpoint}): {exc}",
         }
+    finally:
+        if grant is not None:
+            try:
+                if not target_bound:
+                    rel_mode = "abort_unstarted"
+                    rel_settled = False
+                elif settled and reclaim_proof:
+                    rel_mode = "warm_idle_settled"
+                    rel_settled = True
+                else:
+                    rel_mode = ""
+                    rel_settled = False
+                await asyncio.to_thread(
+                    sched.release,
+                    grant,
+                    worker_settled=rel_settled,
+                    runtime_identity=runtime_ident if target_bound else None,
+                    reclaim_mode=rel_mode,
+                    reclaim_proof=reclaim_proof if rel_settled else None,
+                )
+            except Exception:
+                pass
 
     if resp.status_code != 200:
         return {
