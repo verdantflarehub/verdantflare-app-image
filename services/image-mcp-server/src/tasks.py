@@ -19,6 +19,36 @@ class TaskConflict(Exception):
     pass
 
 
+MAX_SQLITE_INT = (1 << 63) - 1
+
+
+def parse_sort_cursor(raw: str) -> tuple[str, int]:
+    if not isinstance(raw, str) or not raw or len(raw) > 256:
+        raise ValueError("invalid_cursor")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in raw):
+        raise ValueError("invalid_cursor")
+    rowid_part, sep, created_part = raw.partition(":")
+    if (
+        not sep
+        or not rowid_part
+        or len(rowid_part) > 19
+        or not rowid_part.isascii()
+        or not rowid_part.isdigit()
+        or rowid_part.startswith("0")
+        or not created_part
+        or created_part != created_part.strip()
+    ):
+        raise ValueError("invalid_cursor")
+    rowid = int(rowid_part)
+    if rowid <= 0 or rowid > MAX_SQLITE_INT:
+        raise ValueError("invalid_cursor")
+    try:
+        datetime.fromisoformat(created_part.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("invalid_cursor") from exc
+    return created_part, rowid
+
+
 class ClosingConnection(sqlite3.Connection):
     def __exit__(self, *args):
         try:
@@ -43,9 +73,17 @@ class TaskRecord:
     artifact_id: str | None = None
     error: str | None = None
     phase: str | None = None
+    sort_rowid: int | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def sort_cursor(self) -> str | None:
+        if self.sort_rowid is not None and self.created_at:
+            return f"{self.sort_rowid}:{self.created_at}"
+        return None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data.pop("sort_rowid", None)
         custom_title = (self.request_params or {}).get("title")
         data["title"] = str(custom_title).strip() if custom_title else (self.prompt_preview or "")
         return data
@@ -57,6 +95,8 @@ class TaskRecord:
             params = json.loads(params_str)
         except Exception:
             params = {}
+        row_keys = row.keys()
+        raw_rowid = row["_rowid"] if "_rowid" in row_keys else None
 
         return cls(
             task_id=row["task_id"],
@@ -72,7 +112,8 @@ class TaskRecord:
             request_params=params,
             artifact_id=row["artifact_id"],
             error=row["error"],
-            phase=row["phase"] if "phase" in row.keys() else None,
+            phase=row["phase"] if "phase" in row_keys else None,
+            sort_rowid=int(raw_rowid) if raw_rowid is not None else None,
         )
 
 
@@ -165,7 +206,7 @@ class TaskStore:
         # 检查是否已有幂等任务
         with self._get_conn() as conn:
             cur = conn.execute(
-                "SELECT * FROM tasks WHERE project_id = ? AND idempotency_key = ?",
+                "SELECT tasks.rowid AS _rowid, tasks.* FROM tasks WHERE project_id = ? AND idempotency_key = ?",
                 (project_id, idempotency_key),
             )
             existing = cur.fetchone()
@@ -200,7 +241,7 @@ class TaskStore:
             except sqlite3.IntegrityError:
                 # 并发冲突时重新查询
                 cur = conn.execute(
-                    "SELECT * FROM tasks WHERE project_id = ? AND idempotency_key = ?",
+                    "SELECT tasks.rowid AS _rowid, tasks.* FROM tasks WHERE project_id = ? AND idempotency_key = ?",
                     (project_id, idempotency_key),
                 )
                 row = cur.fetchone()
@@ -243,7 +284,7 @@ class TaskStore:
     def get(self, task_id: str) -> TaskRecord:
         self.ensure_ready()
         with self._get_conn() as conn:
-            cur = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+            cur = conn.execute("SELECT tasks.rowid AS _rowid, tasks.* FROM tasks WHERE task_id = ?", (task_id,))
             row = cur.fetchone()
             if not row:
                 raise TaskNotFound(f"任务未找到: {task_id}")
@@ -253,7 +294,8 @@ class TaskStore:
         self.ensure_ready()
         with self._get_conn() as conn:
             cur = conn.execute(
-                "SELECT * FROM tasks WHERE task_id = ? OR artifact_id = ? ORDER BY created_at DESC LIMIT 1",
+                "SELECT tasks.rowid AS _rowid, tasks.* FROM tasks "
+                "WHERE task_id = ? OR artifact_id = ? ORDER BY tasks.created_at DESC, tasks.rowid DESC LIMIT 1",
                 (version_id, version_id),
             )
             row = cur.fetchone()
@@ -315,6 +357,7 @@ class TaskStore:
         offset: int = 0,
         include_nsfw: bool = False,
         q: str | None = None,
+        before_cursor: tuple[str, int] | None = None,
     ) -> tuple[list[TaskRecord], int]:
         self.ensure_ready()
         conditions: list[str] = []
@@ -345,18 +388,30 @@ class TaskStore:
 
         where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+        page_conditions = list(conditions)
+        page_params = list(params)
+        effective_offset = offset
+        if before_cursor is not None:
+            cursor_created_at, cursor_rowid = before_cursor
+            page_conditions.append(
+                "(tasks.created_at < ? OR (tasks.created_at = ? AND tasks.rowid < ?))"
+            )
+            page_params.extend([cursor_created_at, cursor_created_at, int(cursor_rowid)])
+            effective_offset = 0
+        page_where = ("WHERE " + " AND ".join(page_conditions)) if page_conditions else ""
+
         with self._get_conn() as conn:
             count_cur = conn.execute(f"SELECT COUNT(*) FROM tasks {where_clause}", tuple(params))
             total = count_cur.fetchone()[0]
 
             query = f"""
-                SELECT * FROM tasks
-                {where_clause}
-                ORDER BY created_at DESC
+                SELECT tasks.rowid AS _rowid, tasks.* FROM tasks
+                {page_where}
+                ORDER BY tasks.created_at DESC, tasks.rowid DESC
                 LIMIT ? OFFSET ?
             """
-            params.extend([limit, offset])
-            cur = conn.execute(query, tuple(params))
+            page_params.extend([limit, effective_offset])
+            cur = conn.execute(query, tuple(page_params))
             records = [TaskRecord.from_row(r) for r in cur.fetchall()]
 
         return records, total

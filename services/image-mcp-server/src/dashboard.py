@@ -10,7 +10,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Respon
 
 from .artifacts import ArtifactError, ArtifactNotFound, ArtifactStore, etag_matches
 from .content_rating import ContentRatingError, include_nsfw_from_headers
-from .tasks import TaskNotFound, TaskStore
+from .tasks import MAX_SQLITE_INT, TaskNotFound, TaskStore, parse_sort_cursor
 
 STATIC_HTML_PATH = Path(__file__).parent / "static" / "index.html"
 
@@ -425,6 +425,9 @@ async def dashboard_page(request: Request) -> Response:
 
 def _enrich_task_dict(record: Any, artifacts_store: ArtifactStore, ratings_store: Any) -> dict[str, Any]:
     value = record.to_dict()
+    sort_cursor = getattr(record, "sort_cursor", None)
+    if sort_cursor:
+        value["sort_cursor"] = sort_cursor
     if record.artifact_id:
         try:
             art = artifacts_store.get(record.artifact_id, record.project_id)
@@ -482,31 +485,60 @@ async def api_list_tasks(request: Request) -> Response:
     engine = request.query_params.get("engine")
     status = request.query_params.get("status")
     q = request.query_params.get("q", "").strip()
+    raw_before_cursor = request.query_params.get("before_cursor")
+    parsed_cursor: tuple[str, int] | None = None
     try:
-        limit = int(request.query_params.get("limit", "50"))
-        offset = int(request.query_params.get("offset", "0"))
-        if not 1 <= limit <= 100 or offset < 0 or len(q) > 500:
+        raw_limit = request.query_params.get("limit", "50")
+        raw_offset = request.query_params.get("offset", "0")
+        if len(raw_limit) > 10 or len(raw_offset) > 20:
             raise ValueError()
+        limit = int(raw_limit)
+        offset = int(raw_offset)
+        if not 1 <= limit <= 100 or not 0 <= offset <= MAX_SQLITE_INT or len(q) > 500:
+            raise ValueError()
+        if raw_before_cursor is not None:
+            if offset != 0 or raw_before_cursor == "":
+                raise ValueError()
+            parsed_cursor = parse_sort_cursor(raw_before_cursor)
     except ValueError:
         return JSONResponse({"error": "invalid_query"}, status_code=400)
 
-    records, total = tasks_store.list_tasks(
-        project_id=project_id,
-        q=q,
-        engine=engine,
-        status=status,
-        limit=limit,
-        offset=offset,
-        include_nsfw=include_nsfw,
-    )
+    if parsed_cursor is not None:
+        records, total = tasks_store.list_tasks(
+            project_id=project_id,
+            q=q,
+            engine=engine,
+            status=status,
+            limit=limit + 1,
+            offset=0,
+            include_nsfw=include_nsfw,
+            before_cursor=parsed_cursor,
+        )
+        has_more = len(records) > limit
+        records = records[:limit]
+    else:
+        records, total = tasks_store.list_tasks(
+            project_id=project_id,
+            q=q,
+            engine=engine,
+            status=status,
+            limit=limit,
+            offset=offset,
+            include_nsfw=include_nsfw,
+        )
+        has_more = (offset + len(records)) < total
+
     artifacts_store = request.app.state.artifacts
     values = [_enrich_task_dict(record, artifacts_store, ratings_store) for record in records]
+    next_cursor = values[-1].get("sort_cursor") if (has_more and values) else None
     return JSONResponse({
         "tasks": values,
         "capabilities": request.app.state.queue_manager.capabilities(),
         "total": total,
         "limit": limit,
         "offset": offset,
+        "has_more": has_more,
+        "next_cursor": next_cursor,
     })
 
 

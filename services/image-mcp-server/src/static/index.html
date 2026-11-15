@@ -2094,9 +2094,15 @@
     };
 
     // Listen to Parent Studio OS Messages
+    let hostIncludeNsfw = false;
     window.addEventListener('message', e => {
       if (!isEmbedded || e.source !== parent || e.origin !== hostOrigin || e.data?.channel !== 'vf-studio') return;
       const d = e.data;
+
+      if (d.type === 'contentPreferences') {
+        hostIncludeNsfw = Boolean(d.includeNsfw);
+        return;
+      }
 
       if (d.type === 'restore' && Number.isFinite(d.viewport?.scrollY) && d.viewport.scrollY >= 0) {
         const request = viewportRequests.get(d.viewport.captureId);
@@ -2707,7 +2713,7 @@
           </div>
         </div>
       `;
-      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num" data-output-task="${escapeHtml(t.id)}">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}${t.isNsfw ? ' <span class="tag-badge danger" style="margin-left:4px;">18+</span>' : ''}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td>${renderMoreMenu(escapeHtml(t.id), Boolean(t.isNsfw))}</td></tr>`).join('')}</tbody></table>`;
+      const tableMarkup = empty ? '' : `<table class="task-table"><thead><tr><th>任务 / 提示词</th><th>模型 × 渠道</th><th>输出规格 (模式 / 格式 / 比例 / 像素 / 大小)</th><th>状态</th><th class="task-table-secondary">耗时</th><th>操作</th></tr></thead><tbody>${filtered.map(t => `<tr data-row-task-id="${escapeHtml(t.id)}"><td><button data-open-task="${escapeHtml(t.id)}">${escapeHtml(t.title)}</button><small>${escapeHtml(t.id)}</small></td><td><span class="identity-channel">${escapeHtml(t.model)} × ${channelLogo(t.engine || t.channelLabel)}${escapeHtml(t.channelLabel)}</span></td><td class="num" data-output-task="${escapeHtml(t.id)}">${escapeHtml(t.modeCode)} · ${escapeHtml(t.formatLabel)} · ${escapeHtml(t.aspectRatio)} · ${escapeHtml(t.resShort)} · ${escapeHtml(t.sizeLabel)}</td><td>${escapeHtml({succeeded:'已完成',running:'生成中',queued:'排队中',failed:'已失败'}[t.status] || t.status)}${t.isNsfw ? ' <span class="tag-badge danger" style="margin-left:4px;">18+</span>' : ''}</td><td class="task-table-secondary num">${escapeHtml(t.duration)}</td><td>${renderMoreMenu(escapeHtml(t.id), Boolean(t.isNsfw))}</td></tr>`).join('')}</tbody></table>`;
       if (tableMarkup !== lastTableMarkup) { taskTableContainer.innerHTML = tableMarkup; lastTableMarkup = tableMarkup; }
       if (empty) { galleryContainer.replaceChildren(); lastGalleryMarkup = ''; return; }
       const markup = filtered.map(task => {
@@ -2841,15 +2847,20 @@
         if (result?.ok !== true || rating !== (nextAction === 'mark' ? 'nsfw' : 'general')) {
           throw new Error('未取得有效保存回执，请刷新后确认状态');
         }
-        if (taskSyncPromise) await taskSyncPromise;
-        task = allTasks.find(item => item.id === task.id) || task;
-        task.isNsfw = rating === 'nsfw';
-        task.contentRating = rating;
-        lastTaskStructure = '';
-        renderGallery();
+        if (typeof applyConfirmedTaskRating === 'function') {
+          await applyConfirmedTaskRating(task, rating);
+        } else {
+          if (taskSyncPromise) await taskSyncPromise;
+          task = allTasks.find(item => item.id === task.id) || task;
+          task.isNsfw = rating === 'nsfw';
+          task.contentRating = rating;
+          lastTaskStructure = '';
+          renderGallery();
+        }
         await syncBackendTasks(false, true);
+        const refreshFailed = taskLoadState === 'error' || (typeof lastTaskSyncFailed !== 'undefined' && lastTaskSyncFailed);
         showTaskActionStatus((nextAction === 'mark' ? '已设为 NSFW' : '已设为 SFW') +
-          (taskLoadState === 'error' ? '列表刷新失败，请刷新确认显示状态；无需再次提交标记。' : ''), taskLoadState === 'error');
+          (refreshFailed ? '列表刷新失败，请刷新确认显示状态；无需再次提交标记。' : ''), refreshFailed);
       } catch (err) {
         showTaskActionStatus(`分级未确认保存：${err.message || err}。请刷新确认后再重试。`, true);
       } finally {
@@ -2914,7 +2925,15 @@
         });
         if (result?.ok !== true) throw new Error('未取得有效清理回执');
         closeCleanupModal();
-        await syncBackendTasks(false, true);
+        const hasIdArrays = Array.isArray(result.cleaned_unknown_task_ids) &&
+          Array.isArray(result.cleaned_failed_task_ids) &&
+          Array.isArray(result.recovered_task_ids);
+        if (hasIdArrays && typeof applyCleanupReceipt === 'function') {
+          await applyCleanupReceipt(result);
+          await syncBackendTasks(false, true);
+        } else {
+          await syncBackendTasks(false, true, true);
+        }
         const parts = [];
         if (chkUnknown) {
           const rec = Number(result.recovered_count || 0);
@@ -2935,7 +2954,7 @@
       }
     }
 
-    document.getElementById('btnCleanupZombies')?.addEventListener('click', openCleanupModal);
+    document.getElementById('btnCleanupZombies')?.addEventListener?.('click', openCleanupModal);
 
     function confirmTaskDelete() {
       const dialog = document.getElementById('taskDeleteDialog');
@@ -2953,13 +2972,18 @@
         if (!await confirmTaskDelete()) return;
         const result = await requestApi(`/api/tasks/${encodeURIComponent(taskId)}/delete`, {method:'POST', body:{}});
         if (result?.ok !== true || result?.deleted !== true || result?.task_id !== taskId) throw new Error('未取得删除回执');
-        if (taskSyncPromise) await taskSyncPromise;
-        allTasks = allTasks.filter(t => t.id !== taskId);
-        taskTotal = Math.max(0, taskTotal - 1);
-        lastTaskStructure = ''; renderGallery();
+        if (typeof applyConfirmedTaskDelete === 'function') {
+          await applyConfirmedTaskDelete(taskId);
+        } else {
+          if (taskSyncPromise) await taskSyncPromise;
+          allTasks = allTasks.filter(t => t.id !== taskId);
+          taskTotal = Math.max(0, taskTotal - 1);
+          lastTaskStructure = ''; renderGallery();
+        }
         showTaskActionStatus('已删除任务');
         await syncBackendTasks(false, true);
-        if (taskLoadState === 'error') showTaskActionStatus('任务已删除，列表刷新失败，请重试刷新。', true);
+        const refreshFailed = taskLoadState === 'error' || (typeof lastTaskSyncFailed !== 'undefined' && lastTaskSyncFailed);
+        if (refreshFailed) showTaskActionStatus('任务已删除，列表刷新失败，请重试刷新。', true);
       } catch (err) { showTaskActionStatus(`删除失败：${err.message || err}`, true); }
       finally { pendingDeleteTasks.delete(taskId); }
     }
@@ -2977,10 +3001,15 @@
             method: 'POST',
             body: { title: trimmed }
           });
-          task.title = trimmed;
-          lastTaskStructure = '';
-          renderGallery();
-          void syncBackendTasks();
+          if (typeof applyConfirmedTaskTitle === 'function') {
+            await applyConfirmedTaskTitle(taskId, trimmed);
+          } else {
+            if (typeof recordLocalTaskPatch === 'function') recordLocalTaskPatch(taskId, { title: trimmed });
+            task.title = trimmed;
+            lastTaskStructure = '';
+            renderGallery();
+          }
+          void syncBackendTasks(false, true);
         } else if (action === 'toggle-nsfw') {
           await changeTaskRating(task);
         } else if (action === 'delete') {
@@ -3055,6 +3084,7 @@
       taskSearchQuery = query; taskQueryEpoch++;
       clearTimeout(taskSearchTimer);
       allTasks = []; taskNextOffset = 0; taskTotal = 0; taskPageExhausted = false; taskPageError = '';
+      if (typeof resetTaskQueryTransientState === 'function') resetTaskQueryTransientState();
       taskLoadState = 'loading'; renderGallery();
       taskSearchTimer = setTimeout(() => syncBackendTasks(false, true), 300);
     });
@@ -3428,19 +3458,33 @@
     }
     const openInspector = async function(id, notifyStudio = true) {
       closeHostPreview();
+      const epoch = ++detailEpoch;
+      const openQueryEpoch = taskQueryEpoch;
       let task = allTasks.find(t => t.id === id);
       if (!task && typeof mapBackendTask === 'function') {
+        if (typeof locallyHiddenTaskIds !== 'undefined' && locallyHiddenTaskIds.has(id)) return;
+        const reqSeq = typeof allocateTaskReconcileSeq === 'function' ? allocateTaskReconcileSeq() : 0;
         try {
           const singleRes = await requestApi(`/api/tasks/${encodeURIComponent(id)}`);
-          if (singleRes && singleRes.task_id) {
-            task = mapBackendTask(singleRes);
-            allTasks = mergeTaskPage(allTasks, [task], true);
+          if (disposed || epoch !== detailEpoch || openQueryEpoch !== taskQueryEpoch) return;
+          if (typeof locallyHiddenTaskIds !== 'undefined' && locallyHiddenTaskIds.has(id)) return;
+          if (singleRes && singleRes.task_id === id) {
+            const existingInList = allTasks.find(t => t.id === id);
+            const appliedSeq = typeof taskAppliedSeq !== 'undefined' ? (taskAppliedSeq.get(id) || 0) : 0;
+            if (existingInList && reqSeq <= appliedSeq) {
+              task = existingInList;
+            } else {
+              const mapped = mapBackendTask(singleRes);
+              const ov = typeof localTaskOverrides !== 'undefined' ? localTaskOverrides.get(id) : null;
+              if (ov && ov.seq > reqSeq) Object.assign(mapped, ov.patch);
+              if (typeof recordTaskAppliedSeq === 'function' && reqSeq > 0) recordTaskAppliedSeq(id, reqSeq);
+              task = existingInList || mapped;
+            }
           }
         } catch (_) {}
       }
-      if (!task) return;
+      if (!task || epoch !== detailEpoch || disposed) return;
       const savedWinScroll = window.scrollY;
-      const epoch = ++detailEpoch;
       const scroll = await captureViewport();
       if (epoch !== detailEpoch || disposed) return;
       activeTask = task;
@@ -3802,36 +3846,736 @@
       return [...new Map((append ? [...previous, ...incoming] : incoming).map(task => [task.id, task])).values()];
     }
 
+    let taskNextCursor = '';
+    let hasActiveServerCursorMode = false;
+    let activeStateEpoch = taskQueryEpoch;
+    let lastTaskSyncFailed = false;
+    let paginationObservedVisible = false;
+    let activeSyncMode = '';
+    let pendingForceHeadSync = null;
+    let pendingForceWaiters = [];
+    let pendingAppendReq = null;
+    let pendingAppendWaiters = [];
+    const locallyHiddenTaskIds = new Set();
+    const locallyDeletedTaskIds = new Set();
+    const localTaskOverrides = new Map();
+    const pendingForcedReconcileIds = new Set();
+    const inFlightTaskReconciles = new Set();
+    const reconcileQueue = [];
+    const reconcileQueuedSet = new Set();
+    const tailReconcileAt = new Map();
+    const tailReconcileFailures = new Map();
+    const tailReconcileBackoffUntil = new Map();
+    const taskAppliedSeq = new Map();
+    let nextReconcileSeq = 0;
+    let activeReconcileWorkers = 0;
+    const MAX_CONCURRENT_TASK_RECONCILES = 4;
+    const MAX_RECONCILE_BATCH = 8;
+
+    function allocateTaskReconcileSeq() {
+      return ++nextReconcileSeq;
+    }
+
+    function recordTaskAppliedSeq(taskId, seq) {
+      if (!taskId || !Number.isFinite(seq)) return;
+      if (seq > (taskAppliedSeq.get(taskId) || 0)) {
+        taskAppliedSeq.set(taskId, seq);
+      }
+    }
+
+    function bumpTaskMutationSeq(taskId) {
+      const seq = ++nextReconcileSeq;
+      if (taskId) taskAppliedSeq.set(taskId, seq);
+      return seq;
+    }
+
+    function recordLocalTaskPatch(taskId, patch) {
+      if (!taskId || !patch) return 0;
+      const seq = bumpTaskMutationSeq(taskId);
+      const prev = localTaskOverrides.get(taskId)?.patch || {};
+      localTaskOverrides.set(taskId, { seq, patch: { ...prev, ...patch } });
+      return seq;
+    }
+
+    function resetTaskQueryTransientState() {
+      activeStateEpoch = taskQueryEpoch;
+      taskNextCursor = '';
+      hasActiveServerCursorMode = false;
+      lastTaskSyncFailed = false;
+      paginationObservedVisible = false;
+      locallyHiddenTaskIds.clear();
+      locallyDeletedTaskIds.clear();
+      localTaskOverrides.clear();
+      pendingForcedReconcileIds.clear();
+      reconcileQueue.length = 0;
+      reconcileQueuedSet.clear();
+      tailReconcileAt.clear();
+      tailReconcileFailures.clear();
+      tailReconcileBackoffUntil.clear();
+      taskAppliedSeq.clear();
+      if (pendingAppendReq && pendingAppendReq.epoch !== taskQueryEpoch) {
+        pendingAppendReq = null;
+        const waiters = pendingAppendWaiters.splice(0);
+        waiters.forEach(w => w.resolve());
+      }
+      if (pendingForceHeadSync && pendingForceHeadSync.epoch !== taskQueryEpoch) {
+        pendingForceHeadSync = null;
+        const waiters = pendingForceWaiters.splice(0);
+        waiters.forEach(w => w.resolve());
+      }
+    }
+
+    function ensureQueryEpochState() {
+      if (activeStateEpoch !== taskQueryEpoch) {
+        resetTaskQueryTransientState();
+      }
+    }
+
+    const MAX_CURSOR_ROWID = 9223372036854775807n;
+    let taskCommitChain = Promise.resolve();
+
+    function parseSortCursor(cursorStr) {
+      if (typeof cursorStr !== 'string' || !cursorStr || cursorStr.length > 256) return null;
+      const sep = cursorStr.indexOf(':');
+      if (sep <= 0 || sep >= cursorStr.length - 1) return null;
+      const rowPart = cursorStr.slice(0, sep);
+      const createdAt = cursorStr.slice(sep + 1);
+      if (!/^[1-9][0-9]{0,18}$/.test(rowPart) || !createdAt || createdAt !== createdAt.trim()) return null;
+      const rowid = BigInt(rowPart);
+      if (rowid <= 0n || rowid > MAX_CURSOR_ROWID) return null;
+      return { rowid, createdAt };
+    }
+
+    function compareSortCursor(left, right) {
+      const a = parseSortCursor(typeof left === 'string' ? left : left?.sortCursor);
+      const b = parseSortCursor(typeof right === 'string' ? right : right?.sortCursor);
+      if (!a || !b) return NaN;
+      if (a.createdAt !== b.createdAt) return a.createdAt > b.createdAt ? 1 : -1;
+      return a.rowid === b.rowid ? 0 : (a.rowid > b.rowid ? 1 : -1);
+    }
+
+    function isZombieTaskItem(t) {
+      if (typeof isZombieTask === 'function') return isZombieTask(t);
+      return Boolean(t) && (t.phase === 'submission_unknown' || t.phase === 'collect_retry');
+    }
+
+    function isReconcilableActiveTask(t) {
+      return Boolean(t) && !isZombieTaskItem(t) && (t.status === 'queued' || t.status === 'running');
+    }
+
+    function isTaskPaginationFinished() {
+      if (taskPageExhausted) return true;
+      if (hasActiveServerCursorMode) return !taskNextCursor;
+      return taskNextOffset >= taskTotal;
+    }
+
+    function commitTasksWithViewportAnchor(mutator, options = {}) {
+      const run = async () => {
+        ensureQueryEpochState();
+        if (disposed) return false;
+        const preEpoch = taskQueryEpoch;
+        const dynSkip = typeof options.shouldSkipAnchor === 'function'
+          ? Boolean(options.shouldSkipAnchor())
+          : Boolean(options.skipAnchor);
+        const canAnchor = !dynSkip && !activeTask && allTasks.length > 0 && typeof visibleContentTop === 'function';
+        let vpTopBefore = 0;
+        const candidates = [];
+        if (canAnchor) {
+          try {
+            vpTopBefore = Number(await visibleContentTop()) || 0;
+          } catch (_) {
+            vpTopBefore = 0;
+          }
+          if (!disposed && !activeTask && preEpoch === taskQueryEpoch && vpTopBefore > 24) {
+            const isTable = typeof taskView !== 'undefined' && taskView === 'table';
+            const container = isTable
+              ? (typeof taskTableContainer !== 'undefined' ? taskTableContainer : null)
+              : (typeof galleryContainer !== 'undefined' ? galleryContainer : null);
+            const selector = isTable ? 'tr[data-row-task-id]' : '.task-card[data-task-id]';
+            const nodes = container && typeof container.querySelectorAll === 'function'
+              ? [...container.querySelectorAll(selector)]
+              : [];
+            const embeddedMode = typeof isEmbedded !== 'undefined' && isEmbedded;
+            const baseTop = embeddedMode ? vpTopBefore : 0;
+            for (const node of nodes) {
+              const id = node.dataset?.taskId || node.dataset?.rowTaskId;
+              if (!id || typeof node.getBoundingClientRect !== 'function') continue;
+              const rect = node.getBoundingClientRect();
+              const relTop = rect.top - baseTop;
+              if (relTop + (Number(rect.height) || 0) > 0) {
+                candidates.push({ id, preRelTop: relTop });
+              }
+            }
+          }
+        }
+
+        ensureQueryEpochState();
+        if (disposed) return false;
+        const commitEpoch = taskQueryEpoch;
+        const outcome = mutator();
+        if (outcome === false || (outcome && typeof outcome === 'object' && outcome.committed === false)) {
+          return false;
+        }
+        const postSkip = Boolean(
+          dynSkip ||
+          preEpoch !== commitEpoch ||
+          (outcome && typeof outcome === 'object' && outcome.skipAnchor)
+        );
+
+        updateTaskFilters();
+        renderGallery();
+        if (typeof window !== 'undefined') window.notifyHostHeight?.();
+
+        if (postSkip || !candidates.length || activeTask || disposed || commitEpoch !== taskQueryEpoch) {
+          return true;
+        }
+        let vpTopAfter = 0;
+        try {
+          vpTopAfter = Number(await visibleContentTop()) || 0;
+        } catch (_) {
+          vpTopAfter = 0;
+        }
+        if (disposed || activeTask || commitEpoch !== taskQueryEpoch) return true;
+        const isTable = typeof taskView !== 'undefined' && taskView === 'table';
+        const container = isTable
+          ? (typeof taskTableContainer !== 'undefined' ? taskTableContainer : null)
+          : (typeof galleryContainer !== 'undefined' ? galleryContainer : null);
+        const selector = isTable ? 'tr[data-row-task-id]' : '.task-card[data-task-id]';
+        const postNodes = container && typeof container.querySelectorAll === 'function'
+          ? [...container.querySelectorAll(selector)]
+          : [];
+        const postById = new Map();
+        for (const node of postNodes) {
+          const id = node.dataset?.taskId || node.dataset?.rowTaskId;
+          if (id) postById.set(id, node);
+        }
+        const embeddedMode = typeof isEmbedded !== 'undefined' && isEmbedded;
+        const baseTopAfter = embeddedMode ? vpTopAfter : 0;
+        let chosen = null;
+        let postNode = null;
+        for (const cand of candidates) {
+          const found = postById.get(cand.id);
+          if (found && typeof found.getBoundingClientRect === 'function') {
+            chosen = cand;
+            postNode = found;
+            break;
+          }
+        }
+        if (!chosen || !postNode) return true;
+        const postRelTop = postNode.getBoundingClientRect().top - baseTopAfter;
+        let residualDelta = postRelTop - chosen.preRelTop;
+        if (!Number.isFinite(residualDelta) || Math.abs(residualDelta) <= 1) return true;
+        if (embeddedMode) {
+          while (Math.abs(residualDelta) > 1) {
+            const step = Math.max(-1000, Math.min(1000, residualDelta));
+            if (typeof parent !== 'undefined' && typeof parent.postMessage === 'function') {
+              parent.postMessage({
+                channel: 'vf-image',
+                view: typeof viewEpoch !== 'undefined' ? viewEpoch : '1',
+                type: 'wheel',
+                deltaY: step
+              }, typeof hostOrigin !== 'undefined' ? hostOrigin : '*');
+            } else {
+              break;
+            }
+            residualDelta -= step;
+          }
+        } else if (typeof window !== 'undefined' && typeof window.scrollBy === 'function') {
+          window.scrollBy({ top: residualDelta, behavior: 'instant' });
+        }
+        return true;
+      };
+      const next = taskCommitChain.then(run, run);
+      taskCommitChain = next.then(() => undefined, () => undefined);
+      return next;
+    }
+
+    async function applyConfirmedTaskDelete(taskId) {
+      ensureQueryEpochState();
+      if (!taskId || disposed) return;
+      const mutEpoch = taskQueryEpoch;
+      const writeSeq = bumpTaskMutationSeq(taskId);
+      locallyDeletedTaskIds.add(taskId);
+      locallyHiddenTaskIds.add(taskId);
+      localTaskOverrides.delete(taskId);
+      pendingForcedReconcileIds.delete(taskId);
+      await commitTasksWithViewportAnchor(() => {
+        if (disposed || mutEpoch !== taskQueryEpoch) return false;
+        recordTaskAppliedSeq(taskId, writeSeq);
+        locallyDeletedTaskIds.add(taskId);
+        locallyHiddenTaskIds.add(taskId);
+        localTaskOverrides.delete(taskId);
+        pendingForcedReconcileIds.delete(taskId);
+        const beforeLen = allTasks.length;
+        allTasks = allTasks.filter(t => t.id !== taskId);
+        const removed = beforeLen - allTasks.length;
+        if (removed > 0) {
+          taskTotal = Math.max(0, taskTotal - removed);
+          if (!hasActiveServerCursorMode) taskNextOffset = Math.max(0, taskNextOffset - removed);
+          if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+          return true;
+        }
+        return false;
+      }, { shouldSkipAnchor: () => !allTasks.some(t => t.id === taskId) });
+    }
+
+    async function applyConfirmedTaskTitle(taskId, trimmed) {
+      ensureQueryEpochState();
+      if (!taskId || disposed || locallyDeletedTaskIds.has(taskId)) return;
+      const mutEpoch = taskQueryEpoch;
+      const writeSeq = recordLocalTaskPatch(taskId, { title: trimmed });
+      await commitTasksWithViewportAnchor(() => {
+        if (disposed || mutEpoch !== taskQueryEpoch) return false;
+        if (locallyHiddenTaskIds.has(taskId) || locallyDeletedTaskIds.has(taskId)) return false;
+        const currentOv = localTaskOverrides.get(taskId);
+        const effectiveTitle = (currentOv && typeof currentOv.patch?.title === 'string')
+          ? currentOv.patch.title
+          : ((taskAppliedSeq.get(taskId) || 0) > writeSeq ? null : trimmed);
+        if (effectiveTitle === null) return false;
+        const existing = allTasks.find(t => t.id === taskId);
+        if (existing) existing.title = effectiveTitle;
+        if (activeTask?.id === taskId) activeTask.title = effectiveTitle;
+        if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+        return Boolean(existing);
+      }, { skipAnchor: true });
+    }
+
+    async function applyConfirmedTaskRating(task, rating) {
+      ensureQueryEpochState();
+      const taskId = task?.id;
+      if (!taskId || disposed || locallyDeletedTaskIds.has(taskId)) return;
+      const mutEpoch = taskQueryEpoch;
+      const isNsfw = rating === 'nsfw';
+      const includeNsfwNow = typeof hostIncludeNsfw !== 'undefined' && Boolean(hostIncludeNsfw);
+      const writeSeq = recordLocalTaskPatch(taskId, { isNsfw, contentRating: rating });
+      task.isNsfw = isNsfw;
+      task.contentRating = rating;
+      if (isNsfw && !includeNsfwNow) {
+        locallyHiddenTaskIds.add(taskId);
+        pendingForcedReconcileIds.delete(taskId);
+      } else {
+        locallyHiddenTaskIds.delete(taskId);
+      }
+      await commitTasksWithViewportAnchor(() => {
+        if (disposed || mutEpoch !== taskQueryEpoch) return false;
+        if (locallyDeletedTaskIds.has(taskId)) return false;
+        const currentOv = localTaskOverrides.get(taskId);
+        if (currentOv && typeof currentOv.patch?.contentRating === 'string' && currentOv.seq > writeSeq && currentOv.patch.contentRating !== rating) {
+          return false;
+        }
+        if (!currentOv && (taskAppliedSeq.get(taskId) || 0) > writeSeq) {
+          return false;
+        }
+        const curIncludeNsfw = typeof hostIncludeNsfw !== 'undefined' && Boolean(hostIncludeNsfw);
+        if (isNsfw && !curIncludeNsfw) {
+          locallyHiddenTaskIds.add(taskId);
+          pendingForcedReconcileIds.delete(taskId);
+          const beforeLen = allTasks.length;
+          allTasks = allTasks.filter(item => item.id !== taskId);
+          const removed = beforeLen - allTasks.length;
+          if (removed > 0) {
+            taskTotal = Math.max(0, taskTotal - removed);
+            if (!hasActiveServerCursorMode) taskNextOffset = Math.max(0, taskNextOffset - removed);
+          }
+          if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+          return { committed: true, skipAnchor: removed === 0 };
+        }
+        locallyHiddenTaskIds.delete(taskId);
+        const existing = allTasks.find(item => item.id === taskId);
+        if (existing) {
+          existing.isNsfw = isNsfw;
+          existing.contentRating = rating;
+        }
+        if (activeTask?.id === taskId) {
+          activeTask.isNsfw = isNsfw;
+          activeTask.contentRating = rating;
+        }
+        if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+        return { committed: true, skipAnchor: true };
+      }, {
+        shouldSkipAnchor: () => !(isNsfw && !(typeof hostIncludeNsfw !== 'undefined' && Boolean(hostIncludeNsfw))) || !allTasks.some(t => t.id === taskId)
+      });
+    }
+
+    async function applyCleanupReceipt(result) {
+      ensureQueryEpochState();
+      if (disposed) return;
+      const mutEpoch = taskQueryEpoch;
+      const cleanedIds = new Set([
+        ...(Array.isArray(result?.cleaned_unknown_task_ids) ? result.cleaned_unknown_task_ids : []),
+        ...(Array.isArray(result?.cleaned_failed_task_ids) ? result.cleaned_failed_task_ids : [])
+      ].filter(Boolean));
+      const recoveredIds = (Array.isArray(result?.recovered_task_ids) ? result.recovered_task_ids : []).filter(Boolean);
+
+      const cleanedSeqs = new Map();
+      for (const id of cleanedIds) {
+        cleanedSeqs.set(id, bumpTaskMutationSeq(id));
+        locallyDeletedTaskIds.add(id);
+        locallyHiddenTaskIds.add(id);
+        localTaskOverrides.delete(id);
+        pendingForcedReconcileIds.delete(id);
+      }
+
+      const entryLoadedSet = new Set(allTasks.map(t => t.id));
+      const recoveredSeqs = new Map();
+      for (const id of recoveredIds) {
+        if (cleanedIds.has(id) || locallyHiddenTaskIds.has(id) || locallyDeletedTaskIds.has(id)) continue;
+        recoveredSeqs.set(id, bumpTaskMutationSeq(id));
+        if (entryLoadedSet.has(id) || activeTask?.id === id) {
+          pendingForcedReconcileIds.add(id);
+          tailReconcileFailures.delete(id);
+          tailReconcileBackoffUntil.delete(id);
+          tailReconcileAt.delete(id);
+        }
+      }
+
+      await commitTasksWithViewportAnchor(() => {
+        if (disposed || mutEpoch !== taskQueryEpoch) return false;
+        for (const [id, seq] of cleanedSeqs) {
+          recordTaskAppliedSeq(id, seq);
+          locallyDeletedTaskIds.add(id);
+          locallyHiddenTaskIds.add(id);
+          localTaskOverrides.delete(id);
+          pendingForcedReconcileIds.delete(id);
+        }
+        let removed = 0;
+        if (cleanedIds.size > 0) {
+          const beforeLen = allTasks.length;
+          allTasks = allTasks.filter(t => !cleanedIds.has(t.id));
+          removed = beforeLen - allTasks.length;
+          if (removed > 0) {
+            taskTotal = Math.max(0, taskTotal - removed);
+            if (!hasActiveServerCursorMode) taskNextOffset = Math.max(0, taskNextOffset - removed);
+            if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+          }
+        }
+        const loadedSet = new Set(allTasks.map(t => t.id));
+        for (const [id, seq] of recoveredSeqs) {
+          if (cleanedIds.has(id) || locallyHiddenTaskIds.has(id) || locallyDeletedTaskIds.has(id)) continue;
+          if (loadedSet.has(id) || activeTask?.id === id) {
+            recordTaskAppliedSeq(id, seq);
+            pendingForcedReconcileIds.add(id);
+            tailReconcileFailures.delete(id);
+            tailReconcileBackoffUntil.delete(id);
+            tailReconcileAt.delete(id);
+          }
+        }
+        return removed > 0 ? { committed: true, skipAnchor: false } : false;
+      }, { shouldSkipAnchor: () => cleanedIds.size === 0 || !allTasks.some(t => cleanedIds.has(t.id)) });
+    }
+
+    function refreshOpenInspectorTask(nextTask) {
+      if (!nextTask || activeTask?.id !== nextTask.id) return;
+      activeTask = nextTask;
+      const statusLabel = { succeeded: '已完成', running: '生成中', queued: '排队中', failed: '已失败' }[nextTask.status] || nextTask.status;
+      const statusEl = document.getElementById('inspStatus');
+      if (statusEl) statusEl.textContent = statusLabel;
+      const titleEl = document.getElementById('inspTitle');
+      if (titleEl && nextTask.title) titleEl.textContent = nextTask.title;
+      if (typeof updateInspectorImages === 'function') updateInspectorImages(activeTask);
+      if (nextTask.artifactId && !nextTask.img && typeof scheduleMediaLoad === 'function' && typeof getArtifactBlobUrl === 'function') {
+        scheduleMediaLoad(() => getArtifactBlobUrl(nextTask.artifactId), 'p0').then(url => {
+          if (url && !disposed && activeTask?.id === nextTask.id) {
+            nextTask.img = url;
+            if (typeof updateInspectorImages === 'function') updateInspectorImages(activeTask);
+            if (typeof updateCardThumb === 'function') updateCardThumb(nextTask.id, url, nextTask.title);
+          }
+        });
+      }
+    }
+
+    async function runSingleTaskReconcile(id) {
+      const epoch = taskQueryEpoch;
+      const isIsolatedAtStart = Boolean(activeTask && activeTask.id === id && !allTasks.some(t => t.id === id));
+      const inspEpoch = typeof detailEpoch !== 'undefined' ? detailEpoch : 0;
+      const reqSeq = ++nextReconcileSeq;
+      inFlightTaskReconciles.add(id);
+      tailReconcileAt.set(id, Date.now());
+      try {
+        const singleRes = await requestApi(`/api/tasks/${encodeURIComponent(id)}`);
+        if (disposed || epoch !== taskQueryEpoch || reqSeq <= (taskAppliedSeq.get(id) || 0)) return;
+        if (!singleRes || singleRes.task_id !== id) throw new Error('invalid_task_response');
+        let committedItem = null;
+        let committedInList = false;
+        await commitTasksWithViewportAnchor(() => {
+          if (disposed || epoch !== taskQueryEpoch || reqSeq <= (taskAppliedSeq.get(id) || 0)) {
+            return false;
+          }
+          if (locallyHiddenTaskIds.has(id)) {
+            pendingForcedReconcileIds.delete(id);
+            tailReconcileFailures.delete(id);
+            tailReconcileBackoffUntil.delete(id);
+            return false;
+          }
+          const idx = allTasks.findIndex(t => t.id === id);
+          const inListNow = idx >= 0;
+          const curDetailEpoch = typeof detailEpoch !== 'undefined' ? detailEpoch : 0;
+          if (!inListNow && isIsolatedAtStart && (inspEpoch !== curDetailEpoch || activeTask?.id !== id)) {
+            return false;
+          }
+          if (!inListNow && activeTask?.id !== id) {
+            return false;
+          }
+          taskAppliedSeq.set(id, reqSeq);
+          pendingForcedReconcileIds.delete(id);
+          tailReconcileFailures.delete(id);
+          tailReconcileBackoffUntil.delete(id);
+          const prevItem = inListNow ? allTasks[idx] : (activeTask?.id === id ? activeTask : null);
+          const nextItem = mapBackendTask(singleRes);
+          if (!nextItem.sortCursor && prevItem?.sortCursor) nextItem.sortCursor = prevItem.sortCursor;
+          if (prevItem?.img && !nextItem.img && prevItem.artifactId === nextItem.artifactId) nextItem.img = prevItem.img;
+          const ov = localTaskOverrides.get(id);
+          if (ov && ov.seq > reqSeq) {
+            Object.assign(nextItem, ov.patch);
+          } else {
+            localTaskOverrides.delete(id);
+          }
+          committedItem = nextItem;
+          committedInList = inListNow;
+          if (inListNow) {
+            allTasks[idx] = nextItem;
+            if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+            return true;
+          }
+          refreshOpenInspectorTask(nextItem);
+          return false;
+        }, { shouldSkipAnchor: () => !allTasks.some(t => t.id === id) });
+        if (!disposed && epoch === taskQueryEpoch && committedItem) {
+          if (committedInList && activeTask?.id === id && (!isIsolatedAtStart || inspEpoch === (typeof detailEpoch !== 'undefined' ? detailEpoch : 0))) {
+            refreshOpenInspectorTask(allTasks.find(t => t.id === id) || committedItem);
+          }
+          if (committedInList && committedItem.artifactId) loadThumbnails();
+        }
+      } catch (err) {
+        if (disposed || epoch !== taskQueryEpoch || reqSeq <= (taskAppliedSeq.get(id) || 0)) return;
+        const msg = String(err?.message || err || '');
+        if (msg === 'API 404' || /\b404\b/.test(msg)) {
+          await commitTasksWithViewportAnchor(() => {
+            if (disposed || epoch !== taskQueryEpoch || reqSeq <= (taskAppliedSeq.get(id) || 0)) {
+              return false;
+            }
+            const inListNow = allTasks.some(t => t.id === id);
+            const curDetailEpoch = typeof detailEpoch !== 'undefined' ? detailEpoch : 0;
+            if (!inListNow && isIsolatedAtStart && (inspEpoch !== curDetailEpoch || activeTask?.id !== id)) {
+              return false;
+            }
+            taskAppliedSeq.set(id, reqSeq);
+            pendingForcedReconcileIds.delete(id);
+            tailReconcileFailures.delete(id);
+            tailReconcileBackoffUntil.delete(id);
+            locallyDeletedTaskIds.add(id);
+            locallyHiddenTaskIds.add(id);
+            if (!inListNow) return false;
+            const beforeLen = allTasks.length;
+            allTasks = allTasks.filter(t => t.id !== id);
+            const removed = beforeLen - allTasks.length;
+            if (removed > 0) {
+              taskTotal = Math.max(0, taskTotal - removed);
+              if (!hasActiveServerCursorMode) taskNextOffset = Math.max(0, taskNextOffset - removed);
+              if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+              return true;
+            }
+            return false;
+          }, { shouldSkipAnchor: () => !allTasks.some(t => t.id === id) });
+          return;
+        }
+        const inListNow = allTasks.some(t => t.id === id);
+        const curDetailEpoch = typeof detailEpoch !== 'undefined' ? detailEpoch : 0;
+        if (!inListNow && isIsolatedAtStart && (inspEpoch !== curDetailEpoch || activeTask?.id !== id)) return;
+        const fails = (tailReconcileFailures.get(id) || 0) + 1;
+        tailReconcileFailures.set(id, fails);
+        const delayMs = Math.min(60000, 10000 * (2 ** (fails - 1)));
+        tailReconcileBackoffUntil.set(id, Date.now() + delayMs);
+      } finally {
+        inFlightTaskReconciles.delete(id);
+      }
+    }
+
+    function pumpReconcilePool() {
+      if (disposed || (typeof document !== 'undefined' && document.hidden)) {
+        reconcileQueue.length = 0;
+        reconcileQueuedSet.clear();
+        return;
+      }
+      while (activeReconcileWorkers < MAX_CONCURRENT_TASK_RECONCILES && reconcileQueue.length > 0) {
+        const nextId = reconcileQueue.shift();
+        reconcileQueuedSet.delete(nextId);
+        if (!nextId || inFlightTaskReconciles.has(nextId) || locallyHiddenTaskIds.has(nextId)) continue;
+        activeReconcileWorkers++;
+        void runSingleTaskReconcile(nextId).finally(() => {
+          activeReconcileWorkers = Math.max(0, activeReconcileWorkers - 1);
+          pumpReconcilePool();
+        });
+      }
+    }
+
+    function scheduleTaskReconcilePool(headIds = new Set()) {
+      ensureQueryEpochState();
+      if (disposed || (typeof document !== 'undefined' && document.hidden)) return;
+      const loadedSet = new Set(allTasks.map(t => t.id));
+      for (const id of [...pendingForcedReconcileIds]) {
+        if (locallyHiddenTaskIds.has(id) || (!loadedSet.has(id) && activeTask?.id !== id)) {
+          pendingForcedReconcileIds.delete(id);
+        }
+      }
+      const availableBatchSlots = Math.max(0, MAX_RECONCILE_BATCH - reconcileQueue.length);
+      if (availableBatchSlots <= 0) {
+        pumpReconcilePool();
+        return;
+      }
+      const now = Date.now();
+      const picked = [];
+      const seen = new Set();
+      const canPick = id => Boolean(id) &&
+        !seen.has(id) &&
+        !locallyHiddenTaskIds.has(id) &&
+        !inFlightTaskReconciles.has(id) &&
+        !reconcileQueuedSet.has(id) &&
+        now >= (tailReconcileBackoffUntil.get(id) || 0);
+
+      const forcedSorted = [...pendingForcedReconcileIds]
+        .filter(id => loadedSet.has(id) || activeTask?.id === id)
+        .sort((a, b) => (tailReconcileAt.get(a) || 0) - (tailReconcileAt.get(b) || 0));
+      for (const id of forcedSorted) {
+        if (picked.length >= availableBatchSlots) break;
+        if (canPick(id)) {
+          seen.add(id);
+          picked.push(id);
+        }
+      }
+
+      if (picked.length < availableBatchSlots && activeTask && !loadedSet.has(activeTask.id)) {
+        if ((pendingForcedReconcileIds.has(activeTask.id) || isReconcilableActiveTask(activeTask)) && canPick(activeTask.id)) {
+          seen.add(activeTask.id);
+          picked.push(activeTask.id);
+        }
+      }
+
+      if (picked.length < availableBatchSlots) {
+        const tailCandidates = allTasks
+          .filter(t => !headIds.has(t.id) && isReconcilableActiveTask(t) && canPick(t.id))
+          .sort((a, b) => (tailReconcileAt.get(a.id) || 0) - (tailReconcileAt.get(b.id) || 0));
+        for (const t of tailCandidates) {
+          if (picked.length >= availableBatchSlots) break;
+          seen.add(t.id);
+          picked.push(t.id);
+        }
+      }
+
+      for (const id of picked) {
+        reconcileQueuedSet.add(id);
+        reconcileQueue.push(id);
+      }
+      pumpReconcilePool();
+    }
+
     function updateTaskPagination() {
       const footer = document.getElementById('taskPagination');
       const button = document.getElementById('btnLoadMoreTasks');
       footer.hidden = taskLoadState === 'loading' || !allTasks.length;
-      const finished = taskPageExhausted || taskNextOffset >= taskTotal;
+      const finished = isTaskPaginationFinished();
       button.hidden = finished && !taskPageError;
       button.disabled = syncingTasks;
       button.textContent = taskPageError ? '重试加载' : syncingTasks ? '正在加载…' : '加载更多';
+      const displayTotal = Math.max(allTasks.length, taskTotal);
       document.getElementById('taskPageStatus').textContent = taskPageError
-        ? `加载失败：${taskPageError}` : finished ? `已加载全部 ${allTasks.length} 项` : `已加载 ${allTasks.length} / ${taskTotal} 项`;
+        ? `加载失败：${taskPageError}` : finished ? `已加载全部 ${allTasks.length} 项` : `已加载 ${allTasks.length} / ${displayTotal} 项`;
     }
 
-    function loadMoreTasks() {
-      if (taskLoadState !== 'ready' || taskPageExhausted || taskNextOffset >= taskTotal) return;
-      return syncBackendTasks(true);
+    function loadMoreTasks(manual = false) {
+      ensureQueryEpochState();
+      const isManual = manual === true || (typeof manual === 'object' && manual !== null);
+      if (disposed || document.hidden) return Promise.resolve();
+      if (taskSyncPromise) {
+        if (activeSyncMode === 'append') return taskSyncPromise;
+        pendingAppendReq = {
+          epoch: taskQueryEpoch,
+          manual: Boolean(isManual || (pendingAppendReq?.epoch === taskQueryEpoch && pendingAppendReq?.manual))
+        };
+        return new Promise(resolve => { pendingAppendWaiters.push({ resolve }); });
+      }
+      if (taskLoadState !== 'ready' || isTaskPaginationFinished()) return Promise.resolve();
+      return syncBackendTasks(true, false, false, isManual);
     }
-    document.getElementById('btnLoadMoreTasks').addEventListener('click', loadMoreTasks);
+    document.getElementById('btnLoadMoreTasks').addEventListener('click', () => loadMoreTasks(true));
     const taskPageObserver = window.IntersectionObserver ? new IntersectionObserver(entries => {
-      if (!taskSearchQuery && entries.some(entry => entry.isIntersecting) && !taskPageError) void loadMoreTasks();
+      if (!taskSearchQuery && entries.some(entry => entry.isIntersecting) && !taskPageError) void loadMoreTasks(false);
     }) : null;
     taskPageObserver?.observe(document.getElementById('taskPagination'));
 
     // A rating write must wait for older reads, then request a fresh list.
     let taskSyncPromise = null;
-    function syncBackendTasks(append = false, force = false) {
-      if (taskSyncPromise) {
-        return force ? taskSyncPromise.then(() => syncBackendTasks(false, true)) : Promise.resolve();
+    function drainQueuedTaskSyncs() {
+      ensureQueryEpochState();
+      if (disposed || document.hidden) {
+        pendingForceHeadSync = null;
+        pendingAppendReq = null;
+        pendingForceWaiters.splice(0).forEach(w => w.resolve());
+        pendingAppendWaiters.splice(0).forEach(w => w.resolve());
+        return;
       }
-      taskSyncPromise = performTaskSync(append).finally(() => { taskSyncPromise = null; });
+      if (pendingForceHeadSync) {
+        const req = pendingForceHeadSync;
+        pendingForceHeadSync = null;
+        const waiters = pendingForceWaiters.splice(0);
+        if (req.epoch === taskQueryEpoch) {
+          startTaskSyncStep(false, { force: true, reset: Boolean(req.reset) }).finally(() => {
+            waiters.forEach(w => w.resolve());
+          });
+          return;
+        }
+        waiters.forEach(w => w.resolve());
+      }
+      if (pendingAppendReq) {
+        const req = pendingAppendReq;
+        pendingAppendReq = null;
+        const waiters = pendingAppendWaiters.splice(0);
+        const canRunAppend = req.epoch === taskQueryEpoch &&
+          taskLoadState === 'ready' &&
+          !taskPageError &&
+          !isTaskPaginationFinished() &&
+          (req.manual || !taskSearchQuery);
+        if (canRunAppend) {
+          startTaskSyncStep(true, { force: false, reset: false, manual: req.manual }).finally(() => {
+            waiters.forEach(w => w.resolve());
+          });
+          return;
+        }
+        waiters.forEach(w => w.resolve());
+      }
+    }
+
+    function startTaskSyncStep(append = false, options = {}) {
+      activeSyncMode = append ? 'append' : 'head';
+      taskSyncPromise = performTaskSync(append, options).finally(() => {
+        taskSyncPromise = null;
+        activeSyncMode = '';
+        drainQueuedTaskSyncs();
+      });
       return taskSyncPromise;
+    }
+
+    function syncBackendTasks(append = false, force = false, reset = false, manual = false) {
+      ensureQueryEpochState();
+      if (taskSyncPromise) {
+        if (force) {
+          pendingForceHeadSync = {
+            epoch: taskQueryEpoch,
+            reset: Boolean(reset || (pendingForceHeadSync?.epoch === taskQueryEpoch && pendingForceHeadSync?.reset))
+          };
+          return new Promise(resolve => { pendingForceWaiters.push({ resolve }); });
+        }
+        if (append) {
+          if (activeSyncMode === 'append') return taskSyncPromise;
+          pendingAppendReq = {
+            epoch: taskQueryEpoch,
+            manual: Boolean(manual || (pendingAppendReq?.epoch === taskQueryEpoch && pendingAppendReq?.manual))
+          };
+          return new Promise(resolve => { pendingAppendWaiters.push({ resolve }); });
+        }
+        return Promise.resolve();
+      }
+      return startTaskSyncStep(append, { force, reset, manual });
     }
     function mapBackendTask(t) {
       const req = t.request_params || {};
@@ -3871,9 +4615,11 @@
       const ratingObj = t.content_rating && typeof t.content_rating === 'object' ? t.content_rating : null;
       const contentRating = ratingObj ? (ratingObj.rating || 'general') : (typeof t.content_rating === 'string' ? t.content_rating : 'general');
       const isNsfw = contentRating === 'nsfw';
+      const sortCursor = typeof t.sort_cursor === 'string' ? t.sort_cursor : '';
 
       return {
         id: t.task_id,
+        sortCursor,
         title: customTitle || defaultTitle,
         prompt: req.prompt || t.prompt_preview || '',
         negativePrompt: req.negative_prompt || '',
@@ -3905,56 +4651,339 @@
       };
     }
 
+    function buildLiveExistingMap() {
+      const map = new Map(allTasks.map(t => [t.id, t]));
+      if (activeTask?.id && !map.has(activeTask.id)) {
+        map.set(activeTask.id, activeTask);
+      }
+      return map;
+    }
+
+    function resolveTaskEntryWithSeq(mapped, reqSeq, existingById) {
+      const prev = existingById.get(mapped.id);
+      const prevSeq = taskAppliedSeq.get(mapped.id) || 0;
+      if (prevSeq > reqSeq) {
+        if (prev) {
+          const merged = { ...prev, sortCursor: mapped.sortCursor || prev.sortCursor || '' };
+          const ov = localTaskOverrides.get(mapped.id);
+          if (ov && ov.seq >= prevSeq) Object.assign(merged, ov.patch);
+          return merged;
+        }
+        const fallback = { ...mapped };
+        const ov = localTaskOverrides.get(mapped.id);
+        if (ov) Object.assign(fallback, ov.patch);
+        return fallback;
+      }
+      const next = prev && prev.img && !mapped.img && prev.artifactId === mapped.artifactId
+        ? { ...mapped, img: prev.img }
+        : { ...mapped };
+      const ov = localTaskOverrides.get(mapped.id);
+      if (ov && ov.seq > reqSeq) {
+        Object.assign(next, ov.patch);
+      } else {
+        localTaskOverrides.delete(mapped.id);
+        if (reqSeq > prevSeq) {
+          taskAppliedSeq.set(mapped.id, reqSeq);
+          pendingForcedReconcileIds.delete(mapped.id);
+        }
+      }
+      return next;
+    }
+
     // Live Tasks Sync
-    async function performTaskSync(append = false) {
+    async function performTaskSync(append = false, options = {}) {
+      ensureQueryEpochState();
       if (syncingTasks || disposed || document.hidden) return;
       const queryEpoch = taskQueryEpoch;
+      const explicitReset = Boolean(options?.reset);
       syncingTasks = true;
       document.getElementById('btnRefreshTasks').disabled = true;
       updateTaskPagination();
+      let headReconcileIds = null;
+      let didCommitSync = false;
       try {
-        const offset = append ? taskNextOffset : 0;
         const limit = taskPageSize;
-        const tasksRes = await requestApi(`/api/tasks?limit=${limit}&offset=${offset}${taskSearchQuery ? `&q=${encodeURIComponent(taskSearchQuery)}` : ''}`);
-        if (disposed || queryEpoch !== taskQueryEpoch) return;
-        if (!Array.isArray(tasksRes?.tasks)) throw new Error('任务响应格式无效');
-        loadCapabilities(tasksRes.capabilities);
-        if (tasksRes && Array.isArray(tasksRes.tasks)) {
-          taskLoadState = 'ready'; taskLoadError = ''; taskTotal = tasksRes.total ?? tasksRes.tasks.length;
-          const incoming = tasksRes.tasks.map(mapBackendTask);
-          allTasks = mergeTaskPage(allTasks, incoming, append);
-          taskNextOffset = offset + tasksRes.tasks.length;
-          taskPageExhausted = tasksRes.tasks.length < limit;
-          if (append || !taskPageError) taskPageError = '';
-          updateTaskFilters();
-          renderGallery();
-          if (pendingDetailId && activeTask?.id !== pendingDetailId) void openInspector(pendingDetailId, false);
-          if (activeTask) {
-            const refreshed = allTasks.find(x => x.id === activeTask.id);
-            if (refreshed) {
-              activeTask = refreshed;
-              updateInspectorImages(activeTask);
+        const qSuffix = taskSearchQuery ? `&q=${encodeURIComponent(taskSearchQuery)}` : '';
+        if (append) {
+          const useCursor = Boolean(hasActiveServerCursorMode && taskNextCursor);
+          const offset = useCursor ? 0 : taskNextOffset;
+          const url = useCursor
+            ? `/api/tasks?limit=${limit}&offset=0&before_cursor=${encodeURIComponent(taskNextCursor)}${qSuffix}`
+            : `/api/tasks?limit=${limit}&offset=${offset}${qSuffix}`;
+          const pageSeq = ++nextReconcileSeq;
+          const tasksRes = await requestApi(url);
+          if (disposed || queryEpoch !== taskQueryEpoch) return;
+          if (!Array.isArray(tasksRes?.tasks)) throw new Error('任务响应格式无效');
+          const hasServerCursor = typeof tasksRes.has_more === 'boolean' &&
+            (tasksRes.tasks.length === 0 || typeof tasksRes.tasks[0]?.sort_cursor === 'string');
+          didCommitSync = await commitTasksWithViewportAnchor(() => {
+            if (disposed || queryEpoch !== taskQueryEpoch) return false;
+            ensureQueryEpochState();
+            lastTaskSyncFailed = false;
+            loadCapabilities(tasksRes.capabilities);
+            const existingById = buildLiveExistingMap();
+            const rawMapped = tasksRes.tasks.map(mapBackendTask);
+            let hiddenCount = 0;
+            const resolvedIncoming = [];
+            for (const item of rawMapped) {
+              if (locallyHiddenTaskIds.has(item.id)) {
+                hiddenCount++;
+                continue;
+              }
+              resolvedIncoming.push(resolveTaskEntryWithSeq(item, pageSeq, existingById));
             }
+            const filteredPrevious = allTasks.filter(t => !locallyHiddenTaskIds.has(t.id));
+            taskLoadState = 'ready';
+            taskLoadError = '';
+            const rawTotal = tasksRes.total ?? (filteredPrevious.length + resolvedIncoming.length);
+            taskTotal = Math.max(0, rawTotal - hiddenCount);
+            allTasks = mergeTaskPage(filteredPrevious, resolvedIncoming, true);
+            if (hasServerCursor) {
+              hasActiveServerCursorMode = true;
+              const hasMore = Boolean(tasksRes.has_more);
+              taskPageExhausted = !hasMore;
+              taskNextCursor = hasMore
+                ? (tasksRes.next_cursor || rawMapped.at(-1)?.sortCursor || allTasks.at(-1)?.sortCursor || '')
+                : '';
+              taskNextOffset = allTasks.length;
+            } else {
+              hasActiveServerCursorMode = false;
+              taskNextCursor = '';
+              taskNextOffset = Math.max(0, offset + tasksRes.tasks.length - hiddenCount);
+              taskPageExhausted = tasksRes.tasks.length < limit || taskNextOffset >= taskTotal;
+            }
+            taskPageError = '';
+            if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+            return { committed: true, skipAnchor: true };
+          }, { skipAnchor: true });
+        } else {
+          const page1Seq = ++nextReconcileSeq;
+          const tasksRes = await requestApi(`/api/tasks?limit=${limit}&offset=0${qSuffix}`);
+          if (disposed || queryEpoch !== taskQueryEpoch) return;
+          if (!Array.isArray(tasksRes?.tasks)) throw new Error('任务响应格式无效');
+          const hasServerCursor = typeof tasksRes.has_more === 'boolean' &&
+            (tasksRes.tasks.length === 0 || typeof tasksRes.tasks[0]?.sort_cursor === 'string');
+          let latestTotal = tasksRes.total ?? tasksRes.tasks.length;
+          let latestCaps = tasksRes.capabilities;
+          const pageBatches = [{ raw: tasksRes.tasks, seq: page1Seq }];
+          let lastHasMore = hasServerCursor ? Boolean(tasksRes.has_more) : false;
+          let lastNextCursor = hasServerCursor ? String(tasksRes.next_cursor || '') : '';
+
+          if (hasServerCursor) {
+            const maxHeadPages = taskSearchQuery ? 1 : 5;
+            let pagesRead = 1;
+            let rawWindowMapped = tasksRes.tasks.map(mapBackendTask);
+            const isWindowBridgedAgainstLive = () => {
+              const liveTasks = allTasks.filter(t => !locallyHiddenTaskIds.has(t.id));
+              if (!lastHasMore || liveTasks.length === 0 || rawWindowMapped.length === 0) return true;
+              if (!parseSortCursor(liveTasks[0]?.sortCursor)) return false;
+              const boundary = rawWindowMapped.at(-1);
+              if (!parseSortCursor(boundary?.sortCursor)) return false;
+              const liveIds = new Set(liveTasks.map(t => t.id));
+              return rawWindowMapped.some(t => liveIds.has(t.id)) || compareSortCursor(boundary, liveTasks[0]) <= 0;
+            };
+
+            while (!explicitReset && pagesRead < maxHeadPages && lastHasMore && lastNextCursor && !isWindowBridgedAgainstLive()) {
+              const bridgeSeq = ++nextReconcileSeq;
+              const bridgeRes = await requestApi(`/api/tasks?limit=${limit}&offset=0&before_cursor=${encodeURIComponent(lastNextCursor)}${qSuffix}`);
+              if (disposed || queryEpoch !== taskQueryEpoch) return;
+              if (!Array.isArray(bridgeRes?.tasks)) throw new Error('任务响应格式无效');
+              pagesRead++;
+              pageBatches.push({ raw: bridgeRes.tasks, seq: bridgeSeq });
+              rawWindowMapped = [...rawWindowMapped, ...bridgeRes.tasks.map(mapBackendTask)];
+              if (Number.isFinite(bridgeRes.total)) latestTotal = bridgeRes.total;
+              if (bridgeRes.capabilities) latestCaps = bridgeRes.capabilities;
+              lastHasMore = Boolean(bridgeRes.has_more);
+              lastNextCursor = String(bridgeRes.next_cursor || '');
+              if (bridgeRes.tasks.length === 0) {
+                lastHasMore = false;
+                lastNextCursor = '';
+                break;
+              }
+            }
+
+            didCommitSync = await commitTasksWithViewportAnchor(() => {
+              if (disposed || queryEpoch !== taskQueryEpoch) return false;
+              ensureQueryEpochState();
+              lastTaskSyncFailed = false;
+              loadCapabilities(latestCaps);
+              const livePrev = allTasks.filter(t => !locallyHiddenTaskIds.has(t.id));
+              const livePrevIds = new Set(livePrev.map(t => t.id));
+              const existingById = buildLiveExistingMap();
+              const dedupHeadMap = new Map();
+              const rawItemsAtCommit = [];
+              const hiddenSeenInWindow = new Set();
+              for (const batch of pageBatches) {
+                for (const rawTask of batch.raw) {
+                  const mapped = mapBackendTask(rawTask);
+                  rawItemsAtCommit.push(mapped);
+                  if (locallyHiddenTaskIds.has(mapped.id)) {
+                    hiddenSeenInWindow.add(mapped.id);
+                    continue;
+                  }
+                  dedupHeadMap.set(mapped.id, resolveTaskEntryWithSeq(mapped, batch.seq, existingById));
+                }
+              }
+              const rawBoundaryItem = rawItemsAtCommit.at(-1) || null;
+              const headItems = [...dedupHeadMap.values()];
+              const headIds = new Set(headItems.map(t => t.id));
+              headReconcileIds = headIds;
+
+              const bridgedNow = !explicitReset && (
+                !lastHasMore ||
+                livePrev.length === 0 ||
+                rawItemsAtCommit.length === 0 ||
+                (
+                  Boolean(parseSortCursor(livePrev[0]?.sortCursor)) &&
+                  Boolean(parseSortCursor(rawBoundaryItem?.sortCursor)) &&
+                  (rawItemsAtCommit.some(t => livePrevIds.has(t.id)) || compareSortCursor(rawBoundaryItem, livePrev[0]) <= 0)
+                )
+              );
+
+              let nextTasks;
+              let nextCursorVal = '';
+              let nextExhausted = false;
+              let commitSkipAnchor = false;
+
+              if (!lastHasMore) {
+                nextTasks = headItems;
+                nextCursorVal = '';
+                nextExhausted = true;
+                commitSkipAnchor = explicitReset || livePrev.length === 0;
+              } else if (bridgedNow && livePrev.length > 0 && rawBoundaryItem) {
+                const tail = livePrev.filter(t =>
+                  !headIds.has(t.id) &&
+                  !locallyHiddenTaskIds.has(t.id) &&
+                  compareSortCursor(t, rawBoundaryItem) < 0
+                );
+                nextTasks = [...headItems, ...tail];
+                if (tail.length > 0) {
+                  nextCursorVal = nextTasks.at(-1)?.sortCursor || lastNextCursor;
+                  nextExhausted = Boolean(taskPageExhausted);
+                } else {
+                  nextCursorVal = lastNextCursor || headItems.at(-1)?.sortCursor || '';
+                  nextExhausted = !lastHasMore;
+                }
+                commitSkipAnchor = false;
+              } else {
+                nextTasks = headItems;
+                nextCursorVal = lastHasMore ? (lastNextCursor || rawBoundaryItem?.sortCursor || '') : '';
+                nextExhausted = !lastHasMore;
+                commitSkipAnchor = true;
+              }
+
+              hasActiveServerCursorMode = true;
+              taskLoadState = 'ready';
+              taskLoadError = '';
+              taskTotal = Math.max(0, latestTotal - hiddenSeenInWindow.size);
+              allTasks = nextTasks;
+              taskNextCursor = nextCursorVal;
+              taskNextOffset = nextTasks.length;
+              taskPageExhausted = nextExhausted;
+              if (!taskPageError) taskPageError = '';
+              if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+              return { committed: true, skipAnchor: commitSkipAnchor };
+            }, { shouldSkipAnchor: () => explicitReset || allTasks.length === 0 });
+          } else {
+            didCommitSync = await commitTasksWithViewportAnchor(() => {
+              if (disposed || queryEpoch !== taskQueryEpoch) return false;
+              ensureQueryEpochState();
+              lastTaskSyncFailed = false;
+              loadCapabilities(latestCaps);
+              const livePrev = allTasks.filter(t => !locallyHiddenTaskIds.has(t.id));
+              const existingById = buildLiveExistingMap();
+              const rawCount = tasksRes.tasks.length;
+              const hasMore = rawCount >= limit && rawCount < latestTotal;
+              let hiddenCount = 0;
+              const headItems = [];
+              for (const rawTask of tasksRes.tasks) {
+                const mapped = mapBackendTask(rawTask);
+                if (locallyHiddenTaskIds.has(mapped.id)) {
+                  hiddenCount++;
+                  continue;
+                }
+                headItems.push(resolveTaskEntryWithSeq(mapped, page1Seq, existingById));
+              }
+              const headIds = new Set(headItems.map(t => t.id));
+              headReconcileIds = headIds;
+              const prevIndexById = new Map(livePrev.map((t, idx) => [t.id, idx]));
+              let lastOverlapHeadIdx = -1;
+              for (let i = 0; i < headItems.length; i++) {
+                if (prevIndexById.has(headItems[i].id)) lastOverlapHeadIdx = i;
+              }
+              let nextTasks;
+              let nextOffsetVal;
+              let nextExhausted;
+              let commitSkipAnchor = false;
+              const adjustedTotal = Math.max(0, latestTotal - hiddenCount);
+              if (!explicitReset && hasMore && livePrev.length > 0 && headItems.length > 0 && lastOverlapHeadIdx === headItems.length - 1) {
+                const anchorIdx = prevIndexById.get(headItems.at(-1).id);
+                const tail = livePrev.slice(anchorIdx + 1).filter(t => !headIds.has(t.id) && !locallyHiddenTaskIds.has(t.id));
+                nextTasks = [...headItems, ...tail];
+                nextOffsetVal = nextTasks.length;
+                nextExhausted = nextOffsetVal >= adjustedTotal;
+                commitSkipAnchor = false;
+              } else {
+                nextTasks = headItems;
+                nextOffsetVal = Math.max(0, rawCount - hiddenCount);
+                nextExhausted = !hasMore;
+                commitSkipAnchor = explicitReset || livePrev.length === 0 || hasMore;
+              }
+              hasActiveServerCursorMode = false;
+              taskNextCursor = '';
+              taskLoadState = 'ready';
+              taskLoadError = '';
+              taskTotal = adjustedTotal;
+              allTasks = nextTasks;
+              taskNextOffset = nextOffsetVal;
+              taskPageExhausted = nextExhausted;
+              if (!taskPageError) taskPageError = '';
+              if (typeof lastTaskStructure !== 'undefined') lastTaskStructure = '';
+              return { committed: true, skipAnchor: commitSkipAnchor };
+            }, { shouldSkipAnchor: () => explicitReset || allTasks.length === 0 });
           }
-          document.getElementById('connText').textContent = '已连接';
-          document.getElementById('embedStatusPill').dataset.state = 'ready';
-          loadThumbnails();
+        }
+        if (!didCommitSync || disposed || queryEpoch !== taskQueryEpoch) return;
+        if (pendingDetailId && activeTask?.id !== pendingDetailId) void openInspector(pendingDetailId, false);
+        if (activeTask) {
+          const refreshed = allTasks.find(x => x.id === activeTask.id);
+          if (refreshed) refreshOpenInspectorTask(refreshed);
+        }
+        document.getElementById('connText').textContent = '已连接';
+        document.getElementById('embedStatusPill').dataset.state = 'ready';
+        loadThumbnails();
+        if (!append && headReconcileIds) {
+          scheduleTaskReconcilePool(headReconcileIds);
         }
       } catch (e) {
         if (disposed || queryEpoch !== taskQueryEpoch) return;
+        lastTaskSyncFailed = true;
         if (append) { taskPageError = e.message || '请重试'; return; }
-        taskLoadState = 'error'; taskLoadError = e.message || '连接失败，请重试。';
         document.getElementById('connText').textContent = '连接异常';
         document.getElementById('embedStatusPill').dataset.state = 'error';
-        renderChannelCatalog();
-        renderGallery();
+        if (allTasks.length === 0 || explicitReset) {
+          taskLoadState = 'error';
+          taskLoadError = e.message || '连接失败，请重试。';
+          renderChannelCatalog();
+          renderGallery();
+        }
+        if (pendingForcedReconcileIds.size > 0 || (activeTask && !allTasks.some(t => t.id === activeTask.id))) {
+          scheduleTaskReconcilePool(new Set());
+        }
       } finally {
         syncingTasks = false;
         document.getElementById('btnRefreshTasks').disabled = false;
-        updateTaskPagination();
-        if (!taskPageError && taskLoadState === 'ready') {
-          taskPageObserver?.unobserve(document.getElementById('taskPagination'));
-          taskPageObserver?.observe(document.getElementById('taskPagination'));
+        if (!disposed && queryEpoch === taskQueryEpoch) {
+          updateTaskPagination();
+          const paginationEl = document.getElementById('taskPagination');
+          const isPaginationVisible = Boolean(paginationEl && !paginationEl.hidden);
+          if (!taskPageError && taskLoadState === 'ready' && isPaginationVisible && (append || !paginationObservedVisible)) {
+            taskPageObserver?.unobserve?.(paginationEl);
+            taskPageObserver?.observe?.(paginationEl);
+          }
+          paginationObservedVisible = isPaginationVisible;
+        } else if (!disposed) {
+          updateTaskPagination();
         }
       }
     }
@@ -3966,7 +4995,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) syncBackendTasks(); });
     window.addEventListener('pagehide', () => {
       closeHostPreview(); previewFocus.clear(); previewBlobs.clear();
-      disposed = true; clearTimeout(taskActionStatusTimer); clearTimeout(taskSearchTimer); taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
+      disposed = true; resetTaskQueryTransientState(); clearTimeout(taskActionStatusTimer); clearTimeout(taskSearchTimer); taskPageObserver?.disconnect(); cardThumbObserver?.disconnect(); clearInterval(taskPoll); hostResizeObserver?.disconnect();
       for (const request of viewportRequests.values()) { clearTimeout(request.timer); request.resolve(0); }
       viewportRequests.clear();
       for (const req of pendingReqs.values()) { clearTimeout(req.timer); req.reject(new Error('页面已关闭')); }
