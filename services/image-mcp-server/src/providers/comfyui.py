@@ -293,25 +293,15 @@ class ComfyUIWorkflowProvider:
         caller_user = str(caller.get("user_id") or "").strip() if isinstance(caller, dict) else ""
         has_caller_identity = bool(caller_org or caller_user)
         project_auth_url = os.environ.get("IMAGE_PROJECT_SERVICE_URL", "").strip()
-        if has_caller_identity or project_auth_url:
-            if has_caller_identity and (not is_uuid7(caller_org) or not is_uuid7(caller_user)):
+        project_auth_tok = os.environ.get("IMAGE_PROJECT_SERVICE_TOKEN", "").strip()
+        if has_caller_identity or project_auth_url or project_auth_tok:
+            if not is_uuid7(caller_org) or not is_uuid7(caller_user):
                 raise ValueError("verified_studio_identity_required")
-            if authorize_fn is not None and project_auth_url:
-                verified = _call_authorize_fn(authorize_fn, project_id, None, require_write=require_write)
-                org_id = str(verified.get("organization_id") or "").strip()
-                user_id = str(verified.get("user_id") or "").strip()
-            elif authorize_fn is not None and not project_auth_url and has_caller_identity:
-                try:
-                    verified = _call_authorize_fn(authorize_fn, project_id, None, require_write=require_write)
-                    org_id = str(verified.get("organization_id") or "").strip()
-                    user_id = str(verified.get("user_id") or "").strip()
-                except ValueError as exc:
-                    if str(exc) != "project_authorization_not_configured":
-                        raise
-                    org_id = caller_org
-                    user_id = caller_user
-            else:
+            if authorize_fn is None:
                 raise ValueError("project_authorization_not_configured")
+            verified = _call_authorize_fn(authorize_fn, project_id, None, require_write=require_write)
+            org_id = str(verified.get("organization_id") or "").strip()
+            user_id = str(verified.get("user_id") or "").strip()
             if not is_uuid7(org_id) or not is_uuid7(user_id):
                 raise ValueError("verified_studio_identity_required")
             if caller_org and org_id != caller_org:
@@ -797,7 +787,19 @@ class ComfyUIWorkflowProvider:
                     err_code = f"comfyui_{body['code'].strip().lower()}"
                 elif isinstance(body.get("error"), str) and body["error"].strip():
                     err_code = f"comfyui_{body['error'].strip().lower()}"
-            uncertain = resp.status_code >= 500 and tool_name == "api.invoke"
+            uncertain = tool_name == "api.invoke" and (
+                resp.status_code >= 500
+                or resp.status_code in {408, 425, 429}
+                or (
+                    resp.status_code == 409
+                    and err_code
+                    in {
+                        "comfyui_operation_in_progress",
+                        "comfyui_headless_pool_busy",
+                        "comfyui_headless_worker_active",
+                    }
+                )
+            )
             raise ComfyUIProviderError(err_code, uncertain=uncertain)
 
         if isinstance(body, dict) and isinstance(body.get("structuredContent"), dict):
@@ -829,18 +831,25 @@ class ComfyUIWorkflowProvider:
             "X-User-Id": principal.user_id,
             "X-Organization-Id": principal.organization_id,
         }
+        handle_id = new_uuid7()
         try:
             prep_resp = self._client.post(
                 f"{base_url}/v2/artifacts/uploads",
                 headers={**base_headers, "X-Request-Id": new_uuid7(), "Content-Type": "application/json"},
                 json={
-                    "project_id": project_id,
-                    "filename": rec.filename,
-                    "mime_type": rec.media_type,
-                    "size_bytes": len(raw),
+                    "write_id": new_uuid7(),
+                    "source": {
+                        "kind": "legacy_import",
+                        "project_id": project_id,
+                        "original_ref": {
+                            "service_id": "comfyui-input",
+                            "artifact_id": handle_id,
+                            "version_id": "v1",
+                        },
+                    },
                     "sha256": digest,
-                    "source": "image_mcp_bridge",
-                    "source_task_id": task_id,
+                    "size": len(raw),
+                    "mime": (rec.media_type.split(";")[0].strip() or "image/png"),
                 },
                 timeout=30.0,
             )
@@ -849,31 +858,41 @@ class ComfyUIWorkflowProvider:
             prep_resp.raise_for_status()
             prep = prep_resp.json()
             upload_id = str(prep["upload_id"])
-            studio_artifact_id = str(prep["artifact_id"])
+            is_v2_native = bool(prep.get("content_path"))
+            studio_artifact_id = handle_id if is_v2_native else str(prep.get("artifact_id") or handle_id)
 
-            put_resp = self._client.put(
-                f"{base_url}/v2/artifacts/uploads/{upload_id}/content",
-                headers={
-                    **base_headers,
-                    "X-Request-Id": new_uuid7(),
-                    "Content-Type": "application/octet-stream",
-                    "Content-Length": str(len(raw)),
-                },
-                content=raw,
-                timeout=60.0,
-            )
-            put_resp.raise_for_status()
+            if str(prep.get("state") or "prepared") == "prepared":
+                put_resp = self._client.put(
+                    f"{base_url}/v2/artifacts/uploads/{upload_id}/content",
+                    headers={
+                        **base_headers,
+                        "X-Request-Id": new_uuid7(),
+                        "Content-Type": (rec.media_type.split(";")[0].strip() or "application/octet-stream"),
+                        "Content-Length": str(len(raw)),
+                    },
+                    content=raw,
+                    timeout=60.0,
+                )
+                put_resp.raise_for_status()
 
-            commit_resp = self._client.post(
-                f"{base_url}/v2/artifacts/uploads/{upload_id}/commit",
-                headers={**base_headers, "X-Request-Id": new_uuid7(), "Content-Type": "application/json"},
-                json={"sha256": digest, "size_bytes": len(raw)},
-                timeout=30.0,
-            )
-            commit_resp.raise_for_status()
-            committed = commit_resp.json() if commit_resp.content else {}
-            if isinstance(committed, dict) and committed.get("artifact_id"):
-                studio_artifact_id = str(committed["artifact_id"])
+            if is_v2_native:
+                commit_resp = self._client.post(
+                    f"{base_url}/v2/artifacts/uploads/{upload_id}/commit",
+                    headers={**base_headers, "X-Request-Id": new_uuid7()},
+                    timeout=30.0,
+                )
+                commit_resp.raise_for_status()
+            else:
+                commit_resp = self._client.post(
+                    f"{base_url}/v2/artifacts/uploads/{upload_id}/commit",
+                    headers={**base_headers, "X-Request-Id": new_uuid7(), "Content-Type": "application/json"},
+                    json={"sha256": digest, "size_bytes": len(raw)},
+                    timeout=30.0,
+                )
+                commit_resp.raise_for_status()
+                committed = commit_resp.json() if commit_resp.content else {}
+                if isinstance(committed, dict) and committed.get("artifact_id"):
+                    studio_artifact_id = str(committed["artifact_id"])
         except ComfyUIProviderError:
             raise
         except Exception as exc:
@@ -891,16 +910,23 @@ class ComfyUIWorkflowProvider:
         output_meta: dict[str, Any],
     ) -> tuple[bytes, str, str]:
         studio_aid = str(output_meta.get("artifact_id") or "").strip()
+        store_id = str(output_meta.get("store_id") or "").strip()
+        version_id = str(output_meta.get("version_id") or "").strip()
         expected_sha = str(output_meta.get("sha256") or "").strip().lower()
         expected_size = output_meta.get("size_bytes")
         if not is_uuid4_or_7(studio_aid) or len(expected_sha) != 64:
             raise ComfyUIProviderError("comfyui_output_metadata_invalid", uncertain=False)
 
         base_url, svc_token = self._resolved_artifact_service()
-        query = urllib.parse.urlencode({"project_id": project_id, "artifact_id": studio_aid})
+        if is_uuid4_or_7(store_id) and is_uuid4_or_7(version_id):
+            query = urllib.parse.urlencode({"store_id": store_id, "artifact_id": studio_aid})
+            content_url = f"{base_url}/v2/artifacts/{version_id}/content?{query}"
+        else:
+            query = urllib.parse.urlencode({"project_id": project_id, "artifact_id": studio_aid})
+            content_url = f"{base_url}/v2/artifacts/{studio_aid}/content?{query}"
         try:
             resp = self._client.get(
-                f"{base_url}/v2/artifacts/{studio_aid}/content?{query}",
+                content_url,
                 headers={
                     "Authorization": f"Bearer {svc_token}",
                     "X-User-Id": principal.user_id,
@@ -992,23 +1018,32 @@ class ComfyUIWorkflowProvider:
             if cancel_marker.exists() and not journal.get("submitted"):
                 raise ComfyUIProviderError("canceled_by_caller", uncertain=False)
 
+            already_submitted = bool(journal.get("submitted"))
             if on_phase is not None:
                 on_phase("submitting")
             journal["submitted"] = True
             self._write_journal(journal_path, journal)
 
             idem_key = f"imgmcp-{task_id}"
-            remote_task = self._call_headless_tool(
-                principal,
-                "api.invoke",
-                {
-                    "project_id": project_id,
-                    "idempotency_key": idem_key,
-                    "endpoint_slug": slug,
-                    "version": version,
-                    "params": resolved_params,
-                },
-            )
+            try:
+                remote_task = self._call_headless_tool(
+                    principal,
+                    "api.invoke",
+                    {
+                        "project_id": project_id,
+                        "idempotency_key": idem_key,
+                        "endpoint_slug": slug,
+                        "version": version,
+                        "params": resolved_params,
+                    },
+                )
+            except ComfyUIProviderError as exc:
+                if already_submitted and exc.code.startswith("comfyui_") and exc.code not in {
+                    "comfyui_invalid_parameters",
+                    "comfyui_forbidden",
+                }:
+                    raise ComfyUIProviderError(exc.code, uncertain=True) from exc
+                raise
             remote_task_id = str(remote_task.get("task_id") or "").strip()
             if not is_uuid4_or_7(remote_task_id):
                 raise ComfyUIProviderError("comfyui_invalid_task_id", uncertain=False)

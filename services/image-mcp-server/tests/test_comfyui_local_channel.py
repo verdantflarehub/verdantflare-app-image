@@ -205,12 +205,21 @@ class ComfyUILocalChannelTests(unittest.TestCase):
             timeout_seconds=10.0,
             http_client=self.http_client,
         )
+        def default_project_authorize(pid: str, _auth=None, *, require_write: bool = True) -> dict[str, str]:
+            _ = require_write
+            caller = CALLER.get()
+            if isinstance(caller, dict) and (caller.get("organization_id") or caller.get("user_id")):
+                if pid != PROJECT_A or caller.get("organization_id") != ORG_A or not caller.get("user_id"):
+                    raise ValueError("project_access_denied")
+                return {"organization_id": str(caller["organization_id"]), "user_id": str(caller["user_id"])}
+            return {"organization_id": ORG_A, "user_id": USER_A}
+
         self.queue = TaskQueueManager(
             tasks=self.tasks,
             artifacts=self.artifacts,
             codex_provider=CodexProvider(),
             gemini_provider=GeminiProvider(),
-            google_authorize=lambda pid, _auth: {"organization_id": ORG_A, "user_id": USER_A},
+            google_authorize=default_project_authorize,
             comfyui_provider=self.comfyui,
         )
 
@@ -498,6 +507,35 @@ class ComfyUILocalChannelTests(unittest.TestCase):
             finally:
                 CALLER.reset(tok_ro)
             self.assertEqual(self.tasks.get(rec.task_id).status, "queued")
+
+            # 4. Missing project authorization config MUST fail closed even for a same-org caller (R2-H01)
+            from src.channel_authority import authorize as real_project_authorize
+
+            self.queue.google_authorize = lambda pid, auth=None, *, require_write=True: real_project_authorize(
+                self.http_client, pid, auth, require_write=require_write
+            )
+            with patch.dict(
+                os.environ,
+                {"IMAGE_PROJECT_SERVICE_URL": "", "IMAGE_PROJECT_SERVICE_TOKEN": ""},
+                clear=False,
+            ):
+                tok_unconf = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+                try:
+                    with self.assertRaisesRegex(ValueError, "project_authorization_not_configured"):
+                        self.comfyui.authorize_task_caller(
+                            project_id=PROJECT_A,
+                            params=prepared,
+                            authorize_fn=self.queue.google_authorize,
+                            require_write=True,
+                        )
+                    with self.assertRaisesRegex(ValueError, "project_authorization_not_configured"):
+                        server_mod.image_cancel(rec.task_id)
+                    with self.assertRaisesRegex(ValueError, "project_authorization_not_configured"):
+                        server_mod.image_status(rec.task_id)
+                    with self.assertRaisesRegex(ValueError, "project_authorization_not_configured"):
+                        server_mod.image_result(rec.task_id)
+                finally:
+                    CALLER.reset(tok_unconf)
 
     def test_unconfirmed_cancel_replays_submit_keeps_journal_and_blocks_delete(self) -> None:
         from starlette.applications import Starlette

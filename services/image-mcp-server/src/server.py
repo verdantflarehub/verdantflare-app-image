@@ -291,7 +291,7 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.62"
+SERVICE_VERSION = "v0.2.63"
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
@@ -922,7 +922,7 @@ def image_rate_content(
 
 
 def _authorize_task_operation(task, *, require_write: bool) -> None:
-    if task.engine == "comfyui":
+    if getattr(task, "engine", None) == "comfyui":
         queue_manager.authorize_task_caller(task, require_write=require_write)
         return
     if not require_write:
@@ -933,7 +933,8 @@ def _authorize_task_operation(task, *, require_write: bool) -> None:
         or str(caller.get("user_id") or "").strip()
     )
     project_auth_url = os.environ.get("IMAGE_PROJECT_SERVICE_URL", "").strip()
-    saved_org = str((task.request_params.get("channel_authority") or {}).get("organization_id") or "").strip()
+    req_params = getattr(task, "request_params", None) or {}
+    saved_org = str((req_params.get("channel_authority") or {}).get("organization_id") or "").strip()
     if project_auth_url:
         verified = authorize(authority_client, task.project_id, None, require_write=True)
         if saved_org and str(verified.get("organization_id") or "").strip() != saved_org:
