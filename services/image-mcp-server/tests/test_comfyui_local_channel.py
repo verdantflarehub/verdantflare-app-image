@@ -675,6 +675,13 @@ class ComfyUILocalChannelTests(unittest.TestCase):
             self.assertFalse(journal.exists())
             self.assertFalse(journal.with_suffix(".cancel").exists())
 
+    def test_static_index_derives_capability_badges_from_operations(self) -> None:
+        index_html = (Path(__file__).resolve().parents[1] / "src" / "static" / "index.html").read_text(encoding="utf-8")
+        dynamic_push_block = index_html.split("const deriveCapsFromOperations = (ops) =>", 1)[1].split("const totalCount =", 1)[0]
+        self.assertIn("if (ops.includes('generate')) outCaps.push(['T2I', '文生图']);", dynamic_push_block)
+        self.assertIn("if (ops.includes('edit')) outCaps.push(['I2I', '图生图']);", dynamic_push_block)
+        self.assertIn("caps: deriveCapsFromOperations(resolvedOps)", dynamic_push_block)
+
 
 if __name__ == "__main__":
     unittest.main()
