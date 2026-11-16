@@ -256,6 +256,16 @@ class ComfyUILocalChannelTests(unittest.TestCase):
         self.assertEqual(comfy_cap["source_badge"], "本地")
         self.assertEqual(comfy_cap["supported_models"], ["comfyui:sdxl-lora-img2img@1.0.0"])
         self.assertEqual(comfy_cap["model_catalog"][0]["source_badge"], "本地")
+        self.assertEqual(comfy_cap["model_catalog"][0]["operations"], ["edit"])
+        t2i_entry = ComfyUIWorkflowProvider._build_catalog_entry(
+            {
+                "catalog_model_id": "comfyui:sdxl-t2i@1.0.0",
+                "endpoint_slug": "sdxl-t2i",
+                "version": "1.0.0",
+                "spec": {"exposed_inputs": [{"name": "prompt", "value_type": "string", "required": True}]},
+            }
+        )
+        self.assertEqual(t2i_entry["operations"], ["generate"])
         self.assertEqual(GEMINI_MODEL_CATALOG, gemini_snapshot_before)
 
         # Cross-org caller sees zero ORG_A workflows

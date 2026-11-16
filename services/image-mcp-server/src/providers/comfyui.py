@@ -426,11 +426,21 @@ class ComfyUIWorkflowProvider:
             if isinstance(s, dict)
             and ComfyUIWorkflowProvider._slot_type(s) == "artifact_mask"
         )
-        ops = ["generate"]
+        has_required_media = any(
+            isinstance(s, dict)
+            and ComfyUIWorkflowProvider._slot_type(s) in ("artifact_image", "artifact_mask")
+            and bool(s.get("required"))
+            for s in exposed
+        )
+        ops: list[str] = []
+        if not has_required_media:
+            ops.append("generate")
         if img_slots > 0:
             ops.append("edit")
         if img_slots > 0 and mask_slots > 0:
             ops.append("inpaint")
+        if not ops:
+            ops.append("edit" if img_slots > 0 else "generate")
 
         if img_slots == 0 and mask_slots == 0:
             input_summary = "纯文本生成 (T2I) · 无参考图槽位"
