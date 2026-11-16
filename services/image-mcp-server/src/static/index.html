@@ -3737,6 +3737,7 @@
             if (ops.includes('faceswap')) outCaps.push(['FACESWAP', '人脸融合']);
             return outCaps.length > 0 ? outCaps : [['I2I', '图生图']];
           };
+          const isComfyUIDynamic = lowerCode.startsWith('comfyui:') || String(eng.engine || '').toLowerCase() === 'comfyui';
           const resolvedOps = (catalogItem && Array.isArray(catalogItem.operations) && catalogItem.operations.length > 0)
             ? catalogItem.operations
             : (Array.isArray(eng.supported_operations) && eng.supported_operations.length > 0 ? eng.supported_operations : null);
@@ -3746,7 +3747,7 @@
               if (catalogItem.official_name) existing.officialName = catalogItem.official_name;
               if (catalogItem.pricing_line) existing.pricingLine = catalogItem.pricing_line;
               if (catalogItem.release_meta) existing.releaseMeta = catalogItem.release_meta;
-              if (Array.isArray(catalogItem.operations) && catalogItem.operations.length > 0) {
+              if (isComfyUIDynamic && Array.isArray(catalogItem.operations) && catalogItem.operations.length > 0) {
                 existing.caps = deriveCapsFromOperations(catalogItem.operations);
               }
               if (catalogItem.desc) existing.desc = String(catalogItem.desc).replace(/（\$[0-9.]+\/张）/g, '');
@@ -3767,7 +3768,7 @@
               res: (lowerCode.includes('lite') || lowerCode.includes('2.5')) ? '1K' : ((targetId === 'google' || lowerCode.includes('sunburst')) ? '4K' : '2K'),
               fps: 'PNG',
               maxSize: targetId === 'google' ? '24MB' : '10MB',
-              caps: deriveCapsFromOperations(resolvedOps),
+              caps: isComfyUIDynamic ? deriveCapsFromOperations(resolvedOps) : [['T2I', '文生图'], ['I2I', '图生图']],
               refQuota: (catalogItem && catalogItem.input_summary) || (targetId === 'google' ? '最多 6张参考图 · 0张蒙版' : '最多 1张参考底图 (I2I)'),
               desc: String((catalogItem && catalogItem.desc) || '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。').replace(/（\$[0-9.]+\/张）/g, '')
             });
