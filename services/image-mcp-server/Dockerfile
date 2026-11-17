@@ -9,7 +9,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml .
-RUN SERVICE_VERSION="${SERVICE_VERSION}" python3 -c "import os, tomllib; decl = tomllib.loads(open('pyproject.toml', 'rb').read())['project']['version'].strip(); raw = os.environ.get('SERVICE_VERSION', '').strip(); norm = raw[1:] if raw.startswith('v') else raw; assert not norm or norm == decl, f'SERVICE_VERSION ({raw}) != pyproject.toml ({decl})'"
+RUN SERVICE_VERSION="${SERVICE_VERSION}" python3 -c "import os, tomllib; decl = tomllib.load(open('pyproject.toml', 'rb'))['project']['version'].strip(); raw = os.environ.get('SERVICE_VERSION', '').strip(); norm = raw[1:] if raw.startswith('v') else raw; assert not norm or norm == decl, f'SERVICE_VERSION ({raw}) != pyproject.toml ({decl})'"
 ENV IMAGE_MCP_SERVICE_VERSION=${SERVICE_VERSION}
 RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" . && pip check
 
