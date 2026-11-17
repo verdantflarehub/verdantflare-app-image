@@ -520,3 +520,200 @@ class ImageSchedulerP1bTest(unittest.TestCase):
             )
             self.assertEqual(c3._pending_releases, {})
 
+    def test_moss_topology_unsatisfiable_vs_waitable_vram_and_reconcile_contention(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifacts = ArtifactStore(root / "artifacts")
+            tasks = TaskStore(root / "tasks.db")
+            artifacts.ensure_ready()
+            tasks.ensure_ready()
+
+            png = _png_bytes(64, 64)
+            b64_png = base64.b64encode(png).decode("ascii")
+            generate_calls = {"count": 0}
+            release_calls: list[dict] = []
+            scenario = {"mode": "acquire_topology_422", "polls": 0}
+
+            def sched_handler(request: httpx.Request) -> httpx.Response:
+                body = json.loads(request.content.decode("utf-8")) if request.content else {}
+                m = scenario["mode"]
+                if request.url.path == "/internal/v1/gpu-scheduler/leases/acquire":
+                    if m == "acquire_topology_422":
+                        return httpx.Response(
+                            422,
+                            json={
+                                "error_code": "TOPOLOGY_UNSATISFIABLE",
+                                "message": "requested GPU topology cannot be satisfied on node",
+                            },
+                        )
+                    if m == "bind_topology_422":
+                        return httpx.Response(
+                            200,
+                            json={
+                                "lease_id": "lease-bind-topo",
+                                "state": "leased",
+                                "fencing_token": 91,
+                                "version": 1,
+                                "attempt_id": body["attempt_id"],
+                                "stage_id": "generate",
+                                "gpu_uuids": ["GPU-00000000-0000-0000-0000-000000000000"],
+                                "expires_at": "2027-01-01T00:00:00Z",
+                            },
+                        )
+                    if m == "waitable_contention":
+                        return httpx.Response(
+                            202,
+                            json={
+                                "lease_id": "lease-wait-ok",
+                                "state": "queued",
+                                "blocking_reason": "INSUFFICIENT_VRAM",
+                                "fencing_token": 0,
+                            },
+                        )
+                if request.url.path == "/internal/v1/gpu-scheduler/leases/lease-wait-ok":
+                    scenario["polls"] += 1
+                    if scenario["polls"] == 1:
+                        return httpx.Response(
+                            200,
+                            json={
+                                "lease_id": "lease-wait-ok",
+                                "state": "queued",
+                                "blocking_reason": "PENDING_LEASE_RECONCILIATION",
+                                "fencing_token": 0,
+                            },
+                        )
+                    return httpx.Response(
+                        200,
+                        json={
+                            "lease_id": "lease-wait-ok",
+                            "state": "leased",
+                            "fencing_token": 95,
+                            "version": 2,
+                            "attempt_id": "att-wait",
+                            "stage_id": "generate",
+                            "gpu_uuids": ["GPU-11111111-1111-1111-1111-111111111111"],
+                            "expires_at": "2027-01-01T00:05:00Z",
+                        },
+                    )
+                if request.url.path.endswith("/bind-target"):
+                    if m == "bind_topology_422":
+                        return httpx.Response(
+                            422,
+                            json={
+                                "error_code": "TOPOLOGY_UNSATISFIABLE",
+                                "message": "requested GPU topology cannot be satisfied on node",
+                            },
+                        )
+                    return httpx.Response(
+                        200,
+                        json={
+                            "lease_id": "lease-wait-ok",
+                            "state": "leased",
+                            "fencing_token": 96,
+                            "version": 3,
+                            "pod_uid": body["pod_uid"],
+                            "container_id": body["container_id"],
+                            "boot_id": body["boot_id"],
+                            "gpu_uuids": body.get("actual_gpu_uuids", []),
+                            "expires_at": "2027-01-01T00:05:00Z",
+                        },
+                    )
+                if request.url.path.endswith("/release"):
+                    release_calls.append(body)
+                    lid = request.url.path.split("/")[-2]
+                    return httpx.Response(200, json={"lease_id": lid, "state": "released"})
+                raise AssertionError(f"unexpected scheduler path {request.url.path}")
+
+            def moss_handler(request: httpx.Request) -> httpx.Response:
+                if request.url.path == "/health":
+                    return httpx.Response(
+                        200,
+                        json={
+                            "status": "healthy",
+                            "runtime_identity": {
+                                "pod_uid": "pod-moss-topo",
+                                "container_id": "cid-moss-topo",
+                                "boot_id": "boot-topo",
+                                "supervisor_pid": 101,
+                                "supervisor_starttime_ticks": 202,
+                                "visible_gpu_uuids": ["GPU-11111111-1111-1111-1111-111111111111"],
+                            },
+                        },
+                    )
+                if request.url.path == "/v1/generate":
+                    generate_calls["count"] += 1
+                    proof = {
+                        "reclaimed": True,
+                        "active_tasks": 0,
+                        "proof_source": "receiver_guard",
+                        "token_sealed": True,
+                        "supervisor_pid": 101,
+                        "supervisor_starttime_ticks": 202,
+                        "sealed_pod_uid": "pod-moss-topo",
+                        "sealed_container_id": "cid-moss-topo",
+                        "sealed_boot_id": "boot-topo",
+                        "revoked_lease_id": "lease-wait-ok",
+                        "consumed_fencing_token": 96,
+                    }
+                    return httpx.Response(
+                        200,
+                        json={"status": "ok", "image_base64": b64_png, "mime_type": "image/png", "width": 1024, "height": 1024},
+                        headers={"X-VF-Reclaim-Proof": json.dumps(proof)},
+                    )
+                raise AssertionError(request.url.path)
+
+            mem_api = MemoryApi()
+            mem_api.scales["image-moss"] = 1
+            moss_gpu = GpuCoordinator(api=mem_api, role="moss-image", holder="moss-image/test", deployment="image-moss", enabled=True)
+            sched = SchedulerLeaseClient(
+                base_url="http://station-runtime:5056",
+                token="sched-tok",
+                enabled=True,
+                poll_interval_seconds=0.0,
+                client=httpx.Client(transport=httpx.MockTransport(sched_handler)),
+                sleep=lambda _: None,
+            )
+            moss_provider = MossProvider(
+                base_url="http://image-moss:8000",
+                client=httpx.Client(transport=httpx.MockTransport(moss_handler)),
+            )
+            qm = TaskQueueManager(
+                tasks=tasks,
+                artifacts=artifacts,
+                codex_provider=MagicMock(),
+                gemini_provider=MagicMock(),
+                moss_provider=moss_provider,
+                moss_gpu=moss_gpu,
+                scheduler=sched,
+            )
+
+            # 1. 422 TOPOLOGY_UNSATISFIABLE on /acquire raises SchedulerError immediately (never disguised as waiting_gpu_lease)
+            params = qm.prepare("moss-image", "proj-topo", {"action": "generate", "prompt": "hull", "width": 1024, "height": 1024})
+            t1 = tasks.create(project_id="proj-topo", idempotency_key="topo-acq-1", engine="moss-image", model=DEFAULT_MOSS_MODEL, request_params=params)
+            with self.assertRaises(SchedulerError) as ctx_acq:
+                qm._execute_moss(TaskJob(t1.task_id, "proj-topo", "moss-image", "generate", params))
+            self.assertEqual(ctx_acq.exception.code, "TOPOLOGY_UNSATISFIABLE")
+            self.assertEqual(ctx_acq.exception.status_code, 422)
+            self.assertEqual(generate_calls["count"], 0)
+
+            # 2. 422 TOPOLOGY_UNSATISFIABLE on /bind-target aborts unstarted lease and blocks generation
+            scenario["mode"] = "bind_topology_422"
+            mem_api.scales["image-moss"] = 0
+            t2 = tasks.create(project_id="proj-topo", idempotency_key="topo-bind-1", engine="moss-image", model=DEFAULT_MOSS_MODEL, request_params=params)
+            with self.assertRaises(SchedulerError) as ctx_bind:
+                qm._execute_moss(TaskJob(t2.task_id, "proj-topo", "moss-image", "generate", params))
+            self.assertEqual(ctx_bind.exception.code, "TOPOLOGY_UNSATISFIABLE")
+            self.assertEqual(generate_calls["count"], 0)
+            self.assertEqual(len(release_calls), 1)
+            self.assertEqual(release_calls[0]["reclaim_mode"], "abort_unstarted")
+            self.assertFalse(release_calls[0]["worker_settled"])
+
+            # 3. Waitable resource contention (INSUFFICIENT_VRAM -> PENDING_LEASE_RECONCILIATION -> leased) waits and succeeds
+            scenario["mode"] = "waitable_contention"
+            t3 = tasks.create(project_id="proj-topo", idempotency_key="topo-wait-ok", engine="moss-image", model=DEFAULT_MOSS_MODEL, request_params=params)
+            qm._execute_moss(TaskJob(t3.task_id, "proj-topo", "moss-image", "generate", params))
+            self.assertEqual(generate_calls["count"], 1)
+            self.assertEqual(scenario["polls"], 2)
+            self.assertIsNotNone(tasks.get(t3.task_id).artifact_id)
+
+

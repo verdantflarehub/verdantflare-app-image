@@ -3708,15 +3708,20 @@
             ? eng.model_catalog.filter(item => item && item.model_id).map(item => [normalizeModelCode(item.model_id, eng.engine).toLowerCase(), item])
             : []
         );
-        const declaredModels = Array.isArray(eng.supported_models)
-          ? eng.supported_models
-          : [eng.model || eng.engine];
+        const declaredModels = (eName === 'comfyui' && Array.isArray(eng.model_catalog) && eng.model_catalog.length > 0)
+          ? eng.model_catalog.filter(item => item && item.model_id).map(item => item.model_id)
+          : (Array.isArray(eng.supported_models)
+            ? eng.supported_models
+            : [eng.model || eng.engine]);
 
         for (const rawTitle of declaredModels) {
           if (!rawTitle) continue;
           const canonicalCode = normalizeModelCode(rawTitle, eng.engine);
           const lowerCode = canonicalCode.toLowerCase();
           const catalogItem = catalogByModelId.get(lowerCode);
+          const itemStatusLabel = (catalogItem && catalogItem.available === false)
+            ? (catalogItem.reason === 'worker_image_digest_mismatch' ? '摘要不兼容（不可用）' : '摘要未知（不可用）')
+            : statusLabel;
           if (catalogItem && catalogItem.display_name) {
             MODEL_DISPLAY_MAP[lowerCode] = catalogItem.display_name;
           }
@@ -3752,8 +3757,8 @@
               }
               if (catalogItem.desc) existing.desc = String(catalogItem.desc).replace(/（\$[0-9.]+\/张）/g, '');
             }
-            if (!existing.biz.includes(statusLabel)) {
-              existing.biz = `${existing.biz} · ${statusLabel}`;
+            if (!existing.biz.includes(itemStatusLabel)) {
+              existing.biz = `${existing.biz} · ${itemStatusLabel}`;
             }
           } else {
             grp.items.push({
@@ -3764,7 +3769,7 @@
               pricingLine: (catalogItem && catalogItem.pricing_line) || '',
               releaseMeta: (catalogItem && catalogItem.release_meta) || '',
               title: canonicalCode,
-              biz: `${(catalogItem && catalogItem.biz) || '图像生成'} · ${statusLabel}`,
+              biz: `${(catalogItem && catalogItem.biz) || '图像生成'} · ${itemStatusLabel}`,
               res: (lowerCode.includes('lite') || lowerCode.includes('2.5')) ? '1K' : ((targetId === 'google' || lowerCode.includes('sunburst')) ? '4K' : '2K'),
               fps: 'PNG',
               maxSize: targetId === 'google' ? '24MB' : '10MB',

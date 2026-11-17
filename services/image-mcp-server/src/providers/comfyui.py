@@ -28,8 +28,88 @@ _UUID4_OR_7_RE = re.compile(
 _COMFYUI_MODEL_ID_RE = re.compile(
     r"^comfyui:([a-z][a-z0-9-]{2,62}[a-z0-9])@([0-9]+\.[0-9]+\.[0-9]+)$"
 )
+_CANONICAL_REPO_DIGEST_RE = re.compile(r"^sha256:(?!0{64})[0-9a-f]{64}$")
+_PINNED_IMAGE_DIGEST_REF_RE = re.compile(
+    r"^[a-z0-9][a-z0-9./:_-]*@(sha256:(?!0{64})[0-9a-f]{64})$"
+)
 _SAFE_JS_INT_MAX = 9007199254740991
 _MAX_OUTPUT_IMAGE_BYTES = 64 * 1024 * 1024
+
+
+def normalize_repo_digest(raw: Any) -> str | None:
+    """Normalize a canonical repo digest (`sha256:<64hex>` lowercase); reject mutable tags and zero digests."""
+    if not isinstance(raw, str):
+        return None
+    cand = raw.strip().lower()
+    if not cand:
+        return None
+    if _CANONICAL_REPO_DIGEST_RE.fullmatch(cand):
+        return cand
+    pinned = _PINNED_IMAGE_DIGEST_REF_RE.fullmatch(cand)
+    if pinned:
+        return pinned.group(1)
+    return None
+
+
+def evaluate_workflow_digest_compatibility(
+    item: dict[str, Any],
+    *,
+    payload_current_digest: Any = None,
+) -> dict[str, Any]:
+    expected_digest = normalize_repo_digest(
+        item.get("worker_image_digest") or item.get("expected_worker_image_digest")
+    )
+    raw_current = (
+        item.get("current_worker_image_digest")
+        if item.get("current_worker_image_digest") is not None
+        else payload_current_digest
+    )
+    current_digest = normalize_repo_digest(raw_current)
+    upstream_compat = item.get("digest_compatible")
+    upstream_avail = item.get("available")
+    upstream_reason = str(item.get("reason") or "").strip()
+
+    if upstream_compat is False or upstream_reason == "worker_image_digest_mismatch":
+        return {
+            "available": False,
+            "digest_compatible": False,
+            "reason": "worker_image_digest_mismatch",
+            "expected_worker_image_digest": expected_digest,
+            "current_worker_image_digest": current_digest,
+        }
+
+    if expected_digest is not None and current_digest is not None:
+        if expected_digest != current_digest:
+            return {
+                "available": False,
+                "digest_compatible": False,
+                "reason": "worker_image_digest_mismatch",
+                "expected_worker_image_digest": expected_digest,
+                "current_worker_image_digest": current_digest,
+            }
+        if upstream_compat == "unknown" or upstream_avail is False:
+            return {
+                "available": False,
+                "digest_compatible": "unknown",
+                "reason": "worker_image_digest_unknown",
+                "expected_worker_image_digest": expected_digest,
+                "current_worker_image_digest": current_digest,
+            }
+        return {
+            "available": True,
+            "digest_compatible": True,
+            "reason": None,
+            "expected_worker_image_digest": expected_digest,
+            "current_worker_image_digest": current_digest,
+        }
+
+    return {
+        "available": False,
+        "digest_compatible": "unknown",
+        "reason": "worker_image_digest_unknown",
+        "expected_worker_image_digest": expected_digest,
+        "current_worker_image_digest": current_digest,
+    }
 
 
 class ComfyUIProviderError(RuntimeError):
@@ -376,6 +456,9 @@ class ComfyUIWorkflowProvider:
         raw_items = payload.get("items") if isinstance(payload, dict) else None
         if not isinstance(raw_items, list):
             return []
+        payload_current_digest = (
+            payload.get("current_worker_image_digest") if isinstance(payload, dict) else None
+        )
         valid_items: list[dict[str, Any]] = []
         for item in raw_items:
             if not isinstance(item, dict):
@@ -398,7 +481,20 @@ class ComfyUIWorkflowProvider:
                 parse_comfyui_model_id(model_id)
             except ValueError:
                 continue
-            valid_items.append(item)
+            compat = evaluate_workflow_digest_compatibility(
+                item,
+                payload_current_digest=payload_current_digest,
+            )
+            enriched = dict(item)
+            enriched.update(
+                available=compat["available"],
+                digest_compatible=compat["digest_compatible"],
+                reason=compat["reason"],
+                worker_image_digest=compat["expected_worker_image_digest"],
+                expected_worker_image_digest=compat["expected_worker_image_digest"],
+                current_worker_image_digest=compat["current_worker_image_digest"],
+            )
+            valid_items.append(enriched)
         return valid_items
 
     @staticmethod
@@ -470,6 +566,41 @@ class ComfyUIWorkflowProvider:
                 entry_s["default"] = s["default"]
             exposed_summary.append(entry_s)
 
+        compat = (
+            {
+                "available": bool(item["available"]),
+                "digest_compatible": item.get("digest_compatible", "unknown"),
+                "reason": item.get("reason"),
+                "expected_worker_image_digest": normalize_repo_digest(
+                    item.get("expected_worker_image_digest") or item.get("worker_image_digest")
+                ),
+                "current_worker_image_digest": normalize_repo_digest(
+                    item.get("current_worker_image_digest")
+                ),
+            }
+            if "available" in item and "digest_compatible" in item
+            else evaluate_workflow_digest_compatibility(item)
+        )
+        available = bool(compat["available"])
+        digest_compatible = compat["digest_compatible"]
+        reason = compat["reason"]
+        expected_digest = compat["expected_worker_image_digest"]
+        current_digest = compat["current_worker_image_digest"]
+
+        if available:
+            status_detail = "摘要一致（就绪）"
+            desc = f"ComfyUI 已发布工作流 API（{slug}@{ver}），来源：本地。"
+        elif reason == "worker_image_digest_mismatch":
+            exp_short = expected_digest[:19] if expected_digest else "unknown"
+            cur_short = current_digest[:19] if current_digest else "unknown"
+            status_detail = (
+                f"不可用：工作流固化执行器摘要 ({exp_short}…) 与当前无头执行器摘要 ({cur_short}…) 不一致"
+            )
+            desc = f"ComfyUI 已发布工作流 API（{slug}@{ver}），来源：本地（{status_detail}）。"
+        else:
+            status_detail = "不可用：当前无头执行器规范化镜像摘要未知或不可读（失败闭合）"
+            desc = f"ComfyUI 已发布工作流 API（{slug}@{ver}），来源：本地（{status_detail}）。"
+
         return {
             "model_id": item["catalog_model_id"],
             "display_name": str(item.get("display_name") or slug),
@@ -482,7 +613,7 @@ class ComfyUIWorkflowProvider:
             "pricing_line": "本地算力 · 共享 GPU",
             "release_meta": f"v{ver} · {repro} · 显存预算 {vram_mib} MiB",
             "input_summary": input_summary,
-            "desc": f"ComfyUI 已发布工作流 API（{slug}@{ver}），来源：本地。",
+            "desc": desc,
             "operations": ops,
             "endpoint_slug": slug,
             "version": ver,
@@ -491,13 +622,20 @@ class ComfyUIWorkflowProvider:
             "reproducibility_level": repro,
             "seed_policy": item.get("seed_policy") or "caller_or_random",
             "exposed_inputs": exposed_summary,
+            "available": available,
+            "digest_compatible": digest_compatible,
+            "reason": reason,
+            "worker_image_digest": expected_digest,
+            "expected_worker_image_digest": expected_digest,
+            "current_worker_image_digest": current_digest,
+            "status_detail": status_detail,
         }
 
     def capability(self, organization_id: str | None = None) -> dict[str, Any]:
         configured = self.is_configured()
         discovered = self.discover_models(organization_id=organization_id) if configured else []
         catalog = [self._build_catalog_entry(item) for item in discovered]
-        supported = [entry["model_id"] for entry in catalog]
+        supported = [entry["model_id"] for entry in catalog if entry.get("available") is True]
         return {
             "engine": "comfyui",
             "channel": "local",
@@ -508,6 +646,8 @@ class ComfyUIWorkflowProvider:
             "configured": configured,
             "supported_models": supported,
             "model_catalog": catalog,
+            "models": [dict(entry) for entry in catalog],
+            "published_workflows": [dict(entry) for entry in catalog],
         }
 
     @staticmethod
@@ -618,6 +758,13 @@ class ComfyUIWorkflowProvider:
             None,
         )
         if matched is None:
+            raise ValueError("comfyui_workflow_unavailable")
+        if matched.get("available") is not True:
+            reason = str(matched.get("reason") or "").strip()
+            if reason == "worker_image_digest_mismatch" or matched.get("digest_compatible") is False:
+                raise ValueError("comfyui_worker_image_digest_mismatch")
+            if reason == "worker_image_digest_unknown" or matched.get("digest_compatible") == "unknown":
+                raise ValueError("comfyui_worker_image_digest_unknown")
             raise ValueError("comfyui_workflow_unavailable")
 
         spec = matched["spec"]
@@ -1051,6 +1198,11 @@ class ComfyUIWorkflowProvider:
                 if already_submitted and exc.code.startswith("comfyui_") and exc.code not in {
                     "comfyui_invalid_parameters",
                     "comfyui_forbidden",
+                    "comfyui_worker_image_digest_mismatch",
+                    "comfyui_endpoint_not_found",
+                    "comfyui_published_api_not_found",
+                    "comfyui_vram_budget_exceeds_card",
+                    "comfyui_model_license_not_commercial",
                 }:
                     raise ComfyUIProviderError(exc.code, uncertain=True) from exc
                 raise

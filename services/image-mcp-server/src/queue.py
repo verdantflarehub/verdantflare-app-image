@@ -481,12 +481,17 @@ class TaskQueueManager:
                             duration_seconds=None if uncertain else duration,
                         )
                         continue
-                    err_msg = str(exc)
+                    err_msg = (
+                        f"waiting_gpu_lease: {exc.holder}"
+                        if isinstance(exc, LeaseBusy) and exc.holder and exc.holder != "waiting_gpu_lease"
+                        else str(exc)
+                    )
                     print(f"[TaskQueue] 任务失败: {job.task_id} (action: {job.action}, engine: {job.engine}, model: {job.params.get('model')}) 耗时: {duration}s, 错误详情: {err_msg}", flush=True)
                     self.tasks.update_status(
                         job.task_id,
                         status="failed",
                         error=err_msg,
+                        phase="failed",
                         duration_seconds=duration,
                     )
                 finally:
@@ -1134,10 +1139,12 @@ class TaskQueueManager:
                     hd = self.moss_provider.health_details()
                     if isinstance(hd.get("runtime_identity"), dict):
                         post_ident = dict(hd["runtime_identity"])
+                    post_vis = tuple(str(u) for u in (post_ident.get("visible_gpu_uuids") or ()) if u)
                     need_bind = (
                         k8s_slots > 0
                         or not grant.is_target_bound
                         or (post_ident.get("pod_uid") and post_ident.get("pod_uid") != grant.pod_uid)
+                        or (post_vis and grant.assigned_gpu_uuids and post_vis != grant.assigned_gpu_uuids)
                     )
                     if need_bind:
                         self.scheduler.bind_target(grant, runtime_identity=post_ident)

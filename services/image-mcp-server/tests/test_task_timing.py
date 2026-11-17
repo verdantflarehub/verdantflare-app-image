@@ -130,7 +130,8 @@ class TaskTimingTests(unittest.TestCase):
         self.assertEqual(self.store.get(task.task_id).duration_seconds, 40)
 
     def test_concurrent_migration_preserves_legacy_task(self):
-        with sqlite3.connect(self.store.db_path) as conn:
+        import contextlib
+        with contextlib.closing(sqlite3.connect(self.store.db_path)) as conn, conn:
             conn.executescript(SCHEMA_SQL)
             conn.execute("INSERT INTO tasks (task_id, project_id, idempotency_key, engine, status, created_at, updated_at, request_params, artifact_id) VALUES ('legacy', 'project-test', 'legacy', 'gemini', 'completed', 'old', 'old', '{}', 'original-artifact')")
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:

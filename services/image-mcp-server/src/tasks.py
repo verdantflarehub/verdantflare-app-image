@@ -4,6 +4,7 @@ import json
 import hashlib
 import os
 import sqlite3
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -141,6 +142,20 @@ CREATE INDEX IF NOT EXISTS idx_tasks_created ON tasks(created_at DESC);
 """
 
 
+_INIT_LOCKS_GUARD = threading.Lock()
+_INIT_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _init_lock_for(db_path: Path) -> threading.RLock:
+    key = str(db_path.resolve())
+    with _INIT_LOCKS_GUARD:
+        lock = _INIT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _INIT_LOCKS[key] = lock
+        return lock
+
+
 class TaskStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -162,26 +177,28 @@ class TaskStore:
 
     def ensure_ready(self) -> None:
         from .content_rating import CONTENT_RATING_SCHEMA_SQL
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = self._get_conn()
-        try:
-            conn.isolation_level = None
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA synchronous=NORMAL;")
-            conn.executescript(SCHEMA_SQL)
-            conn.executescript(CONTENT_RATING_SCHEMA_SQL)
-            columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
-            if not {"phase", "execution_started_at"}.issubset(columns):
-                conn.execute("BEGIN IMMEDIATE")
-                # Recheck after acquiring the lock: another initializer may
-                # have migrated already. Ordinary reads need no write lock.
+        with _init_lock_for(self.db_path):
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = self._get_conn()
+            try:
+                conn.isolation_level = None
+                conn.execute("PRAGMA busy_timeout=30000;")
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn.executescript(SCHEMA_SQL)
+                conn.executescript(CONTENT_RATING_SCHEMA_SQL)
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
-                for column in ("phase", "execution_started_at"):
-                    if column not in columns:
-                        conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
-                conn.commit()
-        finally:
-            conn.close()
+                if not {"phase", "execution_started_at"}.issubset(columns):
+                    conn.execute("BEGIN IMMEDIATE")
+                    # Recheck after acquiring the lock: another initializer may
+                    # have migrated already. Ordinary reads need no write lock.
+                    columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
+                    for column in ("phase", "execution_started_at"):
+                        if column not in columns:
+                            conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+                    conn.commit()
+            finally:
+                conn.close()
 
     def create(
         self,

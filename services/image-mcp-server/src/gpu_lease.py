@@ -411,6 +411,16 @@ class _Hold:
         return False
 
 
+_NON_WAITABLE_SCHEDULER_CODES = frozenset({
+    "TOPOLOGY_UNSATISFIABLE",
+    "INVALID_REQUEST",
+    "INVALID_TARGET_IDENTITY",
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "NOT_FOUND",
+})
+
+
 class SchedulerError(RuntimeError):
     def __init__(self, code: str, message: str = "", status_code: int = 500) -> None:
         self.code = code
@@ -741,6 +751,7 @@ class SchedulerLeaseClient:
         container_id: str = "",
         boot_id: str = "",
         visible_gpu_uuids: list[str] | tuple[str, ...] | None = None,
+        on_waiting: Callable[[str], None] | None = None,
     ) -> SchedulerLeaseGrant | None:
         if not self.enabled:
             return None
@@ -770,10 +781,16 @@ class SchedulerLeaseClient:
         deadline = self._monotonic() + self.queue_seconds
         resp = self._request_raw("POST", "/internal/v1/gpu-scheduler/leases/acquire", body)
         if resp.status_code not in (200, 201, 202):
-            raise LeaseBusy(f"scheduler_acquire_http_{resp.status_code}")
+            err = self._parse_error(resp)
+            if resp.status_code in (400, 401, 403, 404, 422) or err.code.upper() in _NON_WAITABLE_SCHEDULER_CODES:
+                raise err
+            raise LeaseBusy(err.code or f"scheduler_acquire_http_{resp.status_code}")
         data = resp.json()
         lease_id = str(data.get("lease_id") or "")
         while str(data.get("state") or "") in ("queued", "draining"):
+            wait_reason = str(data.get("blocking_reason") or data.get("queue_reason") or "waiting_gpu_lease")
+            if on_waiting is not None:
+                on_waiting(wait_reason)
             if self._monotonic() >= deadline:
                 try:
                     self.release_raw(
@@ -784,15 +801,32 @@ class SchedulerLeaseClient:
                     )
                 except Exception:
                     pass
-                raise LeaseBusy(str(data.get("blocking_reason") or data.get("queue_reason") or "waiting_gpu_lease"))
+                raise LeaseBusy(wait_reason)
             self._sleep(self.poll_interval_seconds)
             poll = self._request_raw("GET", f"/internal/v1/gpu-scheduler/leases/{lease_id}")
             if poll.status_code != 200:
-                raise LeaseBusy(f"scheduler_poll_http_{poll.status_code}")
+                poll_err = self._parse_error(poll)
+                if poll.status_code in (400, 401, 403, 422) or poll_err.code.upper() in _NON_WAITABLE_SCHEDULER_CODES:
+                    raise poll_err
+                raise LeaseBusy(poll_err.code or f"scheduler_poll_http_{poll.status_code}")
             data = poll.json()
 
-        if str(data.get("state") or "") not in ("leased", "running", "granted"):
-            raise LeaseBusy(str(data.get("state") or "lease_not_granted"))
+        final_state = str(data.get("state") or "")
+        if final_state not in ("leased", "running", "granted"):
+            reject_reason = str(
+                data.get("error_code")
+                or data.get("blocking_reason")
+                or data.get("queue_reason")
+                or final_state
+                or "lease_not_granted"
+            )
+            if reject_reason.upper() in _NON_WAITABLE_SCHEDULER_CODES:
+                raise SchedulerError(
+                    reject_reason.upper(),
+                    str(data.get("message") or reject_reason),
+                    status_code=422 if reject_reason.upper() == "TOPOLOGY_UNSATISFIABLE" else 400,
+                )
+            raise LeaseBusy(reject_reason)
 
         assigned = self._extract_gpu_uuids(data)
         default_exp = format_time(datetime.now(timezone.utc) + timedelta(seconds=int(spec["ttl_seconds"])))

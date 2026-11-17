@@ -674,7 +674,9 @@ async def api_create_task(request: Request) -> Response:
                 params["budget_limit"] = os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1")
         params = queue_mgr.prepare(engine, project_id, params)
     except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        err_code = str(exc)
+        status_code = 409 if err_code == "comfyui_worker_image_digest_mismatch" else 400
+        return JSONResponse({"error": err_code}, status_code=status_code)
     from .tasks import TaskConflict
     try:
         task = tasks_store.create(project_id=project_id, idempotency_key=idempotency_key,
@@ -897,7 +899,9 @@ async def api_update_task_title(request: Request) -> Response:
     except TaskNotFound:
         return JSONResponse({"error": "not_found"}, status_code=404)
     except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        err_code = str(exc)
+        status_code = 409 if err_code == "comfyui_worker_image_digest_mismatch" else 400
+        return JSONResponse({"error": err_code}, status_code=status_code)
 
 
 async def api_cleanup_tasks(request: Request) -> Response:

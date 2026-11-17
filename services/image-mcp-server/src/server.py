@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import hmac
+import importlib.metadata
 import json
 import os
+import re
+import tomllib
 import httpx
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -291,7 +295,43 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.63"
+
+_SERVICE_SEMVER_RE = re.compile(
+    r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
+_DEFAULT_PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
+_PACKAGE_DIST_NAME = "verdantflare-image-mcp-server"
+
+
+def _normalize_service_version(raw: str) -> str:
+    cleaned = str(raw or "").strip()
+    if not cleaned or not _SERVICE_SEMVER_RE.fullmatch(cleaned):
+        raise ValueError("invalid_service_version")
+    return cleaned if cleaned.startswith("v") else f"v{cleaned}"
+
+
+def resolve_service_version(
+    env: Mapping[str, str] | None = None,
+    *,
+    pyproject_path: Path | None = None,
+) -> str:
+    effective_env = os.environ if env is None else env
+    injected = str(effective_env.get("IMAGE_MCP_SERVICE_VERSION") or "").strip()
+    if injected:
+        return _normalize_service_version(injected)
+
+    target_pyproject = _DEFAULT_PYPROJECT_PATH if pyproject_path is None else pyproject_path
+    if target_pyproject.is_file():
+        parsed = tomllib.loads(target_pyproject.read_text(encoding="utf-8"))
+        project_ver = str((parsed.get("project") or {}).get("version") or "").strip()
+        if project_ver:
+            return _normalize_service_version(project_ver)
+
+    dist_ver = importlib.metadata.version(_PACKAGE_DIST_NAME)
+    return _normalize_service_version(dist_ver)
+
+
+SERVICE_VERSION = resolve_service_version()
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 

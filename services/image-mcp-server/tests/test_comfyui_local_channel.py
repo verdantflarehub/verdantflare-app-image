@@ -50,6 +50,9 @@ class ComfyUILocalChannelTests(unittest.TestCase):
         self.tasks = TaskStore(self.root / "tasks.db")
         self.golden_spec = _load_golden_spec()
         self.published_active = True
+        self.current_worker_digest: str | None = "sha256:" + "a" * 64
+        self.published_items_override: list[dict] | None = None
+        self.invoke_digest_mismatch = False
         self.output_png = _make_png_bytes((20, 180, 90))
         self.output_sha = hashlib.sha256(self.output_png).hexdigest()
         self.uploaded_inputs: dict[str, bytes] = {}
@@ -70,9 +73,18 @@ class ComfyUILocalChannelTests(unittest.TestCase):
                         return httpx.Response(400, json={"error": "INVALID_PARAMETERS"})
                     if body["organization_id"] != ORG_A or body["mount_channel"] != "image" or not self.published_active:
                         return httpx.Response(200, json={"items": []})
+                    if self.published_items_override is not None:
+                        return httpx.Response(
+                            200,
+                            json={
+                                "current_worker_image_digest": self.current_worker_digest,
+                                "items": self.published_items_override,
+                            },
+                        )
                     return httpx.Response(
                         200,
                         json={
+                            "current_worker_image_digest": self.current_worker_digest,
                             "items": [
                                 {
                                     "published_api_id": "019a8700-0000-7000-8000-000000000999",
@@ -90,9 +102,11 @@ class ComfyUILocalChannelTests(unittest.TestCase):
                                     "seed_policy": "caller_or_random",
                                     "vram_budget_mib": 15629,
                                     "source_badge": "本地",
+                                    "worker_image_digest": "sha256:" + "a" * 64,
+                                    "current_worker_image_digest": self.current_worker_digest,
                                     "spec": self.golden_spec,
                                 }
-                            ]
+                            ],
                         },
                     )
                 if path == "/internal/apps/comfyui-api/call":
@@ -104,6 +118,17 @@ class ComfyUILocalChannelTests(unittest.TestCase):
                     tname = call_body["name"]
                     targs = call_body["arguments"]
                     if tname == "api.invoke":
+                        if self.invoke_digest_mismatch:
+                            return httpx.Response(
+                                409,
+                                json={
+                                    "code": "WORKER_IMAGE_DIGEST_MISMATCH",
+                                    "details": {
+                                        "published_worker_image_digest": "sha256:" + "1" * 64,
+                                        "worker_image_digest": "sha256:" + "2" * 64,
+                                    },
+                                },
+                            )
                         if not self.published_active:
                             return httpx.Response(
                                 404,
@@ -683,6 +708,229 @@ class ComfyUILocalChannelTests(unittest.TestCase):
         self.assertIn("const isComfyUIDynamic = lowerCode.startsWith('comfyui:')", dynamic_push_block)
         self.assertIn("if (isComfyUIDynamic && Array.isArray(catalogItem.operations)", dynamic_push_block)
         self.assertIn("caps: isComfyUIDynamic ? deriveCapsFromOperations(resolvedOps)", dynamic_push_block)
+
+    def test_digest_mismatch_retains_catalog_entry_marks_unavailable_and_rejects_submit(self) -> None:
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+        from src import dashboard as dash_mod
+        from src.providers.comfyui import normalize_repo_digest
+
+        old_digest = "sha256:" + "1" * 64
+        live_digest = "sha256:" + "2" * 64
+        self.current_worker_digest = live_digest
+        self.published_items_override = [
+            {
+                "published_api_id": "019a8700-0000-7000-8000-000000000908",
+                "catalog_model_id": "comfyui:sdxl-lora-img2img@1.0.8",
+                "engine": "comfyui",
+                "channel_id": "local",
+                "organization_id": ORG_A,
+                "project_id": PROJECT_A,
+                "endpoint_slug": "sdxl-lora-img2img",
+                "version": "1.0.8",
+                "display_name": "SDXL Lightning LoRA 图生图",
+                "output_modality": "image",
+                "mount_channel": "image",
+                "reproducibility_level": "strict",
+                "seed_policy": "caller_or_random",
+                "vram_budget_mib": 9664,
+                "source_badge": "本地",
+                "worker_image_digest": old_digest,
+                "spec": self.golden_spec,
+            },
+            {
+                "published_api_id": "019a8700-0000-7000-8000-000000000909",
+                "catalog_model_id": "comfyui:sdxl-lora-img2img@1.0.9",
+                "engine": "comfyui",
+                "channel_id": "local",
+                "organization_id": ORG_A,
+                "project_id": PROJECT_A,
+                "endpoint_slug": "sdxl-lora-img2img",
+                "version": "1.0.9",
+                "display_name": "SDXL Lightning LoRA 图生图",
+                "output_modality": "image",
+                "mount_channel": "image",
+                "reproducibility_level": "strict",
+                "seed_policy": "caller_or_random",
+                "vram_budget_mib": 9664,
+                "source_badge": "本地",
+                "worker_image_digest": f"registry.cn-qingdao.aliyuncs.com/wod/verdantflare-app@{live_digest.upper()}",
+                "spec": self.golden_spec,
+            },
+        ]
+
+        self.assertEqual(
+            normalize_repo_digest(f"registry.cn-qingdao.aliyuncs.com/wod/verdantflare-app@{live_digest.upper()}"),
+            live_digest,
+        )
+        self.assertIsNone(
+            normalize_repo_digest("registry.cn-qingdao.aliyuncs.com/wod/verdantflare-app:comfyui-worker-v0.1.25")
+        )
+
+        ref_art = self.artifacts.create_from_bytes(
+            project_id=PROJECT_A,
+            filename="ref-mismatch.png",
+            data=_make_png_bytes((10, 20, 30)),
+            media_type="image/png",
+        )
+
+        tok = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+        try:
+            cap = self.comfyui.capability()
+            self.assertTrue(cap["enabled"])
+            # Mismatched 1.0.8 is excluded from supported_models, while 1.0.9 is ready
+            self.assertEqual(cap["supported_models"], ["comfyui:sdxl-lora-img2img@1.0.9"])
+            self.assertEqual(cap["model"], "comfyui:sdxl-lora-img2img@1.0.9")
+
+            # Both 1.0.8 and 1.0.9 remain visible in model_catalog / models / published_workflows
+            for key in ("model_catalog", "models", "published_workflows"):
+                by_id = {entry["model_id"]: entry for entry in cap[key]}
+                self.assertEqual(
+                    set(by_id.keys()),
+                    {"comfyui:sdxl-lora-img2img@1.0.8", "comfyui:sdxl-lora-img2img@1.0.9"},
+                )
+                entry_108 = by_id["comfyui:sdxl-lora-img2img@1.0.8"]
+                self.assertFalse(entry_108["available"])
+                self.assertIs(entry_108["digest_compatible"], False)
+                self.assertEqual(entry_108["reason"], "worker_image_digest_mismatch")
+                self.assertEqual(entry_108["expected_worker_image_digest"], old_digest)
+                self.assertEqual(entry_108["current_worker_image_digest"], live_digest)
+                self.assertIn("不一致", entry_108["status_detail"])
+
+                entry_109 = by_id["comfyui:sdxl-lora-img2img@1.0.9"]
+                self.assertTrue(entry_109["available"])
+                self.assertIs(entry_109["digest_compatible"], True)
+                self.assertIsNone(entry_109["reason"])
+                self.assertEqual(entry_109["expected_worker_image_digest"], live_digest)
+                self.assertEqual(entry_109["current_worker_image_digest"], live_digest)
+
+            # Forcing prepare() on mismatched 1.0.8 fails immediately with comfyui_worker_image_digest_mismatch
+            with self.assertRaisesRegex(ValueError, "^comfyui_worker_image_digest_mismatch$"):
+                self.queue.prepare(
+                    "comfyui",
+                    PROJECT_A,
+                    {
+                        "action": "edit",
+                        "model": "comfyui:sdxl-lora-img2img@1.0.8",
+                        "prompt": "forced mismatch",
+                        "source_artifact_id": ref_art.artifact_id,
+                    },
+                )
+
+            # Dashboard HTTP POST /api/tasks returns 409 comfyui_worker_image_digest_mismatch without creating a task
+            dash_app = Starlette(routes=[Route("/api/tasks", dash_mod.api_create_task, methods=["POST"])])
+            dash_app.state.tasks = self.tasks
+            dash_app.state.queue_manager = self.queue
+            with patch.object(dash_mod, "check_auth", return_value=True), TestClient(dash_app) as client:
+                http_res = client.post(
+                    "/api/tasks",
+                    json={
+                        "project_id": PROJECT_A,
+                        "engine": "comfyui",
+                        "model": "comfyui:sdxl-lora-img2img@1.0.8",
+                        "prompt": "forced mismatch via dashboard",
+                        "source_artifact_id": ref_art.artifact_id,
+                    },
+                )
+                self.assertEqual(http_res.status_code, 409)
+                self.assertEqual(http_res.json()["error"], "comfyui_worker_image_digest_mismatch")
+
+            # Compatible 1.0.9 prepares cleanly; if strict 409 occurs at runtime (even on recovery), it fails deterministically
+            prepared_109 = self.queue.prepare(
+                "comfyui",
+                PROJECT_A,
+                {
+                    "action": "edit",
+                    "model": "comfyui:sdxl-lora-img2img@1.0.9",
+                    "prompt": "strict runtime check",
+                    "source_artifact_id": ref_art.artifact_id,
+                },
+            )
+        finally:
+            CALLER.reset(tok)
+
+        rec = self.tasks.create(
+            project_id=PROJECT_A,
+            idempotency_key="idem-strict-runtime-mismatch",
+            engine="comfyui",
+            model=prepared_109["model"],
+            request_params=prepared_109,
+        )
+        self.tasks.update_status(rec.task_id, "running", error="submission_unknown", phase="submission_unknown")
+        journal = self.queue._comfyui_journal(rec.task_id)
+        journal.write_text(
+            json.dumps({"submitted": True, "bridged_inputs": {"ref_image": STUDIO_IN_AID}}),
+            encoding="utf-8",
+        )
+        self.invoke_digest_mismatch = True
+        self.queue.poll_comfyui_task(rec.task_id)
+        failed_rec = self.tasks.get(rec.task_id)
+        self.assertEqual(failed_rec.status, "failed")
+        self.assertEqual(failed_rec.phase, "failed")
+        self.assertEqual(failed_rec.error, "comfyui_worker_image_digest_mismatch")
+
+    def test_digest_unknown_or_mutable_tag_fails_closed(self) -> None:
+        ref_art = self.artifacts.create_from_bytes(
+            project_id=PROJECT_A,
+            filename="ref-unknown.png",
+            data=_make_png_bytes((40, 50, 60)),
+            media_type="image/png",
+        )
+        for bad_exec_digest in (
+            None,
+            "",
+            "sha256:" + "0" * 64,
+            "registry.cn-qingdao.aliyuncs.com/wod/verdantflare-app:comfyui-worker-v0.1.25",
+            "not-a-digest",
+        ):
+            with self.subTest(bad_exec_digest=bad_exec_digest):
+                self.current_worker_digest = bad_exec_digest
+                self.published_items_override = [
+                    {
+                        "published_api_id": "019a8700-0000-7000-8000-000000000910",
+                        "catalog_model_id": "comfyui:sdxl-lora-img2img@1.0.8",
+                        "engine": "comfyui",
+                        "channel_id": "local",
+                        "organization_id": ORG_A,
+                        "project_id": PROJECT_A,
+                        "endpoint_slug": "sdxl-lora-img2img",
+                        "version": "1.0.8",
+                        "display_name": "SDXL Lightning LoRA 图生图",
+                        "output_modality": "image",
+                        "mount_channel": "image",
+                        "reproducibility_level": "strict",
+                        "seed_policy": "caller_or_random",
+                        "vram_budget_mib": 9664,
+                        "source_badge": "本地",
+                        "worker_image_digest": "sha256:" + "1" * 64,
+                        "current_worker_image_digest": bad_exec_digest,
+                        "spec": self.golden_spec,
+                    }
+                ]
+                tok = CALLER.set({"organization_id": ORG_A, "user_id": USER_A})
+                try:
+                    cap = self.comfyui.capability()
+                    self.assertFalse(cap["enabled"])
+                    self.assertEqual(cap["supported_models"], [])
+                    self.assertEqual(len(cap["model_catalog"]), 1)
+                    entry = cap["model_catalog"][0]
+                    self.assertFalse(entry["available"])
+                    self.assertEqual(entry["digest_compatible"], "unknown")
+                    self.assertEqual(entry["reason"], "worker_image_digest_unknown")
+                    with self.assertRaisesRegex(ValueError, "^comfyui_worker_image_digest_unknown$"):
+                        self.queue.prepare(
+                            "comfyui",
+                            PROJECT_A,
+                            {
+                                "action": "edit",
+                                "model": "comfyui:sdxl-lora-img2img@1.0.8",
+                                "prompt": "fail closed on unknown digest",
+                                "source_artifact_id": ref_art.artifact_id,
+                            },
+                        )
+                finally:
+                    CALLER.reset(tok)
 
 
 if __name__ == "__main__":
