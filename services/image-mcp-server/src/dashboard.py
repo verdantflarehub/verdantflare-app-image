@@ -554,6 +554,14 @@ async def api_get_task(request: Request) -> Response:
         if not include_nsfw and ratings_store is not None:
             if ratings_store.is_nsfw(record.artifact_id or record.task_id, task_id=record.task_id):
                 return JSONResponse({"error": "not_found"}, status_code=404)
+        if record.engine == "google-flow" and record.status == "running" and record.phase:
+            manager = getattr(request.app.state, "queue_manager", None)
+            if manager is not None:
+                try:
+                    await asyncio.to_thread(manager._recover_channel_unknown, record)
+                    record = tasks_store.get(task_id)
+                except Exception:
+                    pass
         value = _enrich_task_dict(record, request.app.state.artifacts, ratings_store)
         return JSONResponse(value)
     except TaskNotFound:
@@ -589,7 +597,7 @@ async def api_create_task(request: Request) -> Response:
     engine = raw_engine or ("comfyui" if model.startswith("comfyui:") else "codex")
     if engine == "codex" and not raw_engine and model.startswith("comfyui:"):
         engine = "comfyui"
-    if engine not in ("codex", "gemini", "grok", "moss-image", "comfyui"):
+    if engine not in ("codex", "gemini", "google-flow", "grok", "moss-image", "comfyui"):
         return JSONResponse({"error": "unsupported_engine"}, status_code=400)
 
     aspect_ratio = str(body.get("aspect_ratio", "1:1" if engine == "moss-image" else "16:9")).strip()
@@ -605,6 +613,10 @@ async def api_create_task(request: Request) -> Response:
         else "gemini-nano-banana-2.1"
     )
 
+    if engine == "google-flow":
+        resolved_model = model or "nano2"
+        quality = body.get("quality")
+        resolution = body.get("resolution")
     if engine == "grok":
         resolved_model = model or request.app.state.queue_manager.grok_provider.model
         quality = body.get("quality")
@@ -655,7 +667,7 @@ async def api_create_task(request: Request) -> Response:
         params["instructions"] = str(instructions).strip()
 
     import uuid
-    if engine == "grok" and not body.get("idempotency_key"):
+    if engine in ("grok", "google-flow") and not body.get("idempotency_key"):
         return JSONResponse({"error": "idempotency_key_required"}, status_code=400)
     idempotency_key = str(body.get("idempotency_key", "")).strip() or f"ui-{uuid.uuid4().hex[:12]}"
 
@@ -962,6 +974,14 @@ async def api_delete_task(request: Request) -> Response:
         tasks_store: TaskStore = request.app.state.tasks
         rec = tasks_store.get(task_id)
         queue_mgr = getattr(request.app.state, "queue_manager", None)
+        if rec.engine == "google-flow" and rec.status == "running":
+            if queue_mgr and rec.phase:
+                try:
+                    await asyncio.to_thread(queue_mgr._recover_channel_unknown, rec)
+                except Exception:
+                    pass
+            if tasks_store.get(task_id).status == "running":
+                return JSONResponse({"error": "original_call_pending"}, status_code=409)
         if rec.engine == "comfyui":
             if rec.status not in ("completed", "failed", "canceled"):
                 if queue_mgr is None:

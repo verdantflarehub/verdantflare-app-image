@@ -1840,7 +1840,7 @@
          ======================================================================= -->
     <section class="tab-view" id="view-models" role="tabpanel">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-        <p class="service-note" style="margin-bottom:0;">分渠道展示模型服务卡片（本地 / Google / ChatGPT / Grok）：不重复外层渠道名、不展示无业务查看按钮；直接展示支持能力（T2I / I2I / INPAINT / R2I / LAYOUT / FACESWAP）、参考图配额、单任务最大容量（≤ 50MB）与底部 3 项输出规格胶囊。</p>
+        <p class="service-note" style="margin-bottom:0;">分渠道展示模型服务卡片（本地 / Google / Google Flow / ChatGPT / Grok）：不重复外层渠道名、不展示无业务查看按钮；直接展示支持能力（T2I / I2I / INPAINT / R2I / LAYOUT / FACESWAP）、参考图配额、单任务最大容量（≤ 50MB）与底部 3 项输出规格胶囊。</p>
         <span class="physics-pill num" id="modelSummaryBadge">分渠道零冗余目录</span>
       </div>
       <div class="filter-chips" id="modelChannelTabs" role="group" aria-label="模型渠道筛选"></div>
@@ -2180,6 +2180,7 @@
     function channelLogo(ch) {
       const s = String(ch || '').toLowerCase();
       if (s.includes('chatgpt') || s.includes('openai') || s.includes('codex')) return chatgptChannelLogo;
+      if (s === 'google-flow' || s === 'google flow') return '<span class="channel-logo" aria-label="Google Flow">GF</span>';
       if (s.includes('google') || s.includes('gemini') || s.includes('vertex')) return googleChannelLogo;
       if (s.includes('grok')) return grokChannelLogo;
       return localChannelLogo;
@@ -2188,6 +2189,7 @@
     function channelDisplayName(ch) {
       const s = String(ch || '').toLowerCase();
       if (!s || s === 'local' || s === '本地' || s.includes('faceswap') || s.includes('facefusion') || s.includes('comfy') || s.includes('moss')) return '本地';
+      if (s === 'google-flow' || s === 'google flow') return 'Google Flow';
       if (s.includes('google') || s.includes('gemini') || s.includes('vertex')) return 'Google';
       if (s.includes('chatgpt') || s.includes('openai') || s.includes('codex')) return 'ChatGPT';
       if (s.includes('grok')) return 'Grok';
@@ -2224,6 +2226,7 @@
       const raw = String(rawModel || '').trim();
       const lower = raw.toLowerCase();
       if (MODEL_CODE_ALIASES[lower]) return MODEL_CODE_ALIASES[lower];
+      if (!raw && engine === 'google-flow') return 'nano2';
       if (!raw && String(engine || '').toLowerCase().includes('gemini')) return 'gemini-nano-banana-2.1';
       if (!raw && String(engine || '').toLowerCase().includes('moss')) return 'moss-image-sft-int8-convrot';
       return raw || 'gpt-image-2.6-sunburst';
@@ -2235,6 +2238,7 @@
       if (MODEL_DISPLAY_MAP[lower]) return MODEL_DISPLAY_MAP[lower];
       const norm = normalizeModelCode(raw, engine).toLowerCase();
       if (MODEL_DISPLAY_MAP[norm]) return MODEL_DISPLAY_MAP[norm];
+      if (engine === 'google-flow') return norm;
       return raw || 'GPT Image 2.6 Sunburst';
     }
 
@@ -2629,7 +2633,8 @@
     const inputSearch = document.getElementById("inputSearch");
     const inspectorDrawer = document.getElementById("inspectorDrawer");
 
-    function getModelQuotas(modelName, action) {
+    function getModelQuotas(modelName, action, engine) {
+      if (engine === 'google-flow') return { maxImages: 3, maxMasks: 0, maxFaces: 0, maxSize: '48 MiB' };
       const m = String(modelName || '').toLowerCase();
       const a = String(action || '').toLowerCase();
       if (m.includes('moss')) return { maxImages: 3, maxMasks: 0, maxFaces: 1, maxSize: '50 MB' };
@@ -3355,7 +3360,7 @@
         }
       }
 
-      const quotas = getModelQuotas(task.model, task.type);
+      const quotas = getModelQuotas(task.model, task.type, task.engine);
       const refImgs = (task.refImageIds || []).map((aid, idx) => ({
         slot: `Picture ${idx + 1}`,
         role: idx === 0 && task.sourceArtifactId === aid ? '源参考底图 (Source)' : `参考图像 #${idx + 1}`,
@@ -3615,7 +3620,7 @@
       } catch (_) {}
     };
 
-    // Channel-Grouped Zero-Redundancy Model Catalog (本地 / Google / ChatGPT / Grok)
+    // Channel-Grouped Zero-Redundancy Model Catalog (本地 / Google / Google Flow / ChatGPT / Grok)
     // No channel name repeated inside cards, no "查看" button on model cards!
     const baseChannelCatalog = [
       {
@@ -3628,6 +3633,10 @@
         models: [
           { mark: 'MI', displayName: 'MOSS Image', modelId: 'moss-image-sft-int8-convrot', officialName: 'MOSS-Image + Qwen3.5-9B Vision', releaseMeta: 'RTX 5090 GPU 租约按需推理', pricingLine: '本地 GPU 算力队列（零外部 API 费用）', title: 'moss-image-sft-int8-convrot', biz: '图像生成', res: '2K', fps: 'PNG', maxSize: '50MB', caps: [['T2I', '文生图'], ['R2I', '参考生图'], ['LAYOUT', '版式控制']], refQuota: '最多 3张角色/视觉参考图 (Qwen3.5-9B Vision)', desc: '本地 5090 自托管 MOSS Image (moss-image-sft-int8-convrot) 中英文密集文字海报、原生 JSON 版式控制与 Qwen3.5-9B 多模态视觉参考角色一致性生图引擎。' }
         ]
+      },
+      {
+        id: 'google-flow', name: 'Google Flow', fullName: 'Google Flow', version: '',
+        kindLabel: 'Google Flow 会员图像渠道', billing: '按实际积分结算', models: []
       },
       {
         id: 'google',
@@ -3686,7 +3695,8 @@
         const eName = String(eng.engine).toLowerCase();
         const statusLabel = eng.configured === false ? '未配置' : eng.enabled === false ? '未启用' : eng.verification_status === 'verified' ? '已验证' : eng.configured === true ? '已配置' : '已声明';
         let targetId = 'local';
-        if (eName.includes('gemini') || eName.includes('google')) targetId = 'google';
+        if (eName === 'google-flow') targetId = 'google-flow';
+        else if (eName.includes('gemini') || eName.includes('google')) targetId = 'google';
         else if (eName.includes('codex') || eName.includes('chatgpt') || eName.includes('openai')) targetId = 'chatgpt';
         else if (eName.includes('grok')) targetId = 'grok';
 
@@ -3770,11 +3780,11 @@
               releaseMeta: (catalogItem && catalogItem.release_meta) || '',
               title: canonicalCode,
               biz: `${(catalogItem && catalogItem.biz) || '图像生成'} · ${itemStatusLabel}`,
-              res: (lowerCode.includes('lite') || lowerCode.includes('2.5')) ? '1K' : ((targetId === 'google' || lowerCode.includes('sunburst')) ? '4K' : '2K'),
-              fps: 'PNG',
-              maxSize: targetId === 'google' ? '24MB' : '10MB',
+              res: targetId === 'google-flow' ? '按实际输出' : (lowerCode.includes('lite') || lowerCode.includes('2.5')) ? '1K' : ((targetId === 'google' || lowerCode.includes('sunburst')) ? '4K' : '2K'),
+              fps: targetId === 'google-flow' ? 'PNG/JPEG/WebP' : 'PNG',
+              maxSize: targetId === 'google-flow' ? '48 MiB' : targetId === 'google' ? '24MB' : '10MB',
               caps: isComfyUIDynamic ? deriveCapsFromOperations(resolvedOps) : [['T2I', '文生图'], ['I2I', '图生图']],
-              refQuota: (catalogItem && catalogItem.input_summary) || (targetId === 'google' ? '最多 6张参考图 · 0张蒙版' : '最多 1张参考底图 (I2I)'),
+              refQuota: (catalogItem && catalogItem.input_summary) || (targetId === 'google-flow' ? '最多 3 张参考图 · 0 张蒙版' : targetId === 'google' ? '最多 6张参考图 · 0张蒙版' : '最多 1张参考底图 (I2I)'),
               desc: String((catalogItem && catalogItem.desc) || '服务端实时声明可用图像生成与编辑底座，产物尺寸与耗时以实际执行结果为准。').replace(/（\$[0-9.]+\/张）/g, '')
             });
           }

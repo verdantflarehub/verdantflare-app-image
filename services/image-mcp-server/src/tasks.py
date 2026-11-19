@@ -186,6 +186,9 @@ class TaskStore:
                 conn.execute("PRAGMA journal_mode=WAL;")
                 conn.execute("PRAGMA synchronous=NORMAL;")
                 conn.executescript(SCHEMA_SQL)
+                conn.execute("""CREATE TABLE IF NOT EXISTS flow_results (
+                    task_id TEXT PRIMARY KEY, call_id TEXT NOT NULL, sha256 TEXT,
+                    write_id TEXT, upload_id TEXT)""")
                 conn.executescript(CONTENT_RATING_SCHEMA_SQL)
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}
                 if not {"phase", "execution_started_at"}.issubset(columns):
@@ -288,6 +291,33 @@ class TaskStore:
                 (now, now, task_id),
             )
             return changed.rowcount == 1
+
+    def flow_intent(self, task_id):
+        with self._get_conn() as conn:
+            return conn.execute("UPDATE tasks SET phase='submitting' WHERE task_id=? "
+                                "AND status='running' AND phase IS NULL AND engine='google-flow'",
+                                (task_id,)).rowcount == 1
+
+    def flow_call(self, task_id, call_id):
+        with self._get_conn() as conn:
+            conn.execute("INSERT OR IGNORE INTO flow_results(task_id,call_id) VALUES (?,?)",
+                         (task_id, call_id))
+            if conn.execute("SELECT call_id FROM flow_results WHERE task_id=?", (task_id,)).fetchone()[0] != call_id:
+                raise ValueError("channel_call_mismatch")
+
+    def flow_upload(self, task_id, call_id, digest, upload_id=None):
+        from .providers.comfyui import new_uuid7
+        with self._get_conn() as conn:
+            conn.execute("UPDATE flow_results SET sha256=?,write_id=? WHERE task_id=? AND call_id=? "
+                         "AND sha256 IS NULL", (digest, new_uuid7(), task_id, call_id))
+            row = conn.execute("SELECT * FROM flow_results WHERE task_id=?", (task_id,)).fetchone()
+            if not row or row["call_id"] != call_id or row["sha256"] != digest:
+                raise ValueError("artifact_identity_mismatch")
+            if upload_id and row["upload_id"] not in (None, upload_id):
+                raise ValueError("upload_identity_mismatch")
+            if upload_id:
+                conn.execute("UPDATE flow_results SET upload_id=? WHERE task_id=?", (upload_id, task_id))
+            return row["write_id"], upload_id or row["upload_id"]
 
     def claim_grok(self, task_id: str) -> bool:
         with self._get_conn() as conn:
@@ -489,7 +519,7 @@ class TaskStore:
                     phase = NULL,
                     error = NULL,
                     updated_at = ?
-                WHERE status = 'running' AND engine = 'moss-image' AND artifact_id IS NULL
+                WHERE status = 'running' AND (engine = 'moss-image' OR (engine = 'google-flow' AND phase IS NULL)) AND artifact_id IS NULL
                 """,
                 (now,),
             )
@@ -500,7 +530,7 @@ class TaskStore:
                     error = '服务重启，原调用结果待确认；未重新提交',
                     updated_at = ?
                 WHERE status = 'running' AND phase IS NULL AND engine NOT IN ('grok', 'moss-image', 'comfyui')
-                  AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') NOT IN ('google-channel-v1', 'chatgpt-channel-v1')
+                  AND COALESCE(json_extract(request_params, '$.channel_runtime'), '') NOT IN ('google-channel-v1', 'chatgpt-channel-v1', 'google-flow-channel-v1')
                 """,
                 (now,),
             )

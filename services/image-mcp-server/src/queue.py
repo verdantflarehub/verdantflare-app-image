@@ -87,6 +87,9 @@ class _DynamicConcurrencyGate:
                 self._cond.notify_all()
 
 
+from .providers import google_flow
+
+
 class TaskQueueManager:
     def __init__(
         self,
@@ -103,11 +106,14 @@ class TaskQueueManager:
         moss_gpu: GpuCoordinator | None = None,
         scheduler: SchedulerLeaseClient | None = None,
         comfyui_provider: ComfyUIWorkflowProvider | None = None,
+        flow_channel=None,
     ) -> None:
         self.tasks = tasks
         self.artifacts = artifacts
         self.codex_provider = codex_provider
         self.gemini_provider = gemini_provider
+        self.flow_channel = flow_channel
+        self.flow_sem = asyncio.Semaphore(1)
         self.google_channel = google_channel
         self.chatgpt_channel = chatgpt_channel
         self.grok_channel = grok_channel
@@ -158,6 +164,8 @@ class TaskQueueManager:
         for i in range(self.worker_count):
             task = asyncio.create_task(self._worker_loop(i))
             self._worker_tasks.append(task)
+        if self.flow_channel:
+            self._worker_tasks.append(asyncio.create_task(self._collect_flow()))
         self._worker_tasks.append(asyncio.create_task(self._idle_moss()))
 
         # 3. 恢复历史未消费的 queued 任务
@@ -195,13 +203,21 @@ class TaskQueueManager:
         await self._queue.put(job)
 
     def prepare(self, engine, project_id, params):
-        if engine not in {"codex", "gemini", "grok", "moss-image", "comfyui"}:
+        if engine not in {"codex", "gemini", "grok", "moss-image", "comfyui", "google-flow"}:
             raise ValueError("unsupported_engine")
         params = dict(params)
         # Internal route/authority cannot be supplied in generation parameters.
         for internal in ('channel_runtime', 'channel_authority', 'comfyui_authority', 'comfyui_workflow'):
             if internal in params:
                 raise ValueError('reserved_channel_parameter')
+        if engine == "google-flow":
+            if self.flow_channel is None or self.google_authorize is None:
+                raise ValueError("channel_not_configured")
+            actor = self.google_authorize(project_id, None)
+            normalized = google_flow.normalize(params)
+            self._check_channel_discovery(engine, "image", self.flow_channel)
+            self.flow_channel.check(project_id, actor, normalized)
+            return dict(normalized, channel_authority=actor, channel_runtime=google_flow.RUNTIME)
         if engine == 'moss-image':
             normalized = self.moss_provider.normalize(params)
             if normalized.get("moss_mode") == "edit":
@@ -278,9 +294,9 @@ class TaskQueueManager:
     def _check_channel_discovery(self, engine, action, channel):
         if self.channel_directory is None:
             return
-        name = {'gemini': 'google', 'codex': 'chatgpt', 'grok': 'grok'}[engine]
+        name = {'gemini': 'google', 'codex': 'chatgpt', 'grok': 'grok', 'google-flow': 'google-flow'}[engine]
         capability = 'image.generate' if action == 'generate' else 'image.edit'
-        origin = self.channel_directory.resolve(name, capability)
+        origin = self.channel_directory.resolve(name, "image" if engine == "google-flow" else capability)
         if not origin or origin != channel.endpoint:
             raise ValueError('channel_discovery_unavailable')
 
@@ -357,6 +373,11 @@ class TaskQueueManager:
                         pass
                 if self.channel_directory is not None:
                     engine['enabled'] = self.channel_directory.resolve(name, 'image.generate') == channel.endpoint
+        engines.append(dict(engine="google-flow", channel="google-flow", model=google_flow.MODELS[0],
+                            supported_models=list(google_flow.MODELS), adapter_version=google_flow.RUNTIME,
+                            enabled=bool(self.flow_channel and (self.channel_directory is None or
+                                self.channel_directory.resolve("google-flow", "image") == self.flow_channel.endpoint)),
+                            budget_currency="credits", project_write_authorization_required=True))
         engines.append(self.moss_provider.capability())
         engines.append(self.comfyui_provider.capability())
         return {
@@ -372,6 +393,8 @@ class TaskQueueManager:
 
     def _get_semaphore(self, engine: str) -> asyncio.Semaphore:
         eng = engine.lower()
+        if eng == "google-flow":
+            return self.flow_sem
         if eng == "grok":
             return self.grok_sem
         if eng == "moss-image":
@@ -399,7 +422,7 @@ class TaskQueueManager:
                 loop = asyncio.get_running_loop()
 
                 try:
-                    if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
+                    if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1', google_flow.RUNTIME}:
                         await loop.run_in_executor(None, self._execute_channel, job)
                         continue
                     elif job.engine == "grok":
@@ -424,7 +447,7 @@ class TaskQueueManager:
                     print(f"[TaskQueue] 任务成功: {job.task_id} (action: {job.action}, engine: {job.engine}) 耗时: {duration}s", flush=True)
                 except Exception as exc:
                     duration = round(time.time() - start_time, 2)
-                    if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
+                    if job.params.get('channel_runtime') in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1', google_flow.RUNTIME}:
                         record = self.tasks.get(job.task_id)
                         # This worker owns the claimed task. The submit fence is
                         # persisted before any POST, so a missing phase proves
@@ -526,6 +549,8 @@ class TaskQueueManager:
             return lock
 
     def _execute_channel(self, job, recovery=False):
+        if job.engine == "google-flow":
+            return self.flow_channel.execute(self, job, recovery)
         # The worker and collector serialize collection per task; ChatGPT channel
         # tasks run concurrently up to the channel-configured concurrent_limit (1..20, default 4).
         runtime = job.params.get('channel_runtime')
@@ -628,12 +653,23 @@ class TaskQueueManager:
                     error='submission_unknown' if result['accepted'] is None else '',
                     phase='submission_unknown' if result['accepted'] is None else 'channel_running')
 
+    async def _collect_flow(self):
+        while self._running:
+            records, _ = self.tasks.list_tasks(engine="google-flow", status="running", limit=10000, include_nsfw=True)
+            for rec in records:
+                if rec.phase:
+                    try:
+                        await asyncio.to_thread(self._recover_channel_unknown, rec)
+                    except Exception:
+                        continue
+            await asyncio.sleep(15)
+
     async def _collect_channels(self):
         while self._running:
             await asyncio.sleep(15)
             records, _ = self.tasks.list_tasks(status='running', limit=10000, include_nsfw=True)
             for record in records:
-                if record.request_params.get('channel_runtime') not in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1'}:
+                if record.request_params.get('channel_runtime') not in {'google-channel-v1', 'grok-channel-v1', 'chatgpt-channel-v1', google_flow.RUNTIME}:
                     continue
                 try:
                     await asyncio.to_thread(self._execute_channel, TaskJob(record.task_id,
@@ -645,6 +681,9 @@ class TaskQueueManager:
 
     def _recover_channel_unknown(self, rec: TaskRecord) -> None:
         runtime = rec.request_params.get("channel_runtime")
+        if runtime == google_flow.RUNTIME:
+            return self._execute_channel(TaskJob(rec.task_id, rec.project_id, rec.engine,
+                                                 rec.request_params["action"], rec.request_params), True)
         channel_name, channel = {
             "google-channel-v1": ("google", self.google_channel),
             "grok-channel-v1": ("grok", self.grok_channel),
@@ -703,7 +742,7 @@ class TaskQueueManager:
             still_unknown: list[TaskRecord] = []
             for rec in unknown_records:
                 runtime = rec.request_params.get("channel_runtime")
-                if runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1"}:
+                if runtime in {"google-channel-v1", "grok-channel-v1", "chatgpt-channel-v1", google_flow.RUNTIME}:
                     try:
                         self._recover_channel_unknown(rec)
                     except Exception:
@@ -743,7 +782,7 @@ class TaskQueueManager:
                 refreshed = self.tasks.get(rec.task_id)
                 if refreshed.status == "completed":
                     recovered_ids.append(rec.task_id)
-                else:
+                elif rec.engine != "google-flow":
                     still_unknown.append(refreshed)
 
             by_channel_org: dict[tuple[str, str], list[str]] = {}

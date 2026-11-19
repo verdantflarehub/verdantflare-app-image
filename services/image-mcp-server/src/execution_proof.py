@@ -12,6 +12,15 @@ SUPPORTED_CODEX_PROOF_MODELS = {
 
 def proof(task, artifacts):
     p = task.request_params
+    if task.engine == "google-flow" and task.status == "completed" and task.artifact_id:
+        artifact = artifacts.get(task.artifact_id, task.project_id)
+        meta = artifact.metadata
+        if meta.get("engine") != task.engine or meta.get("task_id") != task.task_id or not meta.get("content_ref"):
+            raise ValueError("execution_proof_not_ready")
+        return {"schema_version": 1, "run_id": task.task_id, "service_id": "image", "route": task.engine,
+                "state": "succeeded", "project_id": task.project_id, "model_id": task.model,
+                "call_id": meta["channel_call_id"], "outputs": [dict(meta["content_ref"], sha256=artifact.sha256,
+                                                                    size=artifact.size_bytes, mime=artifact.media_type)]}
     if (task.status != 'completed' or not task.artifact_id or task.engine != 'codex'
             or p.get('channel_runtime') != 'chatgpt-channel-v1'
             or task.model not in SUPPORTED_CODEX_PROOF_MODELS):

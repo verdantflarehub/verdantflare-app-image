@@ -49,6 +49,7 @@ from .registry import EtcdRegistry
 from .tasks import TaskNotFound, TaskStore
 from .channel_authority import CALLER, authorize, create_client as create_authority_client
 from .providers.google_channel import GoogleChannel
+from .providers.google_flow import FlowChannel
 from .providers.channel import ImageChannel
 from .channel_discovery_client import ChannelDiscoveryClient
 
@@ -68,6 +69,9 @@ grok_channel = ImageChannel(grok_url, os.environ.get('IMAGE_GROK_CHANNEL_TOKEN',
 chatgpt_url = os.environ.get('IMAGE_CHATGPT_CHANNEL_URL', '')
 chatgpt_channel = ImageChannel(chatgpt_url, os.environ.get('IMAGE_CHATGPT_CHANNEL_TOKEN', ''),
                                channel_client) if chatgpt_url else None
+flow_url = os.environ.get("IMAGE_GOOGLE_FLOW_CHANNEL_URL", "")
+flow_channel = FlowChannel(flow_url, os.environ.get("IMAGE_GOOGLE_FLOW_CHANNEL_TOKEN", ""),
+                           channel_client) if flow_url else None
 channel_discovery = ChannelDiscoveryClient.from_environment()
 queue_manager = TaskQueueManager(
     tasks=tasks,
@@ -75,6 +79,7 @@ queue_manager = TaskQueueManager(
     codex_provider=codex_provider,
     gemini_provider=gemini_provider,
     google_channel=google_channel,
+    flow_channel=flow_channel,
     grok_channel=grok_channel,
     chatgpt_channel=chatgpt_channel,
     channel_directory=channel_discovery.directory if channel_discovery else None,
@@ -93,13 +98,13 @@ IMAGE_TOOLS_SCHEMA = [
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Image description prompt"},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image", "comfyui"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "google-flow", "grok", "moss-image", "comfyui"], "default": "codex"},
                 "model": {
                     "type": "string",
                     "description": "Model identifier, e.g. gpt-image-2.6-sunburst, gpt-image-2.6-flare, gemini-nano-banana-2.1, gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image",
                 },
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"], "default": "16:9"},
-                "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
+                "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "description": "Omit for Google Flow"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
                 "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter"},
@@ -153,7 +158,7 @@ IMAGE_TOOLS_SCHEMA = [
                 "mask_artifact_id": {"type": "string"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "description": "Target resolution (1k/2k for Grok and MOSS-Image; 2k/4k for Codex)"},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image", "comfyui"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "google-flow", "grok", "moss-image", "comfyui"], "default": "codex"},
                 "model": {"type": "string"},
                 "denoise": {"type": "number"},
                 "workflow_params": {"type": "object"},
@@ -233,7 +238,7 @@ for tool in IMAGE_TOOLS_SCHEMA:
     if tool['name'] in {'image.create', 'image.generate', 'image.edit', 'image.inpaint'}:
         tool['inputSchema']['properties'].update({
             'channel_account_id': {'type': 'string', 'description': 'Channel account for the selected engine; omitted uses explicit default'},
-            'budget_limit': {'type': 'string', 'description': 'Maximum USD reservation, not an estimated charge'},
+            'budget_limit': {'type': 'string', 'description': 'Google Flow integer credit ceiling. Other hosted channels use USD.'},
         })
 
 IMAGE_TOOLS_SCHEMA.append(
@@ -336,7 +341,7 @@ registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVIC
 
 
 def _channel_for_engine(engine: str):
-    return {"gemini": queue_manager.google_channel,
+    return {"google-flow": queue_manager.flow_channel, "gemini": queue_manager.google_channel,
             "grok": queue_manager.grok_channel,
             "codex": queue_manager.chatgpt_channel}.get(engine.lower())
 
@@ -453,7 +458,7 @@ async def image_generate(
     engine: str = "codex",
     model: str = "",
     aspect_ratio: str = "16:9",
-    resolution: str = "2k",
+    resolution: str | None = None,
     quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
@@ -502,7 +507,7 @@ async def image_generate(
     if model and str(model).strip().startswith("comfyui:") and engine == "codex":
         engine = "comfyui"
     resolved_model = model or (
-        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+        {"google-flow": "nano2", "codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
     )
     params: dict[str, Any] = {
@@ -510,7 +515,7 @@ async def image_generate(
         "prompt": prompt,
         "model": resolved_model,
         "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
+        "resolution": resolution if engine == "google-flow" else (resolution or "2k"),
         "quality": quality,
         "background": background,
     }
@@ -519,7 +524,7 @@ async def image_generate(
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
-        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if engine != "google-flow" and _channel_for_engine(engine) is not None else None
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
@@ -569,7 +574,7 @@ async def image_generate(
         params["reference_artifact_ids"] = list(reference_artifact_ids)
     if reference_images is not None:
         params["reference_images"] = reference_images
-        if reference_images:
+        if reference_images and engine != "google-flow":
             merged_refs = list(params.get("reference_artifact_ids") or [])
             for item in reference_images:
                 if item and item not in merged_refs:
@@ -614,7 +619,7 @@ async def image_create(
     engine: str = "codex",
     model: str = "",
     aspect_ratio: str = "16:9",
-    resolution: str = "2k",
+    resolution: str | None = None,
     quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
@@ -648,7 +653,7 @@ async def image_create(
 ) -> types.CallToolResult:
     """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
     import uuid
-    if engine == "grok" and not idempotency_key:
+    if engine in ("grok", "google-flow") and not idempotency_key:
         raise ValueError("idempotency_key_required")
     actual_idem = idempotency_key or f"idem_{uuid.uuid4().hex[:12]}"
     return await image_generate(
@@ -729,7 +734,7 @@ async def image_edit(
     if moss_mode is not None and engine.lower() != "moss-image":
         raise ValueError("INVALID_ARGUMENT: moss_mode requires moss-image")
     resolved_model = model or (
-        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+        {"google-flow": "nano2", "codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
     )
     params = {
@@ -755,7 +760,7 @@ async def image_edit(
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
-        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if engine != "google-flow" and _channel_for_engine(engine) is not None else None
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
@@ -806,7 +811,7 @@ async def image_inpaint(
     if model and str(model).strip().startswith("comfyui:") and engine == "codex":
         engine = "comfyui"
     resolved_model = model or (
-        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+        {"google-flow": "nano2", "codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
     )
     params = {
@@ -825,7 +830,7 @@ async def image_inpaint(
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
-        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if engine != "google-flow" and _channel_for_engine(engine) is not None else None
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
@@ -962,6 +967,11 @@ def image_rate_content(
 
 
 def _authorize_task_operation(task, *, require_write: bool) -> None:
+    if getattr(task, "engine", None) == "google-flow":
+        actor = authorize(authority_client, task.project_id, None, require_write=require_write)
+        if actor["organization_id"] != task.request_params["channel_authority"]["organization_id"]:
+            raise ValueError("project_access_denied")
+        return
     if getattr(task, "engine", None) == "comfyui":
         queue_manager.authorize_task_caller(task, require_write=require_write)
         return
@@ -1027,6 +1037,9 @@ def image_cancel(task_id: str, project_id: str | None = None) -> types.CallToolR
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
     if task.status in {"completed", "failed", "canceled"}:
         return _result({"task_id": task.task_id, "status": task.status, "canceled": task.status == "canceled"})
+    if task.engine == "google-flow" and task.status == "running":
+        return _result({"task_id": task_id, "status": task.status, "canceled": False,
+                        "reason": "original_call_pending"})
     if task.engine == "comfyui":
         outcome = queue_manager.cancel_comfyui_task(task)
         if not outcome.confirmed_terminal:

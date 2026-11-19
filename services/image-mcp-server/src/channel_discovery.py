@@ -106,6 +106,9 @@ class ChannelDirectory:
             if not isinstance(capabilities, list):
                 continue
             if any(isinstance(c, dict) and c.get('capability_id') == capability
-                   and c.get('execution_state') == 'enabled' for c in capabilities):
+                   and (c.get('execution_state') == 'enabled' or
+                        (channel == 'google-flow' and capability == 'image'
+                         and c.get('execution_state') == 'adapter_connected_unverified'))
+                   for c in capabilities):
                 instances.append(data['execution_url'])
         return instances[0] if len(instances) == 1 else None
