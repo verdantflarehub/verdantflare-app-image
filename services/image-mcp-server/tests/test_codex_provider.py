@@ -1,5 +1,7 @@
 import json
 import unittest
+from email.parser import BytesParser
+from email.policy import default
 from unittest.mock import MagicMock, patch
 from src.providers.codex import (
     CodexProvider,
@@ -217,6 +219,30 @@ class TestCodexProvider(unittest.TestCase):
         # 验证 4K 映射生效：9:16 从 1152x2048 映射为 2160x3840
         self.assertIn(b'name="size"\r\n\r\n2160x3840\r\n', captured_data)
         self.assertIn(b'name="model"\r\n\r\ngpt-image-2.5-sunburst\r\n', captured_data)
+
+    @patch("urllib.request.urlopen")
+    def test_edit_gateway_receives_all_references_and_mask_in_order(self, mock_urlopen):
+        response = MagicMock()
+        response.read.return_value = b'{"data":[{"b64_json":"b3V0cHV0"}]}'
+        response.__enter__.return_value = response
+        mock_urlopen.return_value = response
+        provider = CodexProvider(base_url="https://gateway.example.invalid/v1", api_key="synthetic")
+        provider.prefer_responses = False
+        references = [b"base-image", b"original-identity", b"fixed-wardrobe"]
+        provider.edit(prompt="edit", source_bytes=references, mask_bytes=b"alpha-mask")
+        request = mock_urlopen.call_args.args[0]
+        message = BytesParser(policy=default).parsebytes(
+            ("Content-Type: " + request.get_header("Content-type") + "\r\n\r\n").encode()
+            + request.data)
+        accepted, masks = [], []
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            if part.get_filename() and (name == "image" or name.startswith("image[")):
+                accepted.append(part.get_payload(decode=True))
+            if name == "mask":
+                masks.append(part.get_payload(decode=True))
+        self.assertEqual(accepted, references)
+        self.assertEqual(masks, [b"alpha-mask"])
 
     @patch("urllib.request.urlopen")
     def test_generate_via_responses_extracts_chinese_refusal_text(self, mock_urlopen):
