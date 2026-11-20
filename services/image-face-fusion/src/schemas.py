@@ -52,3 +52,6 @@ class HealthResponse(BaseModel):
     backend_version: str = "3.9.0"
     reason: Optional[str] = None
     model_hashes: Dict[str, str] = Field(default_factory=dict)
+    active_tasks: int = 0
+    residency_state: str = "S3"
+    runtime_identity: Dict[str, Any] = Field(default_factory=dict)

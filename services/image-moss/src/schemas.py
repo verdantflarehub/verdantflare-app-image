@@ -106,6 +106,9 @@ class HealthResponse(BaseModel):
     comfyui_reachable: bool
     weights: dict[str, str]
     gpu: dict[str, Any]
+    active_tasks: int = 0
+    residency_state: str = "S3"
+    runtime_identity: dict[str, Any] = Field(default_factory=dict)
 
 
 def validate_layout(raw_layout: Any, *, max_items: int = 32) -> dict[str, Any]:

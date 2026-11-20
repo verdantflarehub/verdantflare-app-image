@@ -37,9 +37,14 @@ class ChannelDiscoveryClient:
         scope = os.getenv('CHANNEL_DISCOVERY_SCOPE_ID', '')
         if not endpoint and not scope:
             return None
-        origins = {name: (os.getenv(f'IMAGE_{name.upper()}_CHANNEL_URL', '').rstrip('/')
-                          or f'http://{name}-channel.verdantflare-app.svc.cluster.local:8001')
-                   for name in ('google', 'chatgpt', 'grok')}
+        origins = {}
+        for name in ('google', 'chatgpt', 'grok', 'google-flow'):
+            variable = 'IMAGE_' + name.upper().replace('-', '_') + '_CHANNEL_URL'
+            configured = os.getenv(variable, '').rstrip('/')
+            if configured:
+                origins[name] = configured
+            elif name != 'google-flow':
+                origins[name] = f'http://{name}-channel.verdantflare-app.svc.cluster.local:8001'
         return cls(endpoint, scope, os.getenv('ETCD_USERNAME', ''),
                    os.getenv('ETCD_PASSWORD', ''), origins)
 

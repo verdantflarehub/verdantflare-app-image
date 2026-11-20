@@ -161,6 +161,57 @@ class TestServer(unittest.TestCase):
         self.assertEqual(res["error"], "channel_call_failed: image_safety")
         self.assertFalse(res["needs_attention"])
 
+    def test_service_version_build_injection_and_pyproject_parity(self):
+        import json
+        import re
+        import tomllib
+        from pathlib import Path
+        from unittest import mock
+        from src import server
+
+        svc_dir = Path(__file__).resolve().parents[1]
+        repo_root = svc_dir.parents[1]
+        pyproject = svc_dir / "pyproject.toml"
+        dockerfile = svc_dir / "Dockerfile"
+        workflow = repo_root / ".github" / "workflows" / "image-mcp-server.yml"
+
+        decl_ver = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"].strip()
+        docker_text = dockerfile.read_text(encoding="utf-8")
+        wf_text = workflow.read_text(encoding="utf-8")
+
+        label_match = re.search(r'org\.opencontainers\.image\.version="([^"]+)"', docker_text)
+        self.assertIsNotNone(label_match)
+        self.assertEqual(label_match.group(1), decl_ver)
+        self.assertIn("ENV IMAGE_MCP_SERVICE_VERSION=${SERVICE_VERSION}", docker_text)
+
+        wf_match = re.search(r"^\s*VERSION:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$", wf_text, re.MULTILINE)
+        self.assertIsNotNone(wf_match)
+        self.assertEqual(wf_match.group(1), decl_ver)
+        self.assertIn("SERVICE_VERSION=v${{ env.VERSION }}", wf_text)
+
+        expected_v = f"v{decl_ver}"
+        self.assertEqual(server.SERVICE_VERSION, expected_v)
+        self.assertEqual(server.resolve_service_version({}), expected_v)
+        self.assertEqual(server.resolve_service_version({"IMAGE_MCP_SERVICE_VERSION": decl_ver}), expected_v)
+        self.assertEqual(server.resolve_service_version({"IMAGE_MCP_SERVICE_VERSION": "v9.8.7"}), "v9.8.7")
+
+        with mock.patch("importlib.metadata.version", return_value="1.2.3"):
+            self.assertEqual(
+                server.resolve_service_version({}, pyproject_path=svc_dir / "missing-pyproject.toml"),
+                "v1.2.3",
+            )
+        with self.assertRaisesRegex(ValueError, "invalid_service_version"):
+            server.resolve_service_version({"IMAGE_MCP_SERVICE_VERSION": "not-a-semver"})
+
+        with TestClient(app) as client:
+            health_resp = client.get("/health")
+            self.assertEqual(health_resp.status_code, 200)
+            self.assertEqual(health_resp.json()["version"], expected_v)
+
+        caps = json.loads(server.image_capabilities().content[0].text)
+        self.assertEqual(caps["service_version"], expected_v)
+
+
 if __name__ == "__main__":
     unittest.main()
 

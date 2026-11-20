@@ -19,7 +19,14 @@ class TestArtifacts(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_project_id(value)
         with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
-            (Path(tmp) / "escape").symlink_to(outside, target_is_directory=True)
+            escape_link = Path(tmp) / "escape"
+            try:
+                escape_link.symlink_to(outside, target_is_directory=True)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) != 1314:
+                    raise
+                import _winapi
+                _winapi.CreateJunction(outside, str(escape_link))
             with self.assertRaises(ArtifactError):
                 ArtifactStore(root_dir=Path(tmp))._project_dir("escape/project")
 

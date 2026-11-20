@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 from src.errors import FaceFusionPipelineError
+from src.gpu_guard import RuntimeIdentity, detect_runtime_identity, is_cuda_mode
 from src.settings import Settings, FACEFUSION_VERSION
 
 
@@ -25,7 +26,25 @@ class FaceFusionPipeline:
         self._lock = threading.Lock()
         self._process = None
         self._connection = None
+        self._active_tasks = 0
+        self._evicted_idle_health = None
+        self.runtime_identity: RuntimeIdentity = detect_runtime_identity()
         self._health = self._not_ready("Worker has not started")
+
+    @property
+    def active_tasks(self) -> int:
+        return int(self._active_tasks)
+
+    def _enrich_health(self, base: dict) -> dict:
+        out = dict(base)
+        try:
+            alive = self._process is not None and self._process.is_alive()
+        except (ValueError, AttributeError):
+            alive = False
+        out["active_tasks"] = int(self._active_tasks)
+        out["residency_state"] = "S2" if (alive and is_cuda_mode(out)) else "S3"
+        out["runtime_identity"] = self.runtime_identity.to_dict()
+        return out
 
     @staticmethod
     def _not_ready(reason):
@@ -39,8 +58,33 @@ class FaceFusionPipeline:
         except (ValueError, AttributeError):
             alive = False
         if not alive:
-            return self._not_ready(self._health.get("reason", "Worker exited"))
-        return dict(self._health)
+            if self._evicted_idle_health is not None:
+                return self._enrich_health(self._evicted_idle_health)
+            return self._enrich_health(self._not_ready(self._health.get("reason", "Worker exited")))
+        return self._enrich_health(self._health)
+
+    def is_cuda_active(self) -> bool:
+        return is_cuda_mode(self.health())
+
+    def evict_idle_vram(self) -> bool:
+        if not self._lock.acquire(blocking=False):
+            raise FaceFusionPipelineError("FaceFusion worker is busy", "WORKER_BUSY", 409)
+        try:
+            if self._active_tasks > 0:
+                raise FaceFusionPipelineError("FaceFusion worker is busy", "WORKER_BUSY", 409)
+            try:
+                alive = self._process is not None and self._process.is_alive()
+            except (ValueError, AttributeError):
+                alive = False
+            if alive and self._health.get("status") == "healthy":
+                saved = dict(self._health)
+                saved["models_loaded"] = {}
+                saved["reason"] = "Idle worker evicted (S3)"
+                self._evicted_idle_health = saved
+            self._stop()
+            return True
+        finally:
+            self._lock.release()
 
     def _stop(self):
         if self._process is not None:
@@ -57,6 +101,7 @@ class FaceFusionPipeline:
 
     def close(self):
         with self._lock:
+            self._evicted_idle_health = None
             self._stop()
             self._health = self._not_ready("Worker stopped")
 
@@ -95,8 +140,10 @@ class FaceFusionPipeline:
     def _call(self, operation, payload):
         if not self._lock.acquire(blocking=False):
             raise FaceFusionPipelineError("FaceFusion worker is busy", "WORKER_BUSY", 503)
+        self._active_tasks += 1
         try:
             deadline = time.monotonic() + self.settings.timeout
+            self._evicted_idle_health = None
             self._start(min(self.settings.timeout, self.settings.startup_timeout))
             if self._health["status"] != "healthy":
                 raise FaceFusionPipelineError(self._health.get("reason", "Models not ready"), "MODEL_NOT_READY", 503)
@@ -113,6 +160,7 @@ class FaceFusionPipeline:
                 raise FaceFusionPipelineError(**reply["error"])
             return reply["result"]
         finally:
+            self._active_tasks -= 1
             self._lock.release()
 
     def _image_path(self, value):

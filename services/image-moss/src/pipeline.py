@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from src.gpu_guard import RuntimeIdentity, detect_runtime_identity
 from src.prepare_models import EDIT_LORA_MANIFEST, MODEL_MANIFEST, verify_model_file
 from src.schemas import GenerateRequest, MossApiError, validate_generate_request
 from src.settings import COMFYUI_COMMIT, COMFYUI_VERSION, Settings
@@ -75,6 +76,36 @@ class MossImagePipeline:
         self._last_error: str | None = None
         self._lock = asyncio.Lock()
         self._active_and_queued = 0
+        self._vram_loaded = False
+        self.runtime_identity: RuntimeIdentity = detect_runtime_identity()
+
+    @property
+    def active_tasks(self) -> int:
+        return int(self._active_and_queued)
+
+    @property
+    def residency_state(self) -> str:
+        if self._active_and_queued > 0 or self._vram_loaded:
+            return "S2"
+        return "S3"
+
+    def evict_idle_vram(self) -> bool:
+        if self._active_and_queued > 0:
+            raise MossApiError(409, "WORKER_BUSY", "Cannot evict VRAM while inference is active")
+        if self._comfy_runner is None and self._is_comfyui_reachable():
+            try:
+                payload = json.dumps({"unload_models": True, "free_memory": True}).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{self.settings.comfyui_base_url}/free",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=5.0).read()
+            except Exception:
+                pass
+        self._vram_loaded = False
+        return True
 
     def verify_models(self) -> dict[str, str]:
         root = Path(self.settings.model_root)
@@ -222,6 +253,9 @@ class MossImagePipeline:
             "comfyui_reachable": reachable,
             "weights": dict(self._verified_weights),
             "gpu": gpu_info,
+            "active_tasks": self.active_tasks,
+            "residency_state": self.residency_state,
+            "runtime_identity": self.runtime_identity.to_dict(),
         }
 
     async def generate(self, req: GenerateRequest) -> dict[str, Any]:
@@ -336,6 +370,7 @@ class MossImagePipeline:
                         ),
                         timeout=self.settings.inference_timeout + 5.0,
                     )
+                    self._vram_loaded = True
                 except (TimeoutError, asyncio.TimeoutError) as exc:
                     self._interrupt_comfyui()
                     raise MossApiError(

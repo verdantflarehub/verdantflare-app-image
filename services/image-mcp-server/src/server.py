@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import hmac
+import importlib.metadata
 import json
 import os
+import re
+import tomllib
 import httpx
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +49,7 @@ from .registry import EtcdRegistry
 from .tasks import TaskNotFound, TaskStore
 from .channel_authority import CALLER, authorize, create_client as create_authority_client
 from .providers.google_channel import GoogleChannel
+from .providers.google_flow import FlowChannel
 from .providers.channel import ImageChannel
 from .channel_discovery_client import ChannelDiscoveryClient
 
@@ -64,6 +69,9 @@ grok_channel = ImageChannel(grok_url, os.environ.get('IMAGE_GROK_CHANNEL_TOKEN',
 chatgpt_url = os.environ.get('IMAGE_CHATGPT_CHANNEL_URL', '')
 chatgpt_channel = ImageChannel(chatgpt_url, os.environ.get('IMAGE_CHATGPT_CHANNEL_TOKEN', ''),
                                channel_client) if chatgpt_url else None
+flow_url = os.environ.get("IMAGE_GOOGLE_FLOW_CHANNEL_URL", "")
+flow_channel = FlowChannel(flow_url, os.environ.get("IMAGE_GOOGLE_FLOW_CHANNEL_TOKEN", ""),
+                           create_authority_client(timeout=120.0)) if flow_url else None
 channel_discovery = ChannelDiscoveryClient.from_environment()
 queue_manager = TaskQueueManager(
     tasks=tasks,
@@ -71,10 +79,13 @@ queue_manager = TaskQueueManager(
     codex_provider=codex_provider,
     gemini_provider=gemini_provider,
     google_channel=google_channel,
+    flow_channel=flow_channel,
     grok_channel=grok_channel,
     chatgpt_channel=chatgpt_channel,
     channel_directory=channel_discovery.directory if channel_discovery else None,
-    google_authorize=lambda project_id, authority: authorize(authority_client, project_id, authority),
+    google_authorize=lambda project_id, authority=None, *, require_write=True: authorize(
+        authority_client, project_id, authority, require_write=require_write
+    ),
 )
 
 mcp = MCPServer("VerdantFlare Image")
@@ -82,18 +93,18 @@ mcp = MCPServer("VerdantFlare Image")
 IMAGE_TOOLS_SCHEMA = [
     {
         "name": "image.create",
-        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.6), Gemini, Grok, or MOSS-Image.",
+        "description": "Create an asynchronous image generation task using Codex (GPT Image 2.6), Gemini, Grok, MOSS-Image, or published ComfyUI local workflow APIs.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Target scene, materials, focal detail and constraints. For natural photographic rendering, describe detail at the intended scale; preserve required texture and style. Avoid unrelated grain, repeated microtexture or sharpening halos only where unwanted. No automatic quality suffix is added."},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "google-flow", "grok", "moss-image", "comfyui"], "default": "codex"},
                 "model": {
                     "type": "string",
                     "description": "Model identifier, e.g. gpt-image-2.6-sunburst, gpt-image-2.6-flare, gemini-nano-banana-2.1, gemini-3-pro-image, gemini-3.1-flash-image, gemini-3.1-flash-lite-image",
                 },
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"], "default": "16:9"},
-                "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
+                "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "description": "Omit for Google Flow"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
                 "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter; not a visual quality or negative-prompt control. Put visual targets and preservation constraints in prompt."},
@@ -124,7 +135,9 @@ IMAGE_TOOLS_SCHEMA = [
                 "scheduler": {"type": "string", "description": "Scheduler name (default simple for moss-image)"},
                 "shift": {"type": "number", "description": "ModelSamplingFlux/AuraFlow shift (default 5.0 for moss-image)"},
                 "skip_single_layers": {"type": "string", "description": "SkipLayerGuidanceDiTSimple single_layers (default '22' for moss-image)"},
-                "seed": {"type": "integer", "description": "Random seed (moss-image)"},
+                "seed": {"type": "integer", "description": "Random seed (moss-image / comfyui)"},
+                "denoise": {"type": "number", "description": "Denoise strength (comfyui)"},
+                "workflow_params": {"type": "object", "description": "Optional exposed_inputs parameter map for published ComfyUI workflow APIs"},
                 "layout": {"type": "object", "description": "Experimental JSON layout (abs_centralized yxyx, <=32 items, moss-image)"},
                 "project_id": {"type": "string", "description": "Project ID"},
                 "idempotency_key": {"type": "string", "description": "Unique idempotency key"},
@@ -145,8 +158,10 @@ IMAGE_TOOLS_SCHEMA = [
                 "mask_artifact_id": {"type": "string"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]},
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "description": "Target resolution (1k/2k for Grok and MOSS-Image; 2k/4k for Codex)"},
-                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "google-flow", "grok", "moss-image", "comfyui"], "default": "codex"},
                 "model": {"type": "string"},
+                "denoise": {"type": "number"},
+                "workflow_params": {"type": "object"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "default": "auto"},
                 "project_id": {"type": "string"},
@@ -165,8 +180,10 @@ IMAGE_TOOLS_SCHEMA = [
                 "mask_artifact_id": {"type": "string", "description": "Mask image artifact ID"},
                 "prompt": {"type": "string", "description": "Describe the masked change and material scale; preserve required texture, lighting and scene state. Inspect mask boundaries and surrounding detail after generation."},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
-                "engine": {"type": "string", "default": "codex"},
+                "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "comfyui"], "default": "codex"},
                 "model": {"type": "string"},
+                "denoise": {"type": "number"},
+                "workflow_params": {"type": "object"},
                 "background": {"type": "string", "default": "auto"},
                 "project_id": {"type": "string"},
                 "idempotency_key": {"type": "string"},
@@ -221,7 +238,7 @@ for tool in IMAGE_TOOLS_SCHEMA:
     if tool['name'] in {'image.create', 'image.generate', 'image.edit', 'image.inpaint'}:
         tool['inputSchema']['properties'].update({
             'channel_account_id': {'type': 'string', 'description': 'Channel account for the selected engine; omitted uses explicit default'},
-            'budget_limit': {'type': 'string', 'description': 'Maximum USD reservation, not an estimated charge'},
+            'budget_limit': {'type': 'string', 'description': 'Google Flow integer credit ceiling. Other hosted channels use USD.'},
         })
 
 IMAGE_TOOLS_SCHEMA.append(
@@ -243,6 +260,20 @@ IMAGE_TOOLS_SCHEMA.append(
 )
 IMAGE_TOOLS_SCHEMA.append({"name": "image.capabilities", "description": "Read image engines and configured adapter limits without generating media.",
                            "inputSchema": {"type": "object", "properties": {}}})
+IMAGE_TOOLS_SCHEMA.append(
+    {
+        "name": "image.cancel",
+        "description": "Cancel a queued or running image generation task.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task ID"},
+                "project_id": {"type": "string", "description": "Optional Project ID"},
+            },
+            "required": ["task_id"],
+        },
+    }
+)
 _IMPORT_TOOLS = [
     ("image.import", "Import one PNG/JPEG/WebP of up to 3 MiB as a native project image artifact; never fetches URLs.",
      {"project_id": {"type": "string"}, "filename": {"type": "string"},
@@ -269,12 +300,48 @@ _IMPORT_TOOLS = [
 for _name, _description, _properties, _required in _IMPORT_TOOLS:
     IMAGE_TOOLS_SCHEMA.append({"name": _name, "description": _description,
                                "inputSchema": {"type": "object", "properties": _properties, "required": _required}})
-SERVICE_VERSION = "v0.2.61"
+
+_SERVICE_SEMVER_RE = re.compile(
+    r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
+_DEFAULT_PYPROJECT_PATH = Path(__file__).resolve().parents[1] / "pyproject.toml"
+_PACKAGE_DIST_NAME = "verdantflare-image-mcp-server"
+
+
+def _normalize_service_version(raw: str) -> str:
+    cleaned = str(raw or "").strip()
+    if not cleaned or not _SERVICE_SEMVER_RE.fullmatch(cleaned):
+        raise ValueError("invalid_service_version")
+    return cleaned if cleaned.startswith("v") else f"v{cleaned}"
+
+
+def resolve_service_version(
+    env: Mapping[str, str] | None = None,
+    *,
+    pyproject_path: Path | None = None,
+) -> str:
+    effective_env = os.environ if env is None else env
+    injected = str(effective_env.get("IMAGE_MCP_SERVICE_VERSION") or "").strip()
+    if injected:
+        return _normalize_service_version(injected)
+
+    target_pyproject = _DEFAULT_PYPROJECT_PATH if pyproject_path is None else pyproject_path
+    if target_pyproject.is_file():
+        parsed = tomllib.loads(target_pyproject.read_text(encoding="utf-8"))
+        project_ver = str((parsed.get("project") or {}).get("version") or "").strip()
+        if project_ver:
+            return _normalize_service_version(project_ver)
+
+    dist_ver = importlib.metadata.version(_PACKAGE_DIST_NAME)
+    return _normalize_service_version(dist_ver)
+
+
+SERVICE_VERSION = resolve_service_version()
 registry = EtcdRegistry(domain="image", tools=IMAGE_TOOLS_SCHEMA, version=SERVICE_VERSION)
 
 
 def _channel_for_engine(engine: str):
-    return {"gemini": queue_manager.google_channel,
+    return {"google-flow": queue_manager.flow_channel, "gemini": queue_manager.google_channel,
             "grok": queue_manager.grok_channel,
             "codex": queue_manager.chatgpt_channel}.get(engine.lower())
 
@@ -391,7 +458,7 @@ async def image_generate(
     engine: str = "codex",
     model: str = "",
     aspect_ratio: str = "16:9",
-    resolution: str = "2k",
+    resolution: str | None = None,
     quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
@@ -408,6 +475,8 @@ async def image_generate(
     shift: float | None = None,
     skip_single_layers: str | None = None,
     seed: int | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
     layout: dict[str, Any] | None = None,
     source_artifact_id: str | None = None,
     reference_artifact_ids: list[str] | None = None,
@@ -437,8 +506,10 @@ async def image_generate(
     - background: "auto", "transparent" (纯净透明通道，输出 PNG), "opaque"
     - instructions: 传递给上游主控中介模型的系统指令 (默认注入逐字直传规范)
     """
+    if model and str(model).strip().startswith("comfyui:") and engine == "codex":
+        engine = "comfyui"
     resolved_model = model or (
-        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+        {"google-flow": "nano2", "codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
     )
     params: dict[str, Any] = {
@@ -446,7 +517,7 @@ async def image_generate(
         "prompt": prompt,
         "model": resolved_model,
         "aspect_ratio": aspect_ratio,
-        "resolution": resolution,
+        "resolution": resolution if engine == "google-flow" else (resolution or "2k"),
         "quality": quality,
         "background": background,
     }
@@ -455,7 +526,7 @@ async def image_generate(
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
-        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if engine != "google-flow" and _channel_for_engine(engine) is not None else None
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
@@ -481,6 +552,10 @@ async def image_generate(
         params["skip_single_layers"] = skip_single_layers
     if seed is not None:
         params["seed"] = seed
+    if denoise is not None:
+        params["denoise"] = denoise
+    if workflow_params is not None:
+        params["workflow_params"] = workflow_params
     if layout is not None:
         params["layout"] = layout
     if source_artifact_id:
@@ -501,7 +576,7 @@ async def image_generate(
         params["reference_artifact_ids"] = list(reference_artifact_ids)
     if reference_images is not None:
         params["reference_images"] = reference_images
-        if reference_images:
+        if reference_images and engine != "google-flow":
             merged_refs = list(params.get("reference_artifact_ids") or [])
             for item in reference_images:
                 if item and item not in merged_refs:
@@ -546,7 +621,7 @@ async def image_create(
     engine: str = "codex",
     model: str = "",
     aspect_ratio: str = "16:9",
-    resolution: str = "2k",
+    resolution: str | None = None,
     quality: str | None = None,
     background: str = "auto",
     instructions: str | None = None,
@@ -563,6 +638,8 @@ async def image_create(
     shift: float | None = None,
     skip_single_layers: str | None = None,
     seed: int | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
     layout: dict[str, Any] | None = None,
     source_artifact_id: str | None = None,
     reference_artifact_ids: list[str] | None = None,
@@ -582,7 +659,7 @@ async def image_create(
     instructions 是中介指令，不是通用画质或负向通道。
     """
     import uuid
-    if engine == "grok" and not idempotency_key:
+    if engine in ("grok", "google-flow") and not idempotency_key:
         raise ValueError("idempotency_key_required")
     actual_idem = idempotency_key or f"idem_{uuid.uuid4().hex[:12]}"
     return await image_generate(
@@ -609,6 +686,8 @@ async def image_create(
         shift=shift,
         skip_single_layers=skip_single_layers,
         seed=seed,
+        denoise=denoise,
+        workflow_params=workflow_params,
         layout=layout,
         source_artifact_id=source_artifact_id,
         reference_artifact_ids=reference_artifact_ids,
@@ -642,6 +721,8 @@ async def image_edit(
     background: str = "auto",
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
 ) -> types.CallToolResult:
     """基于既有参考底图执行多模态指令编辑、骨相锁定换装或多图融合合成。
 
@@ -655,10 +736,12 @@ async def image_edit(
     - background: "auto", "transparent" (扣除背景生成透明底), "opaque"
     - quality: "auto", "low", "medium", "high", "xhigh", "max"
     """
+    if model and str(model).strip().startswith("comfyui:") and engine == "codex":
+        engine = "comfyui"
     if moss_mode is not None and engine.lower() != "moss-image":
         raise ValueError("INVALID_ARGUMENT: moss_mode requires moss-image")
     resolved_model = model or (
-        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+        {"google-flow": "nano2", "codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model, "moss-image": DEFAULT_MOSS_MODEL}.get(engine.lower(), "")
     )
     params = {
@@ -677,10 +760,14 @@ async def image_edit(
         params["moss_mode"] = moss_mode
     if aspect_ratio is not None:
         params["aspect_ratio"] = aspect_ratio
+    if denoise is not None:
+        params["denoise"] = denoise
+    if workflow_params is not None:
+        params["workflow_params"] = workflow_params
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
-        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if engine != "google-flow" and _channel_for_engine(engine) is not None else None
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
@@ -724,14 +811,18 @@ async def image_inpaint(
     background: str = "auto",
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
+    denoise: float | None = None,
+    workflow_params: dict[str, Any] | None = None,
 ) -> types.CallToolResult:
     """按实际引擎能力执行遮罩局部重绘，支持可选参考图。
 
     prompt 描述修改范围、材质尺度和保留项；质感清理保留真实细节、光线与场次状态。
     生成后检查遮罩边缘及周围内容，不保证无痕或像素级不变。
     """
+    if model and str(model).strip().startswith("comfyui:") and engine == "codex":
+        engine = "comfyui"
     resolved_model = model or (
-        {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
+        {"google-flow": "nano2", "codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
     )
     params = {
@@ -743,10 +834,14 @@ async def image_inpaint(
         "model": resolved_model,
         "background": background,
     }
+    if denoise is not None:
+        params["denoise"] = denoise
+    if workflow_params is not None:
+        params["workflow_params"] = workflow_params
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
-        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if _channel_for_engine(engine) is not None else None
+        os.environ.get("IMAGE_DEFAULT_BUDGET_LIMIT", "1") if engine != "google-flow" and _channel_for_engine(engine) is not None else None
     )
     if effective_budget is not None:
         params["budget_limit"] = effective_budget
@@ -882,14 +977,49 @@ def image_rate_content(
     return _result(res)
 
 
+def _authorize_task_operation(task, *, require_write: bool) -> None:
+    if getattr(task, "engine", None) == "google-flow":
+        actor = authorize(authority_client, task.project_id, None, require_write=require_write)
+        if actor["organization_id"] != task.request_params["channel_authority"]["organization_id"]:
+            raise ValueError("project_access_denied")
+        return
+    if getattr(task, "engine", None) == "comfyui":
+        queue_manager.authorize_task_caller(task, require_write=require_write)
+        return
+    if not require_write:
+        return
+    caller = CALLER.get()
+    has_caller_identity = isinstance(caller, dict) and bool(
+        str(caller.get("organization_id") or "").strip()
+        or str(caller.get("user_id") or "").strip()
+    )
+    project_auth_url = os.environ.get("IMAGE_PROJECT_SERVICE_URL", "").strip()
+    req_params = getattr(task, "request_params", None) or {}
+    saved_org = str((req_params.get("channel_authority") or {}).get("organization_id") or "").strip()
+    if project_auth_url:
+        verified = authorize(authority_client, task.project_id, None, require_write=True)
+        if saved_org and str(verified.get("organization_id") or "").strip() != saved_org:
+            raise ValueError("project_access_denied")
+    elif has_caller_identity:
+        caller_org = str(caller.get("organization_id") or "").strip()
+        if not caller_org or not str(caller.get("user_id") or "").strip():
+            raise ValueError("verified_studio_identity_required")
+        if saved_org and caller_org != saved_org:
+            raise ValueError("project_access_denied")
+
+
 @mcp.tool(name="image.status")
 def image_status(task_id: str) -> types.CallToolResult:
     task = tasks.get(task_id)
+    _authorize_task_operation(task, require_write=False)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
-    if task.status == "running" and task.phase in {"submission_unknown", "collect_retry"}:
+    if task.status == "running" and task.phase in {"submission_unknown", "collect_retry", "canceling"}:
         try:
-            queue_manager._recover_channel_unknown(task)
+            if task.engine == "comfyui":
+                queue_manager.poll_comfyui_task(task.task_id)
+            else:
+                queue_manager._recover_channel_unknown(task)
             task = tasks.get(task_id)
         except Exception:
             pass
@@ -903,14 +1033,75 @@ def image_status(task_id: str) -> types.CallToolResult:
             "artifact_id": task.artifact_id,
             "error": task.error,
             "phase": task.phase,
-            "needs_attention": task.phase in {"submission_unknown", "collect_retry"},
+            "needs_attention": task.phase in {"submission_unknown", "collect_retry", "canceling"},
         }
     )
+
+
+@mcp.tool(name="image.cancel")
+def image_cancel(task_id: str, project_id: str | None = None) -> types.CallToolResult:
+    task = tasks.get(task_id)
+    if project_id and task.project_id != project_id:
+        raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    _authorize_task_operation(task, require_write=True)
+    if _is_task_nsfw(task.task_id, task.artifact_id):
+        raise TaskNotFound(f"NOT_FOUND: {task_id}")
+    if task.status in {"completed", "failed", "canceled"}:
+        return _result({"task_id": task.task_id, "status": task.status, "canceled": task.status == "canceled"})
+    if task.engine == "google-flow" and task.status == "running":
+        return _result({"task_id": task_id, "status": task.status, "canceled": False,
+                        "reason": "original_call_pending"})
+    if task.engine == "comfyui":
+        outcome = queue_manager.cancel_comfyui_task(task)
+        if not outcome.confirmed_terminal:
+            updated = tasks.update_status(
+                task.task_id,
+                "running",
+                error="cancel_requested",
+                phase="canceling",
+            )
+            return _result(
+                {
+                    "task_id": updated.task_id,
+                    "status": updated.status,
+                    "phase": updated.phase,
+                    "canceled": False,
+                    "cancel_pending": True,
+                    "reason": outcome.reason,
+                }
+            )
+        if outcome.terminal_status == "completed":
+            queue_manager.poll_comfyui_task(task.task_id)
+            refreshed = tasks.get(task.task_id)
+            return _result(
+                {
+                    "task_id": refreshed.task_id,
+                    "status": refreshed.status,
+                    "canceled": False,
+                }
+            )
+        if outcome.terminal_status == "failed":
+            updated = tasks.update_status(
+                task.task_id,
+                "failed",
+                error="comfyui_execution_failed",
+                phase="failed",
+            )
+            return _result(
+                {
+                    "task_id": updated.task_id,
+                    "status": updated.status,
+                    "canceled": False,
+                }
+            )
+    updated = tasks.update_status(task.task_id, "canceled", error="canceled_by_caller", phase="canceled")
+    return _result({"task_id": updated.task_id, "status": updated.status, "canceled": True})
 
 
 @mcp.tool(name="image.result")
 def image_result(task_id: str, execution_proof_only: bool = False) -> types.CallToolResult:
     task = tasks.get(task_id)
+    _authorize_task_operation(task, require_write=False)
     if _is_task_nsfw(task.task_id, task.artifact_id):
         raise TaskNotFound(f"NOT_FOUND: {task_id}")
     if execution_proof_only:

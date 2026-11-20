@@ -11,7 +11,7 @@ import httpx
 CALLER = ContextVar('image_verified_caller', default=None)
 
 
-def create_client():
+def create_client(timeout=None):
     context = ssl.create_default_context()
     ca_file = os.environ.get('IMAGE_PROJECT_CA_FILE', '').strip()
     if ca_file:
@@ -19,7 +19,10 @@ def create_client():
     ca_pem = os.environ.get('IMAGE_PROJECT_CA_PEM', '').strip()
     if ca_pem:
         context.load_verify_locations(cadata=ca_pem)
-    return httpx.Client(verify=context, trust_env=False, follow_redirects=False)
+    kwargs = dict(verify=context, trust_env=False, follow_redirects=False)
+    if timeout is not None:
+        kwargs['timeout'] = timeout
+    return httpx.Client(**kwargs)
 
 
 def authorize(client, project_id, authority=None, *, require_write=True):
