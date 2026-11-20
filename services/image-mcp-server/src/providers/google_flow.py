@@ -140,7 +140,7 @@ class FlowChannel(ImageChannel):
             data = bytes(raw)
             width,height = image_info(data,mime,digest)
             a,b = map(int,job.params["aspect_ratio"].split(":"))
-            if abs(width*b-height*a)>max(a,b):
+            if abs((width / height) - (a / b)) / (a / b) > 0.05:
                 raise ValueError("image_aspect_mismatch")
             ref = self.publish(tasks,job,cid,actor,data,mime,digest)
             artifact = manager.artifacts.create_from_bytes(project_id=job.project_id,
