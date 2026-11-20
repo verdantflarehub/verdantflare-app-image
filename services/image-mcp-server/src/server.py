@@ -86,7 +86,7 @@ IMAGE_TOOLS_SCHEMA = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "Image description prompt"},
+                "prompt": {"type": "string", "description": "Target scene, materials, focal detail and constraints. For natural photographic rendering, describe detail at the intended scale; preserve required texture and style. Avoid unrelated grain, repeated microtexture or sharpening halos only where unwanted. No automatic quality suffix is added."},
                 "engine": {"type": "string", "enum": ["codex", "gemini", "grok", "moss-image"], "default": "codex"},
                 "model": {
                     "type": "string",
@@ -96,7 +96,7 @@ IMAGE_TOOLS_SCHEMA = [
                 "resolution": {"type": "string", "enum": ["1k", "2k", "4k"], "default": "2k"},
                 "quality": {"type": "string", "description": "Engine-specific; omit for Grok"},
                 "background": {"type": "string", "enum": ["auto", "transparent", "opaque"], "default": "auto"},
-                "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter"},
+                "instructions": {"type": "string", "description": "Optional instructions for prompt interpreter; not a visual quality or negative-prompt control. Put visual targets and preservation constraints in prompt."},
                 "source_artifact_id": {"type": "string", "description": "Optional primary reference image artifact ID"},
                 "reference_artifact_ids": {
                     "type": "array",
@@ -115,7 +115,7 @@ IMAGE_TOOLS_SCHEMA = [
                 "restore_face": {"type": "boolean", "default": True, "description": "Preserve face restoration metadata flag (moss-image)"},
                 "restoration_fidelity": {"type": "number", "default": 0.85, "description": "Face restoration fidelity [0.0, 1.0] (moss-image)"},
                 "target_face_index": {"type": "integer", "default": 0, "description": "Target face index sorted by largest area (moss-image)"},
-                "negative_prompt": {"type": "string", "description": "Optional negative prompt (moss-image)"},
+                "negative_prompt": {"type": "string", "description": "Optional negative prompt for moss-image only; not a shared channel control. Preserve intentional material texture, grain and wear."},
                 "width": {"type": "integer", "description": "Pixel width, multiple of 16 (moss-image)"},
                 "height": {"type": "integer", "description": "Pixel height, multiple of 16 (moss-image)"},
                 "steps": {"type": "integer", "description": "Sampling steps (default 50 for moss-image)"},
@@ -140,7 +140,7 @@ IMAGE_TOOLS_SCHEMA = [
             "properties": {
                 "moss_mode": {"type": "string", "enum": ["semantic", "edit"], "description": "MOSS only: explicit latent scene edit; absent keeps legacy behavior"},
                 "source_artifact_id": {"type": "string", "description": "Base image artifact ID"},
-                "prompt": {"type": "string", "description": "Editing instructions"},
+                "prompt": {"type": "string", "description": "Editing target, affected region and preservation constraints. For texture cleanup, retain identity, real material detail, scene state, lighting and intentional grain. Ordinary image editing does not guarantee unchanged pixels outside the target."},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
                 "mask_artifact_id": {"type": "string"},
                 "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1", "4:3", "3:4", "2:3", "3:2"]},
@@ -163,7 +163,7 @@ IMAGE_TOOLS_SCHEMA = [
             "properties": {
                 "source_artifact_id": {"type": "string", "description": "Base image artifact ID"},
                 "mask_artifact_id": {"type": "string", "description": "Mask image artifact ID"},
-                "prompt": {"type": "string", "description": "Inpainting instructions"},
+                "prompt": {"type": "string", "description": "Describe the masked change and material scale; preserve required texture, lighting and scene state. Inspect mask boundaries and surrounding detail after generation."},
                 "reference_artifact_ids": {"type": "array", "items": {"type": "string"}},
                 "engine": {"type": "string", "default": "codex"},
                 "model": {"type": "string"},
@@ -423,10 +423,12 @@ async def image_generate(
 ) -> types.CallToolResult:
     """根据文本提示词生成图像。
 
-    遵循 GPT Image 2.5 官方提示词标准 (Scene, Subject, Details, Constraints)。
+    按目标画面、材质、焦点和保留项组织 prompt，不要求固定模板。
+    写实质感可按需要约束随机微纹理和锐化光晕，保留真实纹理与既定风格；不自动追加画质后缀。
+    独立 negative_prompt 仅用于 moss-image；instructions 是中介指令而非画质控制。
     - engine: 默认 "codex" (OpenAI Responses API 驱动)，亦可选 "gemini", "grok", "moss-image"
     - model:
-        codex 引擎推荐: "gpt-image-2.6-sunburst" (画质首选，微观细节与皮肤毛孔) 或 "gpt-image-2.6-flare" (极速响应)
+        codex 引擎推荐: "gpt-image-2.6-sunburst" 或 "gpt-image-2.6-flare"；细节密度按目标景别与材质描述
         gemini 引擎 (Google 渠道 Nano Banana 系列): 默认 "gemini-nano-banana-2.1" (Nano Banana 2.1，Flash 级高保真与多轮一致性)，可选 "gemini-3-pro-image" (Nano Banana Pro，旗舰光学摄影感，兼容 "-preview")、"gemini-3.1-flash-image" (Nano Banana 2，极速现实锚定，兼容 "-preview")、"gemini-3.1-flash-lite-image" (Nano Banana 2 Lite，轻量高性价比) 或 "gemini-2.5-flash-image" (Nano Banana，经典兼容底座)
         moss-image 引擎: "moss-image-sft-int8-convrot" (自托管 INT8-ConvRot 文字排版与版式生成)
     - aspect_ratio: "16:9", "9:16", "1:1", "4:3", "3:4"
@@ -574,7 +576,11 @@ async def image_create(
     mask: str | None = None,
     prefer_4k: bool | None = None,
 ) -> types.CallToolResult:
-    """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
+    """根据 prompt 创建异步图像任务。描述目标材质、焦点和保留项；质感约束按需选用，不自动追加。
+
+    保留真实纹理与既定颗粒／光影风格。独立 negative_prompt 仅用于 moss-image；
+    instructions 是中介指令，不是通用画质或负向通道。
+    """
     import uuid
     if engine == "grok" and not idempotency_key:
         raise ValueError("idempotency_key_required")
@@ -639,7 +645,8 @@ async def image_edit(
 ) -> types.CallToolResult:
     """基于既有参考底图执行多模态指令编辑、骨相锁定换装或多图融合合成。
 
-    遵循 GPT Image 2.5 官方编辑准则（明确指定“仅变更项”与“严格保留项”，为多参考图分配职责）。
+    明确指定变更区域与保留项，为多参考图分配职责；普通编辑不保证其他像素完全不变。
+    质感清理保留身份、真实材质、场次状态、光线与既定颗粒风格；生成后检查实际保留情况。
     - source_artifact_id: 主参考底图 ID (如主体肖像底图)
     - reference_artifact_ids: 可选附加参考图 ID 列表 (如单品服装图、环境参考图)
     - mask_artifact_id: 可选局部修改遮罩 ID
@@ -718,7 +725,11 @@ async def image_inpaint(
     channel_account_id: str | None = None,
     budget_limit: str | None = None,
 ) -> types.CallToolResult:
-    """基于遮罩（Mask）的精准局部重绘与无痕物体抹除，支持可选服装/主体参考图融合。"""
+    """按实际引擎能力执行遮罩局部重绘，支持可选参考图。
+
+    prompt 描述修改范围、材质尺度和保留项；质感清理保留真实细节、光线与场次状态。
+    生成后检查遮罩边缘及周围内容，不保证无痕或像素级不变。
+    """
     resolved_model = model or (
         {"codex": DEFAULT_IMAGE_MODEL, "gemini": DEFAULT_GEMINI_MODEL,
          "grok": queue_manager.grok_provider.model}.get(engine.lower(), "")
