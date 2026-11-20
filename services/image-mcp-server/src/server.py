@@ -71,7 +71,7 @@ chatgpt_channel = ImageChannel(chatgpt_url, os.environ.get('IMAGE_CHATGPT_CHANNE
                                channel_client) if chatgpt_url else None
 flow_url = os.environ.get("IMAGE_GOOGLE_FLOW_CHANNEL_URL", "")
 flow_channel = FlowChannel(flow_url, os.environ.get("IMAGE_GOOGLE_FLOW_CHANNEL_TOKEN", ""),
-                           channel_client) if flow_url else None
+                           create_authority_client(timeout=120.0)) if flow_url else None
 channel_discovery = ChannelDiscoveryClient.from_environment()
 queue_manager = TaskQueueManager(
     tasks=tasks,
