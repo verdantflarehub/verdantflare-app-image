@@ -4,7 +4,7 @@ ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG SERVICE_VERSION=v0.2.70
 LABEL org.opencontainers.image.source="https://github.com/verdantflarehub/verdantflare-app-image"
 LABEL org.opencontainers.image.title="VerdantFlare Image MCP Server"
-LABEL org.opencontainers.image.version="0.2.70"
+LABEL org.opencontainers.image.version="0.2.71"
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 && rm -rf /var/lib/apt/lists/*

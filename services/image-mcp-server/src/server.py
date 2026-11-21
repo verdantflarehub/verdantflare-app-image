@@ -489,6 +489,7 @@ async def image_generate(
     reference_images: list[str] | None = None,
     mask: str | None = None,
     prefer_4k: bool | None = None,
+    upscale: str | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词生成图像。
 
@@ -521,6 +522,10 @@ async def image_generate(
     }
     if instructions:
         params["instructions"] = str(instructions).strip()
+    if upscale is not None:
+        if engine.lower() != "google-flow":
+            raise ValueError("unsupported_upscale")
+        params["upscale"] = upscale
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
@@ -650,6 +655,7 @@ async def image_create(
     reference_images: list[str] | None = None,
     mask: str | None = None,
     prefer_4k: bool | None = None,
+    upscale: str | None = None,
 ) -> types.CallToolResult:
     """根据文本提示词创建图像生成异步任务（遵循 GPT Image 2.5 官方提示词标准）。"""
     import uuid
@@ -717,6 +723,7 @@ async def image_edit(
     budget_limit: str | None = None,
     denoise: float | None = None,
     workflow_params: dict[str, Any] | None = None,
+    upscale: str | None = None,
 ) -> types.CallToolResult:
     """基于既有参考底图执行多模态指令编辑、骨相锁定换装或多图融合合成。
 
@@ -757,6 +764,10 @@ async def image_edit(
         params["denoise"] = denoise
     if workflow_params is not None:
         params["workflow_params"] = workflow_params
+    if upscale is not None:
+        if engine.lower() != "google-flow":
+            raise ValueError("unsupported_upscale")
+        params["upscale"] = upscale
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (
@@ -806,6 +817,7 @@ async def image_inpaint(
     budget_limit: str | None = None,
     denoise: float | None = None,
     workflow_params: dict[str, Any] | None = None,
+    upscale: str | None = None,
 ) -> types.CallToolResult:
     """基于遮罩（Mask）的精准局部重绘与无痕物体抹除，支持可选服装/主体参考图融合。"""
     if model and str(model).strip().startswith("comfyui:") and engine == "codex":
@@ -827,6 +839,10 @@ async def image_inpaint(
         params["denoise"] = denoise
     if workflow_params is not None:
         params["workflow_params"] = workflow_params
+    if upscale is not None:
+        if engine.lower() != "google-flow":
+            raise ValueError("unsupported_upscale")
+        params["upscale"] = upscale
     if channel_account_id is not None:
         params["channel_account_id"] = channel_account_id
     effective_budget = budget_limit if budget_limit is not None else (

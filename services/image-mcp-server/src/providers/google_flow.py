@@ -12,6 +12,7 @@ from .channel import ImageChannel, ChannelUnavailable
 from .comfyui import new_uuid7
 
 MODELS = ("nano2", "nano21", "nano-pro")
+UPSCALES = ("2k", "4k")
 RUNTIME = "google-flow-channel-v1"
 MAX_BYTES = 48 << 20
 
@@ -24,7 +25,7 @@ def normalize(params):
     if not isinstance(params.get("prompt"), str) or not 0 < len(params["prompt"].strip()) <= 5000:
         raise ValueError("invalid_prompt")
     allowed = {"model", "prompt", "aspect_ratio", "action", "budget_limit", "reference_images",
-               "reference_artifact_ids", "source_artifact_id", "resolution", "quality", "background"}
+               "reference_artifact_ids", "source_artifact_id", "resolution", "quality", "background", "upscale"}
     if not params.get("size"):
         params = {k: v for k, v in params.items() if k != "size"}
     if any(key not in allowed and val is not None for key,val in params.items()):
@@ -43,6 +44,11 @@ def normalize(params):
         raise ValueError("invalid_reference")
     result = dict(model=model, prompt=params["prompt"], aspect_ratio=aspect, action=params["action"],
                   reference_artifact_ids=refs)
+    if params.get("upscale") is not None:
+        up = params["upscale"]
+        if not isinstance(up, str) or up.lower() not in UPSCALES:
+            raise ValueError("unsupported_upscale")
+        result["upscale"] = up.lower()
     if params.get("budget_limit") is not None:
         try:
             budget = Decimal(str(params["budget_limit"]))
@@ -109,6 +115,8 @@ class FlowChannel(ImageChannel):
                     refs.append(asset.sha256)
                 if refs:
                     args["reference_images"] = refs
+                if job.params.get("upscale"):
+                    args["upscale"] = job.params["upscale"]
                 payload = dict(idempotency_key=job.task_id,model=job.params["model"],capability="image",parameters=args)
                 if "budget_limit" in job.params:
                     payload["budget_limit"] = job.params["budget_limit"]
@@ -143,11 +151,15 @@ class FlowChannel(ImageChannel):
             if abs((width / height) - (a / b)) / (a / b) > 0.05:
                 raise ValueError("image_aspect_mismatch")
             ref = self.publish(tasks,job,cid,actor,data,mime,digest)
+            meta = {"engine":"google-flow","channel_call_id":cid,"content_ref":ref,"task_id":job.task_id,
+                    "width":width,"height":height,"credits":result.get("credits")}
+            if result.get("upscale_status"):
+                meta["upscale_status"] = result["upscale_status"]
+                meta["upscale_target"] = result.get("upscale_target")
             artifact = manager.artifacts.create_from_bytes(project_id=job.project_id,
                 artifact_id="art-"+hashlib.sha256(job.task_id.encode()).hexdigest()[:16],
                 filename=job.task_id+"."+mime.split("/")[1],data=data,media_type=mime,
-                metadata={"engine":"google-flow","channel_call_id":cid,"content_ref":ref,"task_id":job.task_id,
-                          "width":width,"height":height,"credits":result.get("credits")})
+                metadata=meta)
             tasks.update_status(job.task_id,"completed",artifact_id=artifact.artifact_id,phase="completed",error="")
 
     def publish(self,tasks,job,cid,actor,data,mime,digest):
