@@ -490,7 +490,7 @@ class CodexProvider:
         raw_list = source_bytes if isinstance(source_bytes, list) else [source_bytes]
         files = []
         for idx, b_data in enumerate(raw_list):
-            field_name = "image" if idx == 0 else f"image_{idx}"
+            field_name = "image[]" if len(raw_list) > 1 else "image"
             filename = f"source_{idx}.png" if idx > 0 else "source.png"
             files.append((field_name, filename, b_data, "image/png"))
 
